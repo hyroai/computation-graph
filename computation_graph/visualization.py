@@ -1,0 +1,67 @@
+from typing import Text
+
+import pygraphviz as pgv
+
+from computation_graph import base_types, graph
+
+
+def _get_edge_exceptions_string(edge: base_types.ComputationEdge) -> Text:
+    return f" [{','.join(map(repr,edge.allowed_exceptions))}]"
+
+
+def _get_edge_label(edge: base_types.ComputationEdge):
+    if edge.key in (None, "args"):
+        return "" + _get_edge_exceptions_string(edge)
+
+    if edge.key == "first_input":
+        return f"{edge.priority}" + _get_edge_exceptions_string(edge)
+
+    return (edge.key or "") + _get_edge_exceptions_string(edge)
+
+
+def _get_node_shape(node: base_types.ComputationNode):
+    if node.name == "first":
+        return "triangle"
+
+    return "ellipse"
+
+
+def _add_single_node(
+    pgv_graph: pgv.AGraph,
+    edges: base_types.GraphType,
+    node: base_types.ComputationNode,
+):
+    pgv_graph.add_node(
+        graph.infer_node_id(edges, node), label=node, shape=_get_node_shape(node)
+    )
+
+    if node.is_stateful:
+        pgv_graph.add_edge(
+            graph.infer_node_id(edges, node), graph.infer_node_id(edges, node)
+        )
+
+
+def _make_graph_from_edges(pgv_graph: pgv.AGraph, edges: base_types.GraphType):
+    for edge in edges:
+        _add_single_node(pgv_graph, edges, edge.destination)
+        if edge.source:
+            _add_single_node(pgv_graph, edges, edge.source)
+            pgv_graph.add_edge(
+                graph.infer_node_id(edges, edge.source),
+                graph.infer_node_id(edges, edge.destination),
+                label=_get_edge_label(edge),
+            )
+        else:
+            for source in edge.args:
+                _add_single_node(pgv_graph, edges, source)
+                pgv_graph.add_edge(
+                    graph.infer_node_id(edges, source),
+                    graph.infer_node_id(edges, edge.destination),
+                    label=_get_edge_label(edge),
+                )
+
+
+def visualize_graph(edges: base_types.GraphType, filename: Text = "topology.png"):
+    pgv_graph = pgv.AGraph(directed=True)
+    _make_graph_from_edges(pgv_graph, edges)
+    pgv_graph.draw(filename, prog="dot")
