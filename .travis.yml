@@ -7,7 +7,6 @@ jobs:
       name: "pytest"
       install:
         - python setup.py install
-        - pip install pytest
       script: pytest
     - stage: "test"
       name: "pre-commit"
