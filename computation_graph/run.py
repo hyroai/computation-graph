@@ -1,22 +1,10 @@
-import collections
 import dataclasses
 import itertools
 import logging
 import pathlib
 import sys
 import traceback
-from typing import (
-    Any,
-    Callable,
-    DefaultDict,
-    Dict,
-    FrozenSet,
-    Optional,
-    Set,
-    Text,
-    Tuple,
-    Type,
-)
+from typing import Any, Callable, Dict, FrozenSet, Optional, Set, Text, Tuple, Type
 
 import gamla
 import toolz
@@ -32,27 +20,30 @@ class _ComputationGraphException(Exception):
 
 def _transpose_graph(
     graph: Dict[base_types.ComputationNode, Set[base_types.ComputationNode]]
-) -> DefaultDict:
-    transposed_graph: DefaultDict = collections.defaultdict(set)
-    for source, destination_set in graph.items():
-        for node in destination_set:
-            transposed_graph[node].add(source)
-
-    return transposed_graph
+) -> Dict[base_types.ComputationNode, Set[base_types.ComputationNode]]:
+    return toolz.pipe(graph.keys(), gamla.groupby_many(graph.get), curried.valmap(set))
 
 
 def _toposort_nodes(
     edges: base_types.GraphType,
 ) -> Tuple[FrozenSet[base_types.ComputationNode], ...]:
-    dependencies: DefaultDict = collections.defaultdict(set)
-    for edge in edges:
-        if edge.args:
-            for arg in edge.args:
-                dependencies[arg].add(edge.destination)
-        else:
-            dependencies[edge.source].add(edge.destination)
+    return toolz.pipe(
+        edges,
+        gamla.groupby_many(lambda edge: edge.args or (edge.source,)),
+        curried.valmap(
+            toolz.compose_left(curried.map(lambda edge: edge.destination), set)
+        ),
+        _transpose_graph,
+        toposort.toposort,
+        curried.map(frozenset),
+        tuple,
+    )
 
-    return tuple(map(frozenset, toposort.toposort(_transpose_graph(dependencies))))
+
+def _result_from_computation_result(
+    computation_result: base_types.ComputationResult,
+) -> base_types.ComputationResult:
+    return computation_result.result
 
 
 def _make_computation_input(args, kwargs):
@@ -90,7 +81,7 @@ def _get_args(
             curried.filter(toolz.compose_left(toolz.second, lambda edge: edge.args)),
             toolz.first,
             toolz.first,
-            curried.map(lambda computation_result: computation_result.result),
+            curried.map(_result_from_computation_result),
             tuple,
         )
 
@@ -101,49 +92,39 @@ def _get_unary_computation_input(
     node: base_types.ComputationNode,
     value: base_types.ComputationResult,
     unbound_signature: base_types.NodeSignature,
-    unbound_input: base_types.ComputationInput,
-) -> base_types.ComputationInput:
-    unbound_kwargs = tuple(
-        filter(
-            lambda x: x not in unbound_signature.optional_kwargs and x != "state",
-            unbound_signature.kwargs,
-        )
-    )
-    if len(unbound_kwargs) == 1:
-        kwargs = unbound_kwargs
-    elif len(unbound_kwargs) == 0:
-        kwargs = node.signature.kwargs
-    else:
-        raise _ComputationGraphException(
-            "got a single input function with more than 1 unbound arguments. cannot bind function"
-        )
-
-    return base_types.ComputationInput(
-        args=(), kwargs={kwargs[0]: value.result}, state=unbound_input.state
+) -> Dict[Text, Any]:
+    return toolz.pipe(
+        unbound_signature.kwargs,
+        curried.filter(
+            lambda arg: arg not in unbound_signature.optional_kwargs and arg != "state"
+        ),
+        tuple,
+        gamla.check(
+            gamla.anyjuxt(gamla.len_equals(1), gamla.len_equals(0),),
+            _ComputationGraphException(
+                "got a single input function with more than 1 unbound arguments. cannot bind function"
+            ),
+        ),
+        gamla.curried_ternary(
+            gamla.len_equals(1), toolz.identity, lambda _: node.signature.kwargs
+        ),
+        lambda kwargs: {kwargs[0]: value.result},
     )
 
 
 def _get_kwargs(
     edges: base_types.GraphType,
-    node: base_types.ComputationNode,
     unbound_signature: base_types.NodeSignature,
     results: Tuple[Tuple[base_types.ComputationResult, ...], ...],
     unbound_input: base_types.ComputationInput,
 ) -> Dict[Text, Any]:
-    kwargs = {}
-
-    for key in unbound_signature.kwargs:
-        if key == "state":
-            continue
-        try:
-            kwargs[key] = unbound_input.kwargs[key]
-        except KeyError:
-            if key in unbound_signature.optional_kwargs:
-                continue
-
-            raise _ComputationGraphException(
-                f"could not bind parameter {key} for node {node}"
-            )
+    kwargs = toolz.pipe(
+        unbound_signature.kwargs,
+        curried.filter(lambda arg: arg != "state"),
+        curried.map(gamla.pair_right(unbound_input.kwargs.get)),
+        curried.filter(gamla.star(lambda _, value: value is not None)),
+        dict,
+    )
 
     return toolz.pipe(
         zip(edges, results),
@@ -151,10 +132,7 @@ def _get_kwargs(
         curried.groupby(toolz.compose_left(toolz.first, lambda edge: edge.key)),
         curried.valmap(
             toolz.compose_left(
-                toolz.first,
-                toolz.second,
-                toolz.first,
-                lambda computation_result: computation_result.result,
+                toolz.first, toolz.second, toolz.first, _result_from_computation_result,
             )
         ),
         lambda x: toolz.merge(kwargs, x),
@@ -174,6 +152,9 @@ _ComputationResultAndNodeType = Tuple[
 
 
 class _NotCoherent(Exception):
+    """This exception signals that for a specific set of incoming
+    node edges not all paths agree on the ComputationResult"""
+
     pass
 
 
@@ -185,7 +166,7 @@ _merge_decision = curried.merge_with(
     toolz.compose_left(
         toolz.unique,
         tuple,
-        gamla.check(lambda x: len(x) == 1, _NotCoherent),
+        gamla.check(gamla.len_equals(1), _NotCoherent),
         toolz.first,
     )
 )
@@ -260,15 +241,19 @@ def _get_computation_input(
         not (unbound_signature.is_args or bound_signature.is_args)
         and sum(map(lambda edge: edge.key is None, edges)) == 1
     ):
-        return _get_unary_computation_input(
-            node, toolz.first(toolz.first(results)), unbound_signature, unbound_input
+        return base_types.ComputationInput(
+            args=(),
+            kwargs=_get_unary_computation_input(
+                node, toolz.first(toolz.first(results)), unbound_signature
+            ),
+            state=unbound_input.state,
         )
 
     return base_types.ComputationInput(
         args=_get_args(
             edges, unbound_signature, bound_signature, results, unbound_input
         ),
-        kwargs=_get_kwargs(edges, node, unbound_signature, results, unbound_input),
+        kwargs=_get_kwargs(edges, unbound_signature, results, unbound_input),
         state=unbound_input.state,
     )
 
@@ -350,7 +335,6 @@ def _decisions_from_value_choices(
         toolz.pipe(
             choices,
             curried.concat,
-            tuple,
             curried.map(toolz.compose_left(toolz.first, toolz.second)),
             tuple,
             gamla.curried_ternary(
@@ -371,18 +355,15 @@ def _decisions_from_value_choices(
 def _results_from_value_choices(
     choices: Tuple[Tuple[_ResultDecisionPairAndNode, ...], ...]
 ) -> Tuple[Tuple[base_types.ComputationResult, ...], ...]:
-    if choices:
-        return toolz.pipe(
-            choices,
-            curried.map(
-                toolz.compose_left(
-                    curried.map(toolz.compose_left(toolz.first, toolz.first)), tuple,
-                )
-            ),
-            tuple,
-        )
-
-    return ()
+    return toolz.pipe(
+        choices,
+        curried.map(
+            toolz.compose_left(
+                curried.map(toolz.compose_left(toolz.first, toolz.first)), tuple,
+            )
+        ),
+        tuple,
+    )
 
 
 @toolz.curry
@@ -431,9 +412,7 @@ def _construct_computation_result(
             )
         ),
         curried.juxt(
-            toolz.compose_left(
-                toolz.first, lambda computation_result: computation_result.result
-            ),
+            toolz.compose_left(toolz.first, _result_from_computation_result),
             toolz.compose_left(
                 toolz.second,
                 _construct_computation_state(
@@ -484,7 +463,7 @@ def execute_graph(
                         ] = decisions
 
                     except exceptions as exception:
-                        _log_unactionable_source(type(exception))
+                        _log_allowed_exception(type(exception))
                         last_exception = exception
     try:
         return _construct_computation_result(
@@ -494,8 +473,7 @@ def execute_graph(
         raise last_exception
 
 
-def _log_unactionable_source(exception_type: Type[Exception]):
-    """Must be run from within an `except Unactionable` clause. """
+def _log_allowed_exception(exception_type: Type[Exception]):
     _, exception, exception_traceback = sys.exc_info()
     filename, line_num, func_name, _ = traceback.extract_tb(exception_traceback)[-1]
     if str(exception):

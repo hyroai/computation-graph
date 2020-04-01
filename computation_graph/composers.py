@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import dataclasses
-import functools
 from typing import Any, Callable, Optional, Text, Tuple, Type, Union
 
 import gamla
@@ -12,7 +11,7 @@ from computation_graph import base_types, graph
 
 _ComposersInputType = Union[Callable, base_types.ComputationNode, base_types.GraphType]
 
-_ComputationNodeAndGraphType = Union[base_types.ComputationNode, base_types.GraphType]
+_ComputationNodeOrGraphType = Union[base_types.ComputationNode, base_types.GraphType]
 
 
 class _ComputationError:
@@ -25,13 +24,11 @@ _callable_or_graph_type_to_node_or_graph_type = gamla.curried_ternary(
 
 
 def _get_edges_from_node_or_graph(
-    node_or_graph: _ComputationNodeAndGraphType,
+    node_or_graph: _ComputationNodeOrGraphType,
 ) -> base_types.GraphType:
-    return (
-        ()  # type:ignore
-        if isinstance(node_or_graph, base_types.ComputationNode)
-        else node_or_graph
-    )
+    if isinstance(node_or_graph, base_types.ComputationNode):
+        return ()
+    return node_or_graph
 
 
 def _signature_union(
@@ -45,14 +42,15 @@ def _signature_union(
     )
 
 
+@toolz.curry
 def _get_unbound_signature_for_single_node(
-    edges: base_types.GraphType, node: base_types.ComputationNode
+    node: base_types.ComputationNode, edges: base_types.GraphType,
 ) -> base_types.NodeSignature:
     """Computes the new signature of unbound variables after considering internal edges."""
     incoming_edges = graph.get_incoming_edges_for_node(edges, node)
 
-    bound_kwargs: Tuple[Text, ...] = tuple(
-        filter(None, map(lambda edge: edge.key, incoming_edges))
+    bound_kwargs: Tuple[Text, ...] = toolz.pipe(
+        incoming_edges, curried.map(lambda edge: edge.key), curried.filter(None)
     )
 
     return base_types.NodeSignature(
@@ -68,12 +66,11 @@ def _get_unbound_signature_for_single_node(
 def _get_unbound_signature_for_graph(
     edges: base_types.GraphType,
 ) -> base_types.NodeSignature:
-    return functools.reduce(
-        _signature_union,
-        map(
-            lambda x: _get_unbound_signature_for_single_node(edges, x),
-            graph.get_all_nodes(edges),
-        ),
+    return toolz.pipe(
+        edges,
+        graph.get_all_nodes,
+        curried.map(_get_unbound_signature_for_single_node(edges=edges)),
+        curried.reduce(_signature_union),
     )
 
 
@@ -101,7 +98,7 @@ def make_and(funcs, merge_fn: Callable) -> base_types.GraphType:
         funcs,
         curried.map(_callable_or_graph_type_to_node_or_graph_type),
         tuple,
-        curried.juxt(
+        gamla.juxtcat(
             curried.mapcat(_get_edges_from_node_or_graph),
             curried.compose_left(
                 curried.map(_infer_sink),
@@ -116,7 +113,6 @@ def make_and(funcs, merge_fn: Callable) -> base_types.GraphType:
                 ),
             ),
         ),
-        curried.concat,
         tuple,
     )
 
@@ -142,7 +138,7 @@ def make_or(
             )
         ),
         tuple,
-        curried.juxt(
+        gamla.juxtcat(
             curried.concat,
             toolz.compose_left(
                 curried.map(_infer_sink),
@@ -165,13 +161,12 @@ def make_or(
                 ),
             ),
         ),
-        curried.concat,
         tuple,
     )
 
 
 def _infer_sink(
-    graph_or_node: Union[_ComputationNodeAndGraphType],
+    graph_or_node: Union[_ComputationNodeOrGraphType],
 ) -> base_types.ComputationNode:
     if isinstance(graph_or_node, base_types.ComputationNode):
         return graph_or_node
@@ -179,7 +174,7 @@ def _infer_sink(
 
 
 def _add_first_edge(
-    source: _ComputationNodeAndGraphType,
+    source: _ComputationNodeOrGraphType,
     destination: base_types.ComputationNode,
     key: Text,
     priority: int,
@@ -193,16 +188,17 @@ def _add_first_edge(
             priority=priority,
             allowed_exceptions=frozenset([exception_type]),
         ),
-    ) + toolz.pipe(
-        _get_edges_from_node_or_graph(source),
-        curried.map(
-            lambda edge: dataclasses.replace(
-                edge,
-                allowed_exceptions=edge.allowed_exceptions
-                | frozenset([exception_type]),
-            )
+        *toolz.pipe(
+            _get_edges_from_node_or_graph(source),
+            curried.map(
+                lambda edge: dataclasses.replace(
+                    edge,
+                    allowed_exceptions=edge.allowed_exceptions
+                    | frozenset([exception_type]),
+                )
+            ),
+            tuple,
         ),
-        tuple,
     )
 
 
@@ -212,7 +208,7 @@ def make_first(
     def first(first_input):
         return first_input
 
-    assert funcs, "cannot use first on empty list of funcs"
+    assert funcs, "Expected at least one function."
 
     first_node = graph.make_computation_node(first)
 
@@ -221,12 +217,14 @@ def make_first(
         curried.map(_callable_or_graph_type_to_node_or_graph_type),
         enumerate,
         curried.mapcat(
-            lambda node_and_priority: _add_first_edge(
-                destination=first_node,
-                key="first_input",
-                priority=toolz.first(node_and_priority),
-                source=toolz.second(node_and_priority),
-                exception_type=exception_type,
+            gamla.star(
+                lambda priority, node: _add_first_edge(
+                    destination=first_node,
+                    key="first_input",
+                    priority=priority,
+                    source=node,
+                    exception_type=exception_type,
+                )
             )
         ),
         tuple,
@@ -235,8 +233,8 @@ def make_first(
 
 @toolz.curry
 def _infer_composition_edges(
-    source: _ComputationNodeAndGraphType,
-    destination: _ComputationNodeAndGraphType,
+    source: _ComputationNodeOrGraphType,
+    destination: _ComputationNodeOrGraphType,
     key: Optional[Text] = None,
 ) -> base_types.GraphType:
     if isinstance(destination, base_types.ComputationNode):
@@ -248,7 +246,8 @@ def _infer_composition_edges(
             graph.make_edge(
                 source=_infer_sink(source), destination=destination, key=key
             ),
-        ) + _get_edges_from_node_or_graph(source)
+            *_get_edges_from_node_or_graph(source),
+        )
 
     return (
         toolz.pipe(
@@ -256,10 +255,10 @@ def _infer_composition_edges(
             curried.mapcat(graph.get_edge_nodes),
             curried.unique,
             curried.filter(
-                lambda node: key
-                in _get_unbound_signature_for_single_node(
-                    edges=destination, node=node
-                ).kwargs
+                toolz.compose_left(
+                    _get_unbound_signature_for_single_node(edges=destination),
+                    lambda signature: key in signature.kwargs,
+                )
             ),
             # Do not add edges to nodes from source that are already present in destination (cycle).
             curried.filter(
@@ -292,12 +291,6 @@ def make_compose(
         reversed,
         curried.map(_callable_or_graph_type_to_node_or_graph_type),
         curried.sliding_window(2),
-        curried.mapcat(
-            gamla.star(
-                lambda source, destination: _infer_composition_edges(
-                    source=source, destination=destination, key=key
-                )
-            )
-        ),
+        curried.mapcat(gamla.star(_infer_composition_edges(key=key))),
         tuple,
     )

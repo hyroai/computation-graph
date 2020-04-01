@@ -1,12 +1,19 @@
 from typing import Text
 
 import pygraphviz as pgv
+import toolz
+from toolz import curried
 
 from computation_graph import base_types, graph
 
 
 def _get_edge_exceptions_string(edge: base_types.ComputationEdge) -> Text:
-    return f" [{','.join(map(repr,edge.allowed_exceptions))}]"
+    return toolz.pipe(
+        edge.allowed_exceptions,
+        curried.map(repr),
+        ",".join,
+        lambda exception_string: f" [{exception_string}]",
+    )
 
 
 def _get_edge_label(edge: base_types.ComputationEdge):
@@ -14,7 +21,7 @@ def _get_edge_label(edge: base_types.ComputationEdge):
         return "" + _get_edge_exceptions_string(edge)
 
     if edge.key == "first_input":
-        return f"{edge.priority}" + _get_edge_exceptions_string(edge)
+        return str(edge.priority) + _get_edge_exceptions_string(edge)
 
     return (edge.key or "") + _get_edge_exceptions_string(edge)
 
@@ -31,14 +38,11 @@ def _add_single_node(
     edges: base_types.GraphType,
     node: base_types.ComputationNode,
 ):
-    pgv_graph.add_node(
-        graph.infer_node_id(edges, node), label=node, shape=_get_node_shape(node)
-    )
+    node_id = graph.infer_node_id(edges, node)
+    pgv_graph.add_node(node_id, label=node, shape=_get_node_shape(node))
 
     if node.is_stateful:
-        pgv_graph.add_edge(
-            graph.infer_node_id(edges, node), graph.infer_node_id(edges, node)
-        )
+        pgv_graph.add_edge(node_id, node_id)
 
 
 def _make_graph_from_edges(pgv_graph: pgv.AGraph, edges: base_types.GraphType):

@@ -33,6 +33,7 @@ class ComputationEdge:
         return f"{source_str}----{self.key or ''}---->{self.destination}"
 
 
+# We use a tuple to generate a unique id for each node based on the order of edges.
 GraphType = Tuple[ComputationEdge, ...]
 
 

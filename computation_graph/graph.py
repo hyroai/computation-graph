@@ -108,15 +108,13 @@ def make_edge(
             priority=priority,
         )
 
-    edge = base_types.ComputationEdge(
+    return base_types.ComputationEdge(
         source=make_computation_node(source),
         destination=make_computation_node(destination),
         key=key,
         allowed_exceptions=allowed_exceptions,
         priority=priority,
     )
-
-    return edge
 
 
 def get_leaves(edges: base_types.GraphType) -> FrozenSet[base_types.ComputationNode]:
@@ -133,9 +131,15 @@ def get_leaves(edges: base_types.GraphType) -> FrozenSet[base_types.ComputationN
 
 
 def infer_graph_sink(edges: base_types.GraphType) -> base_types.ComputationNode:
-    sink = get_leaves(edges)
-    assert len(sink) == 1, f"computation graph has more than one sink"
-    return toolz.first(sink)
+    return toolz.pipe(
+        edges,
+        get_leaves,
+        gamla.check(
+            gamla.len_equals(1),
+            AssertionError("computation graph has more than one sink"),
+        ),
+        toolz.first,
+    )
 
 
 def get_incoming_edges_for_node(
