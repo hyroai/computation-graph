@@ -150,6 +150,8 @@ _ComputationResultAndNodeType = Tuple[
     base_types.ComputationResult, base_types.ComputationNode
 ]
 
+_ResultDecisionPairAndNodeTupleType = Tuple[_ResultDecisionPairAndNode, ...]
+
 
 class _NotCoherent(Exception):
     """This exception signals that for a specific set of incoming
@@ -175,7 +177,7 @@ _merge_decision = curried.merge_with(
 @toolz.curry
 def _node_to_value_choices(
     result_dependencies: _ResultDependenciesType, node: base_types.ComputationNode
-) -> Callable[[base_types.ComputationNode], Tuple[_ResultDecisionPairAndNode, ...]]:
+) -> Callable[[base_types.ComputationNode], _ResultDecisionPairAndNodeTupleType]:
     return toolz.pipe(
         node,
         curried.excepts(
@@ -191,7 +193,7 @@ def _node_to_value_choices(
 def _edge_to_value_choices(
     result_dependencies: _ResultDependenciesType,
 ) -> Callable[
-    [base_types.ComputationEdge], Tuple[Tuple[_ResultDecisionPairAndNode, ...], ...]
+    [base_types.ComputationEdge], Tuple[_ResultDecisionPairAndNodeTupleType, ...]
 ]:
     return toolz.compose_left(
         lambda edge: edge.args or (edge.source,),
@@ -203,7 +205,7 @@ def _edge_to_value_choices(
 
 def _edges_to_value_choices(
     edges: base_types.GraphType, result_dependencies: _ResultDependenciesType
-) -> Tuple[Tuple[Tuple[_ResultDecisionPairAndNode, ...], ...], ...]:
+) -> Tuple[Tuple[_ResultDecisionPairAndNodeTupleType, ...], ...]:
     return toolz.pipe(
         edges,
         curried.map(_edge_to_value_choices(result_dependencies)),
@@ -329,7 +331,7 @@ def _get_allowed_exceptions_for_node(
 
 
 def _decisions_from_value_choices(
-    choices: Tuple[Tuple[_ResultDecisionPairAndNode, ...], ...]
+    choices: Tuple[_ResultDecisionPairAndNodeTupleType, ...]
 ) -> _DecisionsType:
     return toolz.merge(
         toolz.pipe(
@@ -353,7 +355,7 @@ def _decisions_from_value_choices(
 
 
 def _results_from_value_choices(
-    choices: Tuple[Tuple[_ResultDecisionPairAndNode, ...], ...]
+    choices: Tuple[_ResultDecisionPairAndNodeTupleType, ...]
 ) -> Tuple[Tuple[base_types.ComputationResult, ...], ...]:
     return toolz.pipe(
         choices,
