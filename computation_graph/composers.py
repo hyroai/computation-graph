@@ -1,7 +1,6 @@
 from __future__ import annotations
 
-import dataclasses
-from typing import Any, Callable, Optional, Text, Tuple, Type, Union
+from typing import Any, Callable, Optional, Text, Tuple, Union
 
 import gamla
 import toolz
@@ -76,16 +75,12 @@ def _get_unbound_signature_for_graph(
 
 @toolz.curry
 def make_optional(
-    func: _ComposersInputType, exception_type: Type[Exception], default_value: Any
+    func: _ComposersInputType, default_value: Any
 ) -> base_types.GraphType:
     def return_default_value():
         return default_value
 
-    return make_first(
-        func,
-        graph.make_computation_node(return_default_value),
-        exception_type=exception_type,
-    )
+    return make_first(func, graph.make_computation_node(return_default_value))
 
 
 def make_and(funcs, merge_fn: Callable) -> base_types.GraphType:
@@ -117,9 +112,7 @@ def make_and(funcs, merge_fn: Callable) -> base_types.GraphType:
     )
 
 
-def make_or(
-    funcs, merge_fn: Callable, exception_type: Type[Exception]
-) -> base_types.GraphType:
+def make_or(funcs, merge_fn: Callable) -> base_types.GraphType:
     def filter_computation_errors(*args):
         return toolz.pipe(
             args, curried.filter(lambda x: not isinstance(x, _ComputationError)), tuple
@@ -132,11 +125,7 @@ def make_or(
     merge_node = graph.make_computation_node(merge_fn)
     return toolz.pipe(
         funcs,
-        curried.map(
-            make_optional(
-                exception_type=exception_type, default_value=_ComputationError()
-            )
-        ),
+        curried.map(make_optional(default_value=_ComputationError())),
         tuple,
         gamla.juxtcat(
             curried.concat,
@@ -144,19 +133,9 @@ def make_or(
                 curried.map(_infer_sink),
                 tuple,
                 lambda sinks: (
-                    graph.make_edge(
-                        source=sinks,
-                        destination=filter_node,
-                        allowed_exceptions=frozenset([exception_type]),
-                    ),
+                    graph.make_edge(source=sinks, destination=filter_node,),
                     graph.make_edge(
                         source=filter_node, destination=merge_node, key="args",
-                    ),
-                    # Add an edge to catch handled exceptions when running `merge_fn`.
-                    graph.make_edge(
-                        source=merge_node,
-                        destination=graph.make_computation_node(identity),
-                        allowed_exceptions=frozenset([exception_type]),
                     ),
                 ),
             ),
@@ -178,7 +157,6 @@ def _add_first_edge(
     destination: base_types.ComputationNode,
     key: Text,
     priority: int,
-    exception_type: Type[Exception],
 ) -> base_types.GraphType:
     return (
         graph.make_edge(
@@ -186,25 +164,12 @@ def _add_first_edge(
             destination=destination,
             key=key,
             priority=priority,
-            allowed_exceptions=frozenset([exception_type]),
         ),
-        *toolz.pipe(
-            _get_edges_from_node_or_graph(source),
-            curried.map(
-                lambda edge: dataclasses.replace(
-                    edge,
-                    allowed_exceptions=edge.allowed_exceptions
-                    | frozenset([exception_type]),
-                )
-            ),
-            tuple,
-        ),
+        *_get_edges_from_node_or_graph(source),
     )
 
 
-def make_first(
-    *funcs: _ComposersInputType, exception_type: Type[Exception]
-) -> base_types.GraphType:
+def make_first(*funcs: _ComposersInputType) -> base_types.GraphType:
     def first(first_input):
         return first_input
 
@@ -223,7 +188,6 @@ def make_first(
                     key="first_input",
                     priority=priority,
                     source=node,
-                    exception_type=exception_type,
                 )
             )
         ),

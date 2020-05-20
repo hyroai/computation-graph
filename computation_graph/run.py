@@ -286,9 +286,11 @@ def _edge_with_values_to_computation_result_and_node(
     return toolz.pipe(zip(edge.args or (edge.source,), values), tuple)
 
 
-def to_callable(edges: base_types.GraphType) -> Callable:
+def to_callable(
+    edges: base_types.GraphType, handled_exceptions: FrozenSet[Type[Exception]]
+) -> Callable:
     def inner(*args, **kwargs) -> base_types.ComputationResult:
-        return execute_graph(edges, args, kwargs)
+        return execute_graph(edges, handled_exceptions, args, kwargs)
 
     return inner
 
@@ -316,17 +318,6 @@ def _get_node_unbound_input(
         state=unbound_input.state[graph.infer_node_id(edges, node)]
         if graph.infer_node_id(edges, node) in unbound_input.state
         else None,
-    )
-
-
-def _get_allowed_exceptions_for_node(
-    edges: base_types.GraphType, node: base_types.ComputationNode
-) -> Tuple[Type[Exception], ...]:
-    return toolz.pipe(
-        graph.get_outgoing_edges_for_node(edges, node),
-        curried.mapcat(lambda edge: edge.allowed_exceptions),
-        curried.unique,
-        tuple,
     )
 
 
@@ -413,6 +404,7 @@ def _construct_computation_result(
                 _ComputationFailed,
             )
         ),
+        gamla.check(toolz.identity, _ComputationFailed),
         curried.juxt(
             toolz.compose_left(toolz.first, _result_from_computation_result),
             toolz.compose_left(
@@ -433,7 +425,10 @@ def _construct_computation_result(
 
 
 def execute_graph(
-    edges: base_types.GraphType, args, kwargs
+    edges: base_types.GraphType,
+    handled_exceptions: FrozenSet[Type[Exception]],
+    args,
+    kwargs,
 ) -> base_types.ComputationResult:
     unbound_input = _get_unbound_input(args, kwargs)
     last_exception: Exception = StopIteration()
@@ -442,7 +437,6 @@ def execute_graph(
         for node in node_set:
             node_unbound_input = _get_node_unbound_input(edges, node, unbound_input)
             for node_edges in _get_node_ambiguous_edge_groups(edges, node):
-                exceptions = _get_allowed_exceptions_for_node(edges, node)
                 for choices in _edges_to_value_choices(node_edges, result_dependencies):
                     try:
                         decisions = _decisions_from_value_choices(choices)
@@ -464,8 +458,8 @@ def execute_graph(
                             _apply(node, computation_input)
                         ] = decisions
 
-                    except exceptions as exception:
-                        _log_allowed_exception(type(exception))
+                    except tuple(handled_exceptions) as exception:
+                        _log_handled_exception(type(exception))
                         last_exception = exception
     try:
         return _construct_computation_result(
@@ -475,7 +469,7 @@ def execute_graph(
         raise last_exception
 
 
-def _log_allowed_exception(exception_type: Type[Exception]):
+def _log_handled_exception(exception_type: Type[Exception]):
     _, exception, exception_traceback = sys.exc_info()
     filename, line_num, func_name, _ = traceback.extract_tb(exception_traceback)[-1]
     if str(exception):

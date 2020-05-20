@@ -1,29 +1,18 @@
 from typing import Text
 
 import pygraphviz as pgv
-import toolz
-from toolz import curried
 
 from computation_graph import base_types, graph
 
 
-def _get_edge_exceptions_string(edge: base_types.ComputationEdge) -> Text:
-    return toolz.pipe(
-        edge.allowed_exceptions,
-        curried.map(repr),
-        ",".join,
-        lambda exception_string: f" [{exception_string}]",
-    )
-
-
 def _get_edge_label(edge: base_types.ComputationEdge):
     if edge.key in (None, "args"):
-        return "" + _get_edge_exceptions_string(edge)
+        return ""
 
     if edge.key == "first_input":
-        return str(edge.priority) + _get_edge_exceptions_string(edge)
+        return str(edge.priority)
 
-    return (edge.key or "") + _get_edge_exceptions_string(edge)
+    return edge.key or ""
 
 
 def _get_node_shape(node: base_types.ComputationNode):

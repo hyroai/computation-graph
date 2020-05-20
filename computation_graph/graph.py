@@ -1,6 +1,6 @@
 import functools
 import inspect
-from typing import Callable, FrozenSet, Optional, Text, Tuple, Type, Union
+from typing import Callable, FrozenSet, Optional, Text, Tuple, Union
 
 import gamla
 import toolz
@@ -97,14 +97,12 @@ def make_edge(
     ],
     destination: Union[Callable, base_types.ComputationNode],
     key: Optional[Text] = None,
-    allowed_exceptions: FrozenSet[Type[Exception]] = frozenset(),
     priority: int = 0,
 ) -> base_types.ComputationEdge:
     if isinstance(source, tuple):
         return base_types.ComputationEdge(
             args=tuple(map(make_computation_node, source)),
             destination=make_computation_node(destination),
-            allowed_exceptions=allowed_exceptions,
             priority=priority,
         )
 
@@ -112,7 +110,6 @@ def make_edge(
         source=make_computation_node(source),
         destination=make_computation_node(destination),
         key=key,
-        allowed_exceptions=allowed_exceptions,
         priority=priority,
     )
 

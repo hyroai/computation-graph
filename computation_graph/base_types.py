@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import dataclasses
-from typing import Any, Callable, Dict, FrozenSet, Optional, Text, Tuple, Type
+from typing import Any, Callable, Dict, Optional, Text, Tuple
 
 
 @dataclasses.dataclass(frozen=True)
@@ -18,8 +18,6 @@ class ComputationEdge:
     key: Optional[Text] = None
     source: Optional[ComputationNode] = None
     args: Tuple[ComputationNode, ...] = ()
-    # Exceptions that are caught when run edges with ambiguity.
-    allowed_exceptions: FrozenSet[Type[Exception]] = frozenset()
 
     def __post_init__(self):
         assert bool(self.args) != bool(
