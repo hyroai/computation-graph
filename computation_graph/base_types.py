@@ -18,8 +18,6 @@ class ComputationEdge:
     key: Optional[Text] = None
     source: Optional[ComputationNode] = None
     args: Tuple[ComputationNode, ...] = ()
-    # Exceptions that are caught when run edges with ambiguity.
-    allowed_exceptions: FrozenSet[Type[Exception]] = frozenset()
 
     def __post_init__(self):
         assert bool(self.args) != bool(
