@@ -1,6 +1,6 @@
 import functools
 import inspect
-from typing import Callable, FrozenSet, Optional, Text, Tuple, Type, Union
+from typing import Callable, FrozenSet, Optional, Text, Tuple, Union
 
 import gamla
 import toolz

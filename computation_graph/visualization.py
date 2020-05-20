@@ -1,8 +1,6 @@
 from typing import Text
 
 import pygraphviz as pgv
-import toolz
-from toolz import curried
 
 from computation_graph import base_types, graph
 

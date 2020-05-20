@@ -1,7 +1,6 @@
 from __future__ import annotations
 
-import dataclasses
-from typing import Any, Callable, Optional, Text, Tuple, Type, Union
+from typing import Any, Callable, Optional, Text, Tuple, Union
 
 import gamla
 import toolz
