@@ -18,7 +18,7 @@ class _ComputationError:
 
 
 _callable_or_graph_type_to_node_or_graph_type = gamla.curried_ternary(
-    lambda x: isinstance(x, tuple), toolz.identity, graph.make_computation_node
+    lambda x: isinstance(x, tuple), toolz.identity, graph.make_computation_node,
 )
 
 
@@ -31,7 +31,7 @@ def _get_edges_from_node_or_graph(
 
 
 def _signature_union(
-    sig_a: base_types.NodeSignature, sig_b: base_types.NodeSignature
+    sig_a: base_types.NodeSignature, sig_b: base_types.NodeSignature,
 ) -> base_types.NodeSignature:
     return base_types.NodeSignature(
         is_args=sig_a.is_args or sig_b.is_args,
@@ -49,7 +49,7 @@ def _get_unbound_signature_for_single_node(
     incoming_edges = graph.get_incoming_edges_for_node(edges, node)
 
     bound_kwargs: Tuple[Text, ...] = toolz.pipe(
-        incoming_edges, curried.map(lambda edge: edge.key), curried.filter(None)
+        incoming_edges, curried.map(lambda edge: edge.key), curried.filter(None),
     )
 
     return base_types.NodeSignature(
@@ -57,7 +57,7 @@ def _get_unbound_signature_for_single_node(
         and not any(edge.args for edge in incoming_edges),
         kwargs=tuple(filter(lambda x: x not in bound_kwargs, node.signature.kwargs)),
         optional_kwargs=tuple(
-            filter(lambda x: x not in bound_kwargs, node.signature.optional_kwargs)
+            filter(lambda x: x not in bound_kwargs, node.signature.optional_kwargs),
         ),
     )
 
@@ -75,7 +75,7 @@ def _get_unbound_signature_for_graph(
 
 @toolz.curry
 def make_optional(
-    func: _ComposersInputType, default_value: Any
+    func: _ComposersInputType, default_value: Any,
 ) -> base_types.GraphType:
     def return_default_value():
         return default_value
@@ -115,7 +115,7 @@ def make_and(funcs, merge_fn: Callable) -> base_types.GraphType:
 def make_or(funcs, merge_fn: Callable) -> base_types.GraphType:
     def filter_computation_errors(*args):
         return toolz.pipe(
-            args, curried.filter(lambda x: not isinstance(x, _ComputationError)), tuple
+            args, curried.filter(lambda x: not isinstance(x, _ComputationError)), tuple,
         )
 
     def identity(x):
@@ -133,7 +133,7 @@ def make_or(funcs, merge_fn: Callable) -> base_types.GraphType:
                 curried.map(_infer_sink),
                 tuple,
                 lambda sinks: (
-                    graph.make_edge(source=sinks, destination=filter_node,),
+                    graph.make_edge(source=sinks, destination=filter_node),
                     graph.make_edge(
                         source=filter_node, destination=merge_node, key="args",
                     ),
@@ -188,8 +188,8 @@ def make_first(*funcs: _ComposersInputType) -> base_types.GraphType:
                     key="first_input",
                     priority=priority,
                     source=node,
-                )
-            )
+                ),
+            ),
         ),
         tuple,
     )
@@ -208,7 +208,7 @@ def _infer_composition_edges(
 
         return (
             graph.make_edge(
-                source=_infer_sink(source), destination=destination, key=key
+                source=_infer_sink(source), destination=destination, key=key,
             ),
             *_get_edges_from_node_or_graph(source),
         )
@@ -222,23 +222,23 @@ def _infer_composition_edges(
                 toolz.compose_left(
                     _get_unbound_signature_for_single_node(edges=destination),
                     lambda signature: key in signature.kwargs,
-                )
+                ),
             ),
             # Do not add edges to nodes from source that are already present in destination (cycle).
             curried.filter(
                 lambda node: isinstance(source, base_types.ComputationNode)
-                or node not in graph.get_all_nodes(source)
+                or node not in graph.get_all_nodes(source),
             ),
             curried.map(
                 lambda node: graph.make_edge(
-                    source=_infer_sink(source), destination=node, key=key
-                )
+                    source=_infer_sink(source), destination=node, key=key,
+                ),
             ),
             tuple,
             gamla.check(
                 toolz.identity,
                 AssertionError(
-                    f"Cannot compose, destination signature does not contain key '{key}'"
+                    f"Cannot compose, destination signature does not contain key '{key}'",
                 ),
             ),
         )

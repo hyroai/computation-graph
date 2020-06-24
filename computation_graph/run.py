@@ -19,7 +19,7 @@ class _ComputationGraphException(Exception):
 
 
 def _transpose_graph(
-    graph: Dict[base_types.ComputationNode, Set[base_types.ComputationNode]]
+    graph: Dict[base_types.ComputationNode, Set[base_types.ComputationNode]],
 ) -> Dict[base_types.ComputationNode, Set[base_types.ComputationNode]]:
     return toolz.pipe(graph.keys(), gamla.groupby_many(graph.get), curried.valmap(set))
 
@@ -31,7 +31,7 @@ def _toposort_nodes(
         edges,
         gamla.groupby_many(lambda edge: edge.args or (edge.source,)),
         curried.valmap(
-            toolz.compose_left(curried.map(lambda edge: edge.destination), set)
+            toolz.compose_left(curried.map(lambda edge: edge.destination), set),
         ),
         _transpose_graph,
         toposort.toposort,
@@ -49,7 +49,7 @@ def _result_from_computation_result(
 def _make_computation_input(args, kwargs):
     if "state" in kwargs:
         return base_types.ComputationInput(
-            args=args, kwargs=toolz.dissoc(kwargs, "state"), state=kwargs["state"]
+            args=args, kwargs=toolz.dissoc(kwargs, "state"), state=kwargs["state"],
         )
 
     return base_types.ComputationInput(args=args, kwargs=kwargs)
@@ -96,17 +96,17 @@ def _get_unary_computation_input(
     return toolz.pipe(
         unbound_signature.kwargs,
         curried.filter(
-            lambda arg: arg not in unbound_signature.optional_kwargs and arg != "state"
+            lambda arg: arg not in unbound_signature.optional_kwargs and arg != "state",
         ),
         tuple,
         gamla.check(
-            gamla.anyjuxt(gamla.len_equals(1), gamla.len_equals(0),),
+            gamla.anyjuxt(gamla.len_equals(1), gamla.len_equals(0)),
             _ComputationGraphException(
-                "got a single input function with more than 1 unbound arguments. cannot bind function"
+                "got a single input function with more than 1 unbound arguments. cannot bind function",
             ),
         ),
         gamla.curried_ternary(
-            gamla.len_equals(1), toolz.identity, lambda _: node.signature.kwargs
+            gamla.len_equals(1), toolz.identity, lambda _: node.signature.kwargs,
         ),
         lambda kwargs: {kwargs[0]: value.result},
     )
@@ -133,7 +133,7 @@ def _get_kwargs(
         curried.valmap(
             toolz.compose_left(
                 toolz.first, toolz.second, toolz.first, _result_from_computation_result,
-            )
+            ),
         ),
         lambda x: toolz.merge(kwargs, x),
     )
@@ -141,13 +141,13 @@ def _get_kwargs(
 
 _DecisionsType = Dict[base_types.ComputationNode, base_types.ComputationResult]
 _ResultDecisionPairAndNode = Tuple[
-    Tuple[base_types.ComputationResult, _DecisionsType], base_types.ComputationNode
+    Tuple[base_types.ComputationResult, _DecisionsType], base_types.ComputationNode,
 ]
 _ResultToDecisionsType = Dict[base_types.ComputationResult, _DecisionsType]
 _ResultDependenciesType = Dict[base_types.ComputationNode, _ResultToDecisionsType]
 
 _ComputationResultAndNodeType = Tuple[
-    base_types.ComputationResult, base_types.ComputationNode
+    base_types.ComputationResult, base_types.ComputationNode,
 ]
 
 _ResultDecisionPairAndNodeTupleType = Tuple[_ResultDecisionPairAndNode, ...]
@@ -170,13 +170,13 @@ _merge_decision = curried.merge_with(
         tuple,
         gamla.check(gamla.len_equals(1), _NotCoherent),
         toolz.first,
-    )
+    ),
 )
 
 
 @toolz.curry
 def _node_to_value_choices(
-    result_dependencies: _ResultDependenciesType, node: base_types.ComputationNode
+    result_dependencies: _ResultDependenciesType, node: base_types.ComputationNode,
 ) -> Callable[[base_types.ComputationNode], _ResultDecisionPairAndNodeTupleType]:
     return toolz.pipe(
         node,
@@ -193,7 +193,7 @@ def _node_to_value_choices(
 def _edge_to_value_choices(
     result_dependencies: _ResultDependenciesType,
 ) -> Callable[
-    [base_types.ComputationEdge], Tuple[_ResultDecisionPairAndNodeTupleType, ...]
+    [base_types.ComputationEdge], Tuple[_ResultDecisionPairAndNodeTupleType, ...],
 ]:
     return toolz.compose_left(
         lambda edge: edge.args or (edge.source,),
@@ -204,7 +204,7 @@ def _edge_to_value_choices(
 
 
 def _edges_to_value_choices(
-    edges: base_types.GraphType, result_dependencies: _ResultDependenciesType
+    edges: base_types.GraphType, result_dependencies: _ResultDependenciesType,
 ) -> Tuple[Tuple[_ResultDecisionPairAndNodeTupleType, ...], ...]:
     return toolz.pipe(
         edges,
@@ -215,14 +215,14 @@ def _edges_to_value_choices(
 
 
 def _signature_difference(
-    sig_a: base_types.NodeSignature, sig_b: base_types.NodeSignature
+    sig_a: base_types.NodeSignature, sig_b: base_types.NodeSignature,
 ) -> base_types.NodeSignature:
     return base_types.NodeSignature(
         is_args=(sig_a.is_args != sig_b.is_args),
         # Difference must save the order of the left signature.
         kwargs=tuple(filter(lambda x: x not in sig_b.kwargs, sig_a.kwargs)),
         optional_kwargs=tuple(
-            filter(lambda x: x not in sig_b.optional_kwargs, sig_a.optional_kwargs)
+            filter(lambda x: x not in sig_b.optional_kwargs, sig_a.optional_kwargs),
         ),
     )
 
@@ -246,14 +246,14 @@ def _get_computation_input(
         return base_types.ComputationInput(
             args=(),
             kwargs=_get_unary_computation_input(
-                node, toolz.first(toolz.first(results)), unbound_signature
+                node, toolz.first(toolz.first(results)), unbound_signature,
             ),
             state=unbound_input.state,
         )
 
     return base_types.ComputationInput(
         args=_get_args(
-            edges, unbound_signature, bound_signature, results, unbound_input
+            edges, unbound_signature, bound_signature, results, unbound_input,
         ),
         kwargs=_get_kwargs(edges, unbound_signature, results, unbound_input),
         state=unbound_input.state,
@@ -261,7 +261,7 @@ def _get_computation_input(
 
 
 def _apply(
-    node: base_types.ComputationNode, node_input: base_types.ComputationInput
+    node: base_types.ComputationNode, node_input: base_types.ComputationInput,
 ) -> base_types.ComputationResult:
     assert node.func is not None, f"cannot apply {node}"
     if node.is_stateful:
@@ -281,13 +281,13 @@ def _apply(
 
 
 def _edge_with_values_to_computation_result_and_node(
-    edge: base_types.ComputationEdge, values: Tuple[base_types.ComputationResult, ...]
+    edge: base_types.ComputationEdge, values: Tuple[base_types.ComputationResult, ...],
 ) -> Tuple[_ComputationResultAndNodeType, ...]:
     return toolz.pipe(zip(edge.args or (edge.source,), values), tuple)
 
 
 def to_callable(
-    edges: base_types.GraphType, handled_exceptions: FrozenSet[Type[Exception]]
+    edges: base_types.GraphType, handled_exceptions: FrozenSet[Type[Exception]],
 ) -> Callable:
     def inner(*args, **kwargs) -> base_types.ComputationResult:
         return execute_graph(edges, handled_exceptions, args, kwargs)
@@ -300,7 +300,7 @@ def _get_unbound_input(args, kwargs) -> base_types.ComputationInput:
 
     if unbound_input.state is not None:
         unbound_input = dataclasses.replace(
-            unbound_input, state=dict(unbound_input.state)
+            unbound_input, state=dict(unbound_input.state),
         )
 
     return unbound_input
@@ -322,7 +322,7 @@ def _get_node_unbound_input(
 
 
 def _decisions_from_value_choices(
-    choices: Tuple[_ResultDecisionPairAndNodeTupleType, ...]
+    choices: Tuple[_ResultDecisionPairAndNodeTupleType, ...],
 ) -> _DecisionsType:
     return toolz.merge(
         toolz.pipe(
@@ -331,14 +331,14 @@ def _decisions_from_value_choices(
             curried.map(toolz.compose_left(toolz.first, toolz.second)),
             tuple,
             gamla.curried_ternary(
-                toolz.identity, curried.reduce(_merge_decision), dict
+                toolz.identity, curried.reduce(_merge_decision), dict,
             ),
         ),
         toolz.pipe(
             choices,
             curried.concat,
             curried.map(
-                toolz.juxt(toolz.second, toolz.compose_left(toolz.first, toolz.first),)
+                toolz.juxt(toolz.second, toolz.compose_left(toolz.first, toolz.first)),
             ),
             dict,
         ),
@@ -346,14 +346,14 @@ def _decisions_from_value_choices(
 
 
 def _results_from_value_choices(
-    choices: Tuple[_ResultDecisionPairAndNodeTupleType, ...]
+    choices: Tuple[_ResultDecisionPairAndNodeTupleType, ...],
 ) -> Tuple[Tuple[base_types.ComputationResult, ...], ...]:
     return toolz.pipe(
         choices,
         curried.map(
             toolz.compose_left(
                 curried.map(toolz.compose_left(toolz.first, toolz.first)), tuple,
-            )
+            ),
         ),
         tuple,
     )
@@ -375,7 +375,7 @@ def _construct_computation_state(
                     toolz.pipe(
                         result_dependencies,
                         curried.get_in(
-                            [sink_node, toolz.first(result_dependencies[sink_node])]
+                            [sink_node, toolz.first(result_dependencies[sink_node])],
                         ),
                         curried.valmap(lambda x: x.state),
                     ),
@@ -402,7 +402,7 @@ def _construct_computation_result(
                 lambda sink: toolz.first(result_dependencies[sink]),
                 KeyError,
                 _ComputationFailed,
-            )
+            ),
         ),
         gamla.check(toolz.identity, _ComputationFailed),
         curried.juxt(
@@ -418,8 +418,8 @@ def _construct_computation_result(
         ),
         gamla.star(
             lambda result, state: base_types.ComputationResult(
-                result=result, state=state
-            )
+                result=result, state=state,
+            ),
         ),
     )
 
@@ -463,7 +463,7 @@ def execute_graph(
                         last_exception = exception
     try:
         return _construct_computation_result(
-            edges, result_dependencies, unbound_input.state
+            edges, result_dependencies, unbound_input.state,
         )
     except _ComputationFailed:
         raise last_exception

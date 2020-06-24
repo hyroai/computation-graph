@@ -56,7 +56,7 @@ get_edge_nodes = functools.lru_cache(maxsize=1024)(
         lambda edge: edge.args,
         lambda edge: edge.args + (edge.destination,),
         lambda edge: (edge.source, edge.destination),
-    )
+    ),
 )
 
 
@@ -75,7 +75,7 @@ def infer_node_id(edges: base_types.GraphType, node: base_types.ComputationNode)
 
 
 def make_computation_node(
-    func: Union[base_types.ComputationNode, Callable]
+    func: Union[base_types.ComputationNode, Callable],
 ) -> base_types.ComputationNode:
     assert func is not base_types.ComputationNode
     if isinstance(func, base_types.ComputationNode):
@@ -121,7 +121,7 @@ def get_leaves(edges: base_types.GraphType) -> FrozenSet[base_types.ComputationN
         curried.filter(
             lambda node: not any(
                 edge.source == node or node in edge.args for edge in edges
-            )
+            ),
         ),
         frozenset,
     )
@@ -140,13 +140,13 @@ def infer_graph_sink(edges: base_types.GraphType) -> base_types.ComputationNode:
 
 
 def get_incoming_edges_for_node(
-    edges: base_types.GraphType, node: base_types.ComputationNode
+    edges: base_types.GraphType, node: base_types.ComputationNode,
 ) -> FrozenSet[base_types.ComputationEdge]:
     return frozenset(filter(lambda edge: edge.destination == node, edges))
 
 
 def get_outgoing_edges_for_node(
-    edges: base_types.GraphType, node: base_types.ComputationNode
+    edges: base_types.GraphType, node: base_types.ComputationNode,
 ) -> FrozenSet[base_types.ComputationEdge]:
     return toolz.pipe(
         edges,

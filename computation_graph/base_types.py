@@ -21,7 +21,7 @@ class ComputationEdge:
 
     def __post_init__(self):
         assert bool(self.args) != bool(
-            self.source
+            self.source,
         ), "Edge must have a source or args, not both."
 
     def __repr__(self):
