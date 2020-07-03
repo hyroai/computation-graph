@@ -128,15 +128,9 @@ def get_leaves(edges: base_types.GraphType) -> FrozenSet[base_types.ComputationN
 
 
 def infer_graph_sink(edges: base_types.GraphType) -> base_types.ComputationNode:
-    return toolz.pipe(
-        edges,
-        get_leaves,
-        gamla.check(
-            gamla.len_equals(1),
-            AssertionError("computation graph has more than one sink"),
-        ),
-        toolz.first,
-    )
+    leafs = get_leaves(edges)
+    assert len(leafs) == 1, f"computation graph has more than one sink: {leafs}"
+    return toolz.first(leafs)
 
 
 def get_incoming_edges_for_node(
