@@ -15,10 +15,6 @@ def get_all_nodes(
     return toolz.pipe(edges, curried.mapcat(get_edge_nodes), toolz.unique, frozenset)
 
 
-def _is_reducer_type(node: Callable) -> bool:
-    return "state" in inspect.signature(node).parameters
-
-
 def _infer_callable_signature(func: Callable) -> base_types.NodeSignature:
     signature = base_types.NodeSignature(
         is_args=any(
@@ -60,18 +56,21 @@ get_edge_nodes = functools.lru_cache(maxsize=1024)(
 )
 
 
-_edges_to_node_id_map = toolz.compose_left(
-    curried.mapcat(get_edge_nodes),
-    curried.unique,
-    enumerate,
-    curried.map(reversed),
-    dict,
+_edges_to_node_map = toolz.compose_left(
+    curried.mapcat(get_edge_nodes), curried.unique, enumerate, dict,
 )
 
 
 @toolz.curry
 def infer_node_id(edges: base_types.GraphType, node: base_types.ComputationNode) -> int:
-    return _edges_to_node_id_map(edges)[node]
+    return toolz.pipe(edges, _edges_to_node_map, curried.itemmap(reversed))[node]
+
+
+@toolz.curry
+def infer_node_from_id(
+    edges: base_types.GraphType, node_id: int,
+) -> base_types.ComputationNode:
+    return _edges_to_node_map(edges)[node_id]
 
 
 def make_computation_node(
@@ -84,39 +83,58 @@ def make_computation_node(
     return base_types.ComputationNode(
         name=_infer_callable_name(func),
         func=func,
-        is_stateful=_is_reducer_type(func),
         signature=_infer_callable_signature(func),
     )
 
 
+@toolz.curry
 def make_edge(
+    priority: int,
+    is_future: bool,
     source: Union[
         Callable,
         Tuple[Union[Callable, base_types.ComputationNode], ...],
         base_types.ComputationNode,
     ],
     destination: Union[Callable, base_types.ComputationNode],
-    key: Optional[Text] = None,
-    priority: int = 0,
+    key: Optional[Text],
 ) -> base_types.ComputationEdge:
+    assert (
+        callable(source)
+        or isinstance(source, base_types.ComputationNode)
+        or isinstance(source, tuple)
+    ), "cannot create edge: source must be a callable, ComputationNode or tuple"
+    assert callable(destination) or isinstance(
+        destination, base_types.ComputationNode,
+    ), "cannot create edge: destination must be a callable or a ComputationNode"
     if isinstance(source, tuple):
         return base_types.ComputationEdge(
             args=tuple(map(make_computation_node, source)),
+            source=None,
             destination=make_computation_node(destination),
+            key=None,
             priority=priority,
+            is_future=is_future,
         )
 
     return base_types.ComputationEdge(
         source=make_computation_node(source),
         destination=make_computation_node(destination),
+        args=(),
         key=key,
         priority=priority,
+        is_future=is_future,
     )
 
 
-def get_leaves(edges: base_types.GraphType) -> FrozenSet[base_types.ComputationNode]:
+make_default_edge = make_edge(0, False)
+make_future_edge = make_edge(0, True)
+
+
+def _get_leaves(edges: base_types.GraphType) -> FrozenSet[base_types.ComputationNode]:
     return toolz.pipe(
         edges,
+        curried.filter(lambda edge: not edge.is_future),
         get_all_nodes,
         curried.filter(
             lambda node: not any(
@@ -128,9 +146,30 @@ def get_leaves(edges: base_types.GraphType) -> FrozenSet[base_types.ComputationN
 
 
 def infer_graph_sink(edges: base_types.GraphType) -> base_types.ComputationNode:
-    leafs = get_leaves(edges)
-    assert len(leafs) == 1, f"computation graph has more than one sink: {leafs}"
-    return toolz.first(leafs)
+    # TODO(nitzo): Handle:  f->g, g -> future -> h, f->h. infer sink should notify of an error here.
+    return toolz.pipe(
+        edges,
+        # Check for special reducer case (x --> future_edge --> x).
+        gamla.ternary(
+            lambda edges: len(edges) == 1
+            and edges[0].is_future
+            and edges[0].source == edges[0].destination,
+            gamla.just(frozenset([edges[0].destination])),
+            _get_leaves,
+        ),
+        gamla.ternary(
+            gamla.len_equals(1),
+            toolz.identity,
+            toolz.compose_left(
+                lambda sinks: AssertionError(
+                    f"computation graph must have exactly one sink {sinks}",
+                ),
+                gamla.make_raise,
+                gamla.invoke,
+            ),
+        ),
+        toolz.first,
+    )
 
 
 def get_incoming_edges_for_node(

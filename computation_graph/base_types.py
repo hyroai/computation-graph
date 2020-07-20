@@ -15,14 +15,23 @@ class ComputationEdge:
     destination: ComputationNode
     priority: int
     # Either key+source, just source, just args.
-    key: Optional[Text] = None
-    source: Optional[ComputationNode] = None
-    args: Tuple[ComputationNode, ...] = ()
+    key: Optional[Text]
+    source: Optional[ComputationNode]
+    args: Tuple[ComputationNode, ...]
+    is_future: bool
 
     def __post_init__(self):
         assert bool(self.args) != bool(
             self.source,
         ), "Edge must have a source or args, not both."
+
+        assert not self.is_future or not bool(
+            self.args,
+        ), "future edges do not support args source"
+
+        assert (
+            not self.is_future or self.priority == 0
+        ), "future edges cannot have priority"
 
     def __repr__(self):
         source_str = (
@@ -40,7 +49,6 @@ class ComputationNode:
     name: Text
     func: Optional[Callable]
     signature: NodeSignature
-    is_stateful: bool
 
     def __hash__(self):
         return id(self.func)
@@ -52,7 +60,6 @@ class ComputationNode:
 @dataclasses.dataclass(frozen=True)
 class ComputationInput:
     kwargs: Dict[Text, Any]
-    state: Any = None
     args: Tuple[Any, ...] = ()
 
 
@@ -61,3 +68,7 @@ class NodeSignature:
     is_args: bool = False
     kwargs: Tuple[Text, ...] = ()
     optional_kwargs: Tuple[Text, ...] = ()
+
+
+class ExhaustedAllComputationPaths(Exception):
+    pass

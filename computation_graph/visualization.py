@@ -30,9 +30,6 @@ def _add_single_node(
     node_id = graph.infer_node_id(edges, node)
     pgv_graph.add_node(node_id, label=node, shape=_get_node_shape(node))
 
-    if node.is_stateful:
-        pgv_graph.add_edge(node_id, node_id)
-
 
 def _make_graph_from_edges(pgv_graph: pgv.AGraph, edges: base_types.GraphType):
     for edge in edges:
@@ -43,6 +40,7 @@ def _make_graph_from_edges(pgv_graph: pgv.AGraph, edges: base_types.GraphType):
                 graph.infer_node_id(edges, edge.source),
                 graph.infer_node_id(edges, edge.destination),
                 label=_get_edge_label(edge),
+                style="dashed" if edge.is_future else "solid",
             )
         else:
             for source in edge.args:

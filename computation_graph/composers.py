@@ -49,7 +49,7 @@ def _get_unbound_signature_for_single_node(
     incoming_edges = graph.get_incoming_edges_for_node(edges, node)
 
     bound_kwargs: Tuple[Text, ...] = toolz.pipe(
-        incoming_edges, curried.map(lambda edge: edge.key), curried.filter(None),
+        incoming_edges, curried.map(lambda edge: edge.key), curried.filter(None), tuple,
     )
 
     return base_types.NodeSignature(
@@ -99,11 +99,9 @@ def make_and(funcs, merge_fn: Callable) -> base_types.GraphType:
                 curried.map(_infer_sink),
                 tuple,
                 lambda nodes: (
-                    graph.make_edge(source=nodes, destination=merge_node),
-                    graph.make_edge(
-                        source=merge_node,
-                        destination=graph.make_computation_node(merge_fn),
-                        key="args",
+                    graph.make_default_edge(nodes, merge_node, None),
+                    graph.make_default_edge(
+                        merge_node, graph.make_computation_node(merge_fn), "args",
                     ),
                 ),
             ),
@@ -133,8 +131,10 @@ def make_or(funcs, merge_fn: Callable) -> base_types.GraphType:
                 curried.map(_infer_sink),
                 tuple,
                 lambda sinks: (
-                    graph.make_edge(source=sinks, destination=filter_node),
-                    graph.make_edge(
+                    graph.make_default_edge(
+                        source=sinks, destination=filter_node, key=None,
+                    ),
+                    graph.make_default_edge(
                         source=filter_node, destination=merge_node, key="args",
                     ),
                 ),
@@ -164,6 +164,7 @@ def _add_first_edge(
             destination=destination,
             key=key,
             priority=priority,
+            is_future=False,
         ),
         *_get_edges_from_node_or_graph(source),
     )
@@ -199,7 +200,8 @@ def make_first(*funcs: _ComposersInputType) -> base_types.GraphType:
 def _infer_composition_edges(
     source: _ComputationNodeOrGraphType,
     destination: _ComputationNodeOrGraphType,
-    key: Optional[Text] = None,
+    key: Optional[Text],
+    is_future: bool,
 ) -> base_types.GraphType:
     if isinstance(destination, base_types.ComputationNode):
         assert (
@@ -208,7 +210,11 @@ def _infer_composition_edges(
 
         return (
             graph.make_edge(
-                source=_infer_sink(source), destination=destination, key=key,
+                source=_infer_sink(source),
+                destination=destination,
+                key=key,
+                is_future=is_future,
+                priority=0,
             ),
             *_get_edges_from_node_or_graph(source),
         )
@@ -221,7 +227,8 @@ def _infer_composition_edges(
             curried.filter(
                 toolz.compose_left(
                     _get_unbound_signature_for_single_node(edges=destination),
-                    lambda signature: key in signature.kwargs,
+                    lambda signature: key in signature.kwargs
+                    or (key is None and len(signature.kwargs) == 1),
                 ),
             ),
             # Do not add edges to nodes from source that are already present in destination (cycle).
@@ -231,7 +238,11 @@ def _infer_composition_edges(
             ),
             curried.map(
                 lambda node: graph.make_edge(
-                    source=_infer_sink(source), destination=node, key=key,
+                    source=_infer_sink(source),
+                    destination=node,
+                    key=key,
+                    is_future=is_future,
+                    priority=0,
                 ),
             ),
             tuple,
@@ -247,14 +258,22 @@ def _infer_composition_edges(
     )
 
 
-def make_compose(
-    *funcs: _ComposersInputType, key: Optional[Text] = None
+@toolz.curry
+def _make_compose_inner(
+    *funcs: _ComposersInputType, key: Optional[Text], is_future: bool
 ) -> base_types.GraphType:
     return toolz.pipe(
         funcs,
         reversed,
         curried.map(_callable_or_graph_type_to_node_or_graph_type),
         curried.sliding_window(2),
-        curried.mapcat(gamla.star(_infer_composition_edges(key=key))),
+        curried.mapcat(
+            gamla.star(_infer_composition_edges(key=key, is_future=is_future)),
+        ),
+        toolz.unique,
         tuple,
     )
+
+
+make_compose = _make_compose_inner(is_future=False)
+make_compose_future = _make_compose_inner(is_future=True)
