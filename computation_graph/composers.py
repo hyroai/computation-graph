@@ -116,9 +116,6 @@ def make_or(funcs, merge_fn: Callable) -> base_types.GraphType:
             args, curried.filter(lambda x: not isinstance(x, _ComputationError)), tuple,
         )
 
-    def identity(x):
-        return x
-
     filter_node = graph.make_computation_node(filter_computation_errors)
     merge_node = graph.make_computation_node(merge_fn)
     return toolz.pipe(
