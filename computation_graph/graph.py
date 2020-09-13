@@ -134,13 +134,15 @@ def infer_graph_sink(edges: base_types.GraphType) -> base_types.ComputationNode:
 
 
 def get_incoming_edges_for_node(
-    edges: base_types.GraphType, node: base_types.ComputationNode,
+    edges: base_types.GraphType,
+    node: base_types.ComputationNode,
 ) -> FrozenSet[base_types.ComputationEdge]:
     return frozenset(filter(lambda edge: edge.destination == node, edges))
 
 
 def get_outgoing_edges_for_node(
-    edges: base_types.GraphType, node: base_types.ComputationNode,
+    edges: base_types.GraphType,
+    node: base_types.ComputationNode,
 ) -> FrozenSet[base_types.ComputationEdge]:
     return toolz.pipe(
         edges,
