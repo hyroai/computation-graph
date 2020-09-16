@@ -6,7 +6,8 @@ jobs:
     - stage: "test"
       name: "pytest"
       install:
-        - python setup.py install
+        - sudo apt update && sudo apt install graphviz
+        - pip install .[test]
       script: pytest
     - stage: "test"
       name: "pre-commit"
