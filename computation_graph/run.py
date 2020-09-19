@@ -544,14 +544,18 @@ def _ambiguously(
     )
 
 
+@gamla.curry
+def _process_layer_in_parallel(f, state, layer):
+    return toolz.merge(state, *gamla.map(f(state), layer))
+
+
 def _dag_reduce(reducer: Callable, graph: base_types.GraphType):
     """Directed acyclic graph reduction."""
     return gamla.pipe(
         graph,
         _toposort_nodes,
-        toolz.concat,
         gamla.reduce(
-            reducer,
+            _process_layer_in_parallel(reducer),
             {},
         ),
     )
