@@ -420,8 +420,8 @@ def _construct_computation_state(
 
 def _construct_computation_result(
     edges: base_types.GraphType,
-    result_dependencies: _ResultDependenciesType,
     previous_state: Dict,
+    result_dependencies: _ResultDependenciesType,
 ):
     return gamla.pipe(
         edges,
@@ -583,24 +583,23 @@ def execute_graph(
     kwargs,
 ) -> base_types.ComputationResult:
     unbound_input = _get_unbound_input(args, kwargs)
-    results = _dag_reduce(
-        _ambiguously(
-            _on_incoming_edge_options(
-                graph,
-                _on_value_options(
-                    _run_keeping_choices(
-                        _get_node_unbound_input(graph, unbound_input),
-                        tuple(handled_exceptions),
+    return _construct_computation_result(
+        graph,
+        unbound_input.state,
+        _dag_reduce(
+            _ambiguously(
+                _on_incoming_edge_options(
+                    graph,
+                    _on_value_options(
+                        _run_keeping_choices(
+                            _get_node_unbound_input(graph, unbound_input),
+                            tuple(handled_exceptions),
+                        ),
                     ),
                 ),
             ),
+            graph,
         ),
-        graph,
-    )
-    return _construct_computation_result(
-        graph,
-        results,
-        unbound_input.state,
     )
 
 
