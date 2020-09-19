@@ -32,18 +32,6 @@ def _get_edges_from_node_or_graph(
     return node_or_graph
 
 
-def _signature_union(
-    sig_a: base_types.NodeSignature,
-    sig_b: base_types.NodeSignature,
-) -> base_types.NodeSignature:
-    return base_types.NodeSignature(
-        is_args=sig_a.is_args or sig_b.is_args,
-        # Union signature does not preserve arguments' order.
-        kwargs=tuple(set(sig_a.kwargs + sig_b.kwargs)),
-        optional_kwargs=tuple(set(sig_a.optional_kwargs + sig_b.optional_kwargs)),
-    )
-
-
 @toolz.curry
 def _get_unbound_signature_for_single_node(
     node: base_types.ComputationNode,
@@ -65,17 +53,6 @@ def _get_unbound_signature_for_single_node(
         optional_kwargs=tuple(
             filter(lambda x: x not in bound_kwargs, node.signature.optional_kwargs),
         ),
-    )
-
-
-def _get_unbound_signature_for_graph(
-    edges: base_types.GraphType,
-) -> base_types.NodeSignature:
-    return toolz.pipe(
-        edges,
-        graph.get_all_nodes,
-        curried.map(_get_unbound_signature_for_single_node(edges=edges)),
-        curried.reduce(_signature_union),
     )
 
 
