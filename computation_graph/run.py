@@ -1,9 +1,5 @@
 import dataclasses
 import itertools
-import logging
-import pathlib
-import sys
-import traceback
 from typing import Any, Callable, Dict, FrozenSet, Optional, Set, Text, Tuple, Type
 
 import gamla
@@ -59,7 +55,7 @@ def _make_computation_input(args, kwargs):
     return base_types.ComputationInput(args=args, kwargs=kwargs)
 
 
-_get_node_ambiguous_edge_groups = toolz.compose_left(
+_incoming_edge_options = toolz.compose_left(
     graph.get_incoming_edges_for_node,
     curried.groupby(lambda edge: edge.key),
     curried.valmap(toolz.compose_left(curried.sorted(key=lambda edge: edge.priority))),
@@ -242,11 +238,12 @@ def _signature_difference(
     )
 
 
+@gamla.curry
 def _get_computation_input(
     edges: base_types.GraphType,
     node: base_types.ComputationNode,
-    results: Tuple[Tuple[base_types.ComputationResult, ...], ...],
     unbound_input: base_types.ComputationInput,
+    results: Tuple[Tuple[base_types.ComputationResult, ...], ...],
 ) -> base_types.ComputationInput:
     bound_signature = base_types.NodeSignature(
         is_args=node.signature.is_args and any(edge.args for edge in edges),
@@ -281,6 +278,7 @@ def _get_computation_input(
     )
 
 
+@gamla.curry
 def _apply(
     node: base_types.ComputationNode,
     node_input: base_types.ComputationInput,
@@ -331,18 +329,18 @@ def _get_unbound_input(args, kwargs) -> base_types.ComputationInput:
     return unbound_input
 
 
+@gamla.curry
 def _get_node_unbound_input(
     edges: base_types.GraphType,
-    node: base_types.ComputationNode,
     unbound_input: base_types.ComputationInput,
+    node: base_types.ComputationNode,
 ) -> base_types.ComputationInput:
     if unbound_input.state is None:
         return unbound_input
+    node_id = graph.infer_node_id(edges, node)
     return dataclasses.replace(
         unbound_input,
-        state=unbound_input.state[graph.infer_node_id(edges, node)]
-        if graph.infer_node_id(edges, node) in unbound_input.state
-        else None,
+        state=unbound_input.state[node_id] if node_id in unbound_input.state else None,
     )
 
 
@@ -372,7 +370,7 @@ def _decisions_from_value_choices(
     )
 
 
-def _results_from_value_choices(
+def _choices_to_values(
     choices: Tuple[_ResultDecisionPairAndNodeTupleType, ...],
 ) -> Tuple[Tuple[base_types.ComputationResult, ...], ...]:
     return toolz.pipe(
@@ -501,59 +499,94 @@ def node_computation_trace(
     )
 
 
+@gamla.curry
+def _safely(handled_exceptions, f):
+    try:
+        return f()
+    except handled_exceptions as exception:
+        return exception
+
+
+@gamla.curry
+def _get_outputs_and_decisions(
+    safely,
+    edge_group,
+    unbound_input,
+    accumulated_outputs,
+    node,
+):
+    choices = _edges_to_value_choices(edge_group, accumulated_outputs)
+    return (
+        safely(
+            lambda: _apply(
+                node,
+                _get_computation_input(
+                    edge_group,
+                    node,
+                    unbound_input(node),
+                    _choices_to_values(choices),
+                ),
+            ),
+        ),
+        _decisions_from_value_choices(choices),
+    )
+
+
+@gamla.curry
+def _ambiguously(
+    f,
+    accumulated_outputs,
+    element,
+):
+    return gamla.pipe(
+        element,
+        toolz.excepts(_NotCoherent, f(accumulated_outputs), gamla.just(None)),
+        curried.filter(None),
+        dict,
+        curried.assoc(accumulated_outputs, element),
+    )
+
+
+def _dag_reduce(reducer: Callable, graph: base_types.GraphType):
+    """Directed acyclic graph reduction."""
+    return gamla.pipe(
+        graph,
+        _toposort_nodes,
+        toolz.concat,
+        gamla.reduce(
+            reducer,
+            {},
+        ),
+    )
+
+
 def execute_graph(
-    edges: base_types.GraphType,
+    graph: base_types.GraphType,
     handled_exceptions: FrozenSet[Type[Exception]],
     args,
     kwargs,
 ) -> base_types.ComputationResult:
     unbound_input = _get_unbound_input(args, kwargs)
-    last_exception: Exception = StopIteration()
-    result_dependencies: _ResultDependenciesType = {}
-    for node_set in _toposort_nodes(edges):
-        for node in node_set:
-            node_unbound_input = _get_node_unbound_input(edges, node, unbound_input)
-            for node_edges in _get_node_ambiguous_edge_groups(edges, node):
-                for choices in _edges_to_value_choices(node_edges, result_dependencies):
-                    try:
-                        decisions = _decisions_from_value_choices(choices)
-                    except _NotCoherent:
-                        continue
-
-                    computation_input = _get_computation_input(
-                        node_edges,
-                        node,
-                        _results_from_value_choices(choices),
-                        node_unbound_input,
-                    )
-
-                    try:
-                        if node not in result_dependencies:
-                            result_dependencies[node] = {}
-
-                        result_dependencies[node][
-                            _apply(node, computation_input)
-                        ] = decisions
-
-                    except tuple(handled_exceptions) as exception:
-                        _log_handled_exception(type(exception))
-                        last_exception = exception
+    results = _dag_reduce(
+        _ambiguously(
+            gamla.compose_left(
+                _incoming_edge_options(graph),
+                gamla.map(
+                    _get_outputs_and_decisions(
+                        _safely(handled_exceptions),
+                        graph,
+                        _get_node_unbound_input(graph, unbound_input),
+                    ),
+                ),
+            ),
+        ),
+        graph,
+    )
     try:
         return _construct_computation_result(
-            edges,
-            result_dependencies,
+            graph,
+            results,
             unbound_input.state,
         )
     except _ComputationFailed:
-        raise last_exception
-
-
-def _log_handled_exception(exception_type: Type[Exception]):
-    _, exception, exception_traceback = sys.exc_info()
-    filename, line_num, func_name, _ = traceback.extract_tb(exception_traceback)[-1]
-    if str(exception):
-        reason = f": {exception}"
-    else:
-        reason = ""
-    code_location = f"{pathlib.Path(filename).name}:{line_num}"
-    logging.debug(f"'{func_name.strip('_')}' {exception_type}@{code_location}{reason}")
+        raise toolz.last(dict.items(results))[1]
