@@ -156,10 +156,6 @@ _ResultDecisionPairAndNode = Tuple[
 _ResultToDecisionsType = Dict[base_types.ComputationResult, _DecisionsType]
 _ResultDependenciesType = Dict[base_types.ComputationNode, _ResultToDecisionsType]
 
-_ComputationResultAndNodeType = Tuple[
-    base_types.ComputationResult,
-    base_types.ComputationNode,
-]
 
 _ResultDecisionPairAndNodeTupleType = Tuple[_ResultDecisionPairAndNode, ...]
 
@@ -301,13 +297,6 @@ def _apply(
         return base_types.ComputationResult(result.result, result.state)
 
     return base_types.ComputationResult(result=result, state=node_input.state)
-
-
-def _edge_with_values_to_computation_result_and_node(
-    edge: base_types.ComputationEdge,
-    values: Tuple[base_types.ComputationResult, ...],
-) -> Tuple[_ComputationResultAndNodeType, ...]:
-    return toolz.pipe(zip(edge.args or (edge.source,), values), tuple)
 
 
 def to_callable(
