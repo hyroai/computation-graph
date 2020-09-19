@@ -1,5 +1,9 @@
 import dataclasses
 import itertools
+import logging
+import pathlib
+import sys
+import traceback
 from typing import Any, Callable, Dict, FrozenSet, Optional, Set, Text, Tuple, Type
 
 import gamla
@@ -518,7 +522,8 @@ def _run_keeping_choices(
             ),
             _decisions_from_value_choices(value_choices),
         )
-    except handled_exceptions:
+    except handled_exceptions as exception:
+        _log_handled_exception(type(exception))
         return None
 
 
@@ -597,3 +602,14 @@ def execute_graph(
         results,
         unbound_input.state,
     )
+
+
+def _log_handled_exception(exception_type: Type[Exception]):
+    _, exception, exception_traceback = sys.exc_info()
+    filename, line_num, func_name, _ = traceback.extract_tb(exception_traceback)[-1]
+    if str(exception):
+        reason = f": {exception}"
+    else:
+        reason = ""
+    code_location = f"{pathlib.Path(filename).name}:{line_num}"
+    logging.debug(f"'{func_name.strip('_')}' {exception_type}@{code_location}{reason}")
