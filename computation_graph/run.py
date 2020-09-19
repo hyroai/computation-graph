@@ -167,7 +167,7 @@ class _NotCoherent(Exception):
     pass
 
 
-class _ComputationFailed(Exception):
+class ComputationFailed(Exception):
     pass
 
 
@@ -238,7 +238,6 @@ def _signature_difference(
     )
 
 
-@gamla.curry
 def _get_computation_input(
     edges: base_types.GraphType,
     node: base_types.ComputationNode,
@@ -363,7 +362,7 @@ def _decisions_from_value_choices(
             choices,
             curried.concat,
             curried.map(
-                toolz.juxt(toolz.second, toolz.compose_left(toolz.first, toolz.first)),
+                gamla.juxt(toolz.second, toolz.compose_left(toolz.first, toolz.first)),
             ),
             dict,
         ),
@@ -420,22 +419,21 @@ def _construct_computation_result(
     result_dependencies: _ResultDependenciesType,
     previous_state: Dict,
 ):
-
-    return toolz.pipe(
+    return gamla.pipe(
         edges,
         graph.infer_graph_sink,
         debug_trace(edges, result_dependencies),
         gamla.pair_with(
             gamla.translate_exception(
-                lambda sink: toolz.first(result_dependencies[sink]),
+                gamla.compose_left(result_dependencies.__getitem__, toolz.first),
                 KeyError,
-                _ComputationFailed,
+                ComputationFailed,
             ),
         ),
-        gamla.check(toolz.identity, _ComputationFailed),
-        curried.juxt(
-            toolz.compose_left(toolz.first, _result_from_computation_result),
-            toolz.compose_left(
+        gamla.check(toolz.identity, ComputationFailed),
+        gamla.juxt(
+            gamla.compose_left(toolz.first, _result_from_computation_result),
+            gamla.compose_left(
                 toolz.second,
                 _construct_computation_state(
                     edges=edges,
@@ -499,36 +497,41 @@ def node_computation_trace(
     )
 
 
-def _safely(handled_exceptions, f):
-    def safely(*args, **kwargs):
-        try:
-            return f(*args, **kwargs)
-        except handled_exceptions as exception:
-            return exception
-
-    return safely
+@gamla.curry
+def _run_keeping_choices(
+    unbound_input,
+    handled_exceptions,
+    node,
+    incoming_edges,
+    value_choices,
+):
+    try:
+        return (
+            _apply(
+                node,
+                _get_computation_input(
+                    incoming_edges,
+                    node,
+                    unbound_input(node),
+                    _choices_to_values(value_choices),
+                ),
+            ),
+            _decisions_from_value_choices(value_choices),
+        )
+    except handled_exceptions:
+        return None
 
 
 @gamla.curry
-def _tracing_all_decisions(
-    unbound_input,
+def _on_value_options(
     f,
     accumulated_outputs,
     node,
     incoming_edges,
 ):
-    choices = _edges_to_value_choices(incoming_edges, accumulated_outputs)
-    return (
-        f(
-            node,
-            _get_computation_input(
-                incoming_edges,
-                node,
-                unbound_input(node),
-                _choices_to_values(choices),
-            ),
-        ),
-        _decisions_from_value_choices(choices),
+    return map(
+        f(node, incoming_edges),
+        _edges_to_value_choices(incoming_edges, accumulated_outputs),
     )
 
 
@@ -564,7 +567,7 @@ def _dag_reduce(reducer: Callable, graph: base_types.GraphType):
 def _on_incoming_edge_options(graph, f, accumulated_outputs, node):
     return gamla.pipe(
         _incoming_edge_options(graph, node),
-        gamla.map(f(accumulated_outputs, node)),
+        curried.mapcat(f(accumulated_outputs, node)),
     )
 
 
@@ -579,19 +582,18 @@ def execute_graph(
         _ambiguously(
             _on_incoming_edge_options(
                 graph,
-                _tracing_all_decisions(
-                    _get_node_unbound_input(graph, unbound_input),
-                    _safely(handled_exceptions, _apply),
+                _on_value_options(
+                    _run_keeping_choices(
+                        _get_node_unbound_input(graph, unbound_input),
+                        tuple(handled_exceptions),
+                    ),
                 ),
             ),
         ),
         graph,
     )
-    try:
-        return _construct_computation_result(
-            graph,
-            results,
-            unbound_input.state,
-        )
-    except _ComputationFailed:
-        raise toolz.last(dict.items(results))[1]
+    return _construct_computation_result(
+        graph,
+        results,
+        unbound_input.state,
+    )
