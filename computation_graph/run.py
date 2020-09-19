@@ -499,33 +499,33 @@ def node_computation_trace(
     )
 
 
-@gamla.curry
 def _safely(handled_exceptions, f):
-    try:
-        return f()
-    except handled_exceptions as exception:
-        return exception
+    def safely(*args, **kwargs):
+        try:
+            return f(*args, **kwargs)
+        except handled_exceptions as exception:
+            return exception
+
+    return safely
 
 
 @gamla.curry
-def _get_outputs_and_decisions(
-    safely,
-    edge_group,
+def _tracing_all_decisions(
     unbound_input,
+    f,
     accumulated_outputs,
     node,
+    incoming_edges,
 ):
-    choices = _edges_to_value_choices(edge_group, accumulated_outputs)
+    choices = _edges_to_value_choices(incoming_edges, accumulated_outputs)
     return (
-        safely(
-            lambda: _apply(
+        f(
+            node,
+            _get_computation_input(
+                incoming_edges,
                 node,
-                _get_computation_input(
-                    edge_group,
-                    node,
-                    unbound_input(node),
-                    _choices_to_values(choices),
-                ),
+                unbound_input(node),
+                _choices_to_values(choices),
             ),
         ),
         _decisions_from_value_choices(choices),
@@ -560,6 +560,14 @@ def _dag_reduce(reducer: Callable, graph: base_types.GraphType):
     )
 
 
+@gamla.curry
+def _on_incoming_edge_options(graph, f, accumulated_outputs, node):
+    return gamla.pipe(
+        _incoming_edge_options(graph, node),
+        gamla.map(f(accumulated_outputs, node)),
+    )
+
+
 def execute_graph(
     graph: base_types.GraphType,
     handled_exceptions: FrozenSet[Type[Exception]],
@@ -569,14 +577,11 @@ def execute_graph(
     unbound_input = _get_unbound_input(args, kwargs)
     results = _dag_reduce(
         _ambiguously(
-            gamla.compose_left(
-                _incoming_edge_options(graph),
-                gamla.map(
-                    _get_outputs_and_decisions(
-                        _safely(handled_exceptions),
-                        graph,
-                        _get_node_unbound_input(graph, unbound_input),
-                    ),
+            _on_incoming_edge_options(
+                graph,
+                _tracing_all_decisions(
+                    _get_node_unbound_input(graph, unbound_input),
+                    _safely(handled_exceptions, _apply),
                 ),
             ),
         ),
