@@ -212,9 +212,10 @@ def _edge_to_value_choices(
     )
 
 
+@gamla.curry
 def _edges_to_value_choices(
-    edges: base_types.GraphType,
     result_dependencies: _ResultDependenciesType,
+    edges: base_types.GraphType,
 ) -> Tuple[Tuple[_ResultDecisionPairAndNodeTupleType, ...], ...]:
     return toolz.pipe(
         edges,
@@ -394,9 +395,10 @@ def _construct_computation_state(
     )
 
 
+@gamla.curry
 def _construct_computation_result(
-    edges: base_types.GraphType,
     previous_state: Dict,
+    edges: base_types.GraphType,
     result_dependencies: _ResultDependenciesType,
 ):
     return gamla.pipe(
@@ -505,40 +507,11 @@ def _run_keeping_choices(
 
 
 @gamla.curry
-def _on_value_options(
-    f,
-    accumulated_outputs,
-    node,
-    incoming_edges,
-):
-    return map(
-        f,
-        itertools.repeat(node),
-        itertools.repeat(incoming_edges),
-        _edges_to_value_choices(incoming_edges, accumulated_outputs),
-    )
-
-
-@gamla.curry
-def _ambiguously(
-    f,
-    accumulated_outputs,
-    element,
-):
-    return gamla.pipe(
-        element,
-        toolz.excepts(_NotCoherent, f(accumulated_outputs), gamla.just(None)),
-        curried.filter(None),
-        dict,
-        curried.assoc(accumulated_outputs, element),
-    )
-
-
-@gamla.curry
 def _process_layer_in_parallel(f, state, layer):
     return toolz.merge(state, *gamla.map(f(state), layer))
 
 
+@gamla.curry
 def _dag_reduce(reducer: Callable, graph: base_types.GraphType):
     """Directed acyclic graph reduction."""
     return gamla.pipe(
@@ -552,10 +525,25 @@ def _dag_reduce(reducer: Callable, graph: base_types.GraphType):
 
 
 @gamla.curry
-def _on_incoming_edge_options(graph, f, accumulated_outputs, node):
+def _per_values_option(excepting, f, accumulated_outputs, node, edge_option):
     return gamla.pipe(
-        _incoming_edge_options(graph, node),
-        curried.mapcat(f(accumulated_outputs, node)),
+        edge_option,
+        gamla.juxt(gamla.wrap_tuple, _edges_to_value_choices(accumulated_outputs)),
+        gamla.star(itertools.product),
+        curried.map(gamla.star(excepting(f(node)))),
+        curried.filter(None),
+        dict,
+    )
+
+
+@gamla.curry
+def _per_edge_option(f, edge_options, accumulated_outputs, node):
+    return gamla.pipe(
+        node,
+        edge_options,
+        curried.map(f(accumulated_outputs, node)),
+        gamla.star(toolz.merge),
+        curried.assoc(accumulated_outputs, node),
     )
 
 
@@ -566,30 +554,28 @@ def execute_graph(
     kwargs,
 ) -> base_types.ComputationResult:
     unbound_input = _get_unbound_input(args, kwargs)
-    return _construct_computation_result(
+    return gamla.pipe(
         graph,
-        unbound_input.state,
         _dag_reduce(
-            _ambiguously(
-                _on_incoming_edge_options(
-                    graph,
-                    _on_value_options(
-                        toolz.excepts(
-                            tuple(handled_exceptions),
-                            _run_keeping_choices(
-                                _get_computation_input(graph, unbound_input),
-                            ),
-                            gamla.compose_left(
-                                type,
-                                _log_handled_exception,
-                                gamla.just(None),
-                            ),
+            _per_edge_option(
+                _per_values_option(
+                    lambda f: toolz.excepts(
+                        tuple(handled_exceptions) + (_NotCoherent,),
+                        f,
+                        gamla.compose_left(
+                            type,
+                            _log_handled_exception,
+                            gamla.just(None),
                         ),
                     ),
+                    _run_keeping_choices(
+                        _get_computation_input(graph, unbound_input),
+                    ),
                 ),
+                lambda node: _incoming_edge_options(graph, node),
             ),
-            graph,
         ),
+        _construct_computation_result(unbound_input.state, graph),
     )
 
 
