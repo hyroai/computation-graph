@@ -557,8 +557,8 @@ def execute_graph(
         graph,
         _dag_reduce(
             _per_edge_option(
+                graph,
                 _per_values_option(
-                    graph,
                     lambda f: toolz.excepts(
                         (
                             *handled_exceptions,
