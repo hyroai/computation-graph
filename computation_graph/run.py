@@ -537,10 +537,9 @@ def _per_values_option(excepting, f, accumulated_outputs, node, edge_option):
 
 
 @gamla.curry
-def _per_edge_option(f, edge_options, accumulated_outputs, node):
+def _per_edge_option(graph, f, accumulated_outputs, node):
     return gamla.pipe(
-        node,
-        edge_options,
+        _incoming_edge_options(graph, node),
         curried.map(f(accumulated_outputs, node)),
         gamla.star(toolz.merge),
         curried.assoc(accumulated_outputs, node),
@@ -559,6 +558,7 @@ def execute_graph(
         _dag_reduce(
             _per_edge_option(
                 _per_values_option(
+                    graph,
                     lambda f: toolz.excepts(
                         tuple(handled_exceptions) + (_NotCoherent,),
                         f,
@@ -572,7 +572,6 @@ def execute_graph(
                         _get_computation_input(graph, unbound_input),
                     ),
                 ),
-                lambda node: _incoming_edge_options(graph, node),
             ),
         ),
         _construct_computation_result(unbound_input.state, graph),
