@@ -238,10 +238,12 @@ def _signature_difference(
     )
 
 
+@gamla.curry
 def _get_computation_input(
-    edges: base_types.GraphType,
+    graph,
+    unbound_input,
     node: base_types.ComputationNode,
-    unbound_input: base_types.ComputationInput,
+    edges: base_types.GraphType,
     results: Tuple[Tuple[base_types.ComputationResult, ...], ...],
 ) -> base_types.ComputationInput:
     bound_signature = base_types.NodeSignature(
@@ -249,6 +251,7 @@ def _get_computation_input(
         kwargs=tuple(filter(None, map(lambda edge: edge.key, edges))),
     )
     unbound_signature = _signature_difference(node.signature, bound_signature)
+    unbound_input = _get_node_unbound_input(graph, unbound_input, node)
 
     if (
         not (unbound_signature.is_args or bound_signature.is_args)
@@ -277,26 +280,10 @@ def _get_computation_input(
     )
 
 
-@gamla.curry
-def _apply(
-    node: base_types.ComputationNode,
-    node_input: base_types.ComputationInput,
-) -> base_types.ComputationResult:
-    assert node.func is not None, f"cannot apply {node}"
-    if node.is_stateful:
-        return node.func(
-            *node_input.args,
-            **toolz.assoc(node_input.kwargs, "state", node_input.state),
-        )
-
-    result = node.func(*node_input.args, **node_input.kwargs)
-
-    # We could have gotten a `ComputationResult` (In the case `node` is a nested `ComputationNode` for example).
-    # Unwrap to avoid nested results.
+def _wrap_in_result_if_needed(result):
     if isinstance(result, base_types.ComputationResult):
-        return base_types.ComputationResult(result.result, result.state)
-
-    return base_types.ComputationResult(result=result, state=node_input.state)
+        return result
+    return base_types.ComputationResult(result=result, state=None)
 
 
 def to_callable(
@@ -490,30 +477,31 @@ def node_computation_trace(
     )
 
 
+def _apply(node, node_input):
+    return node.func(
+        *node_input.args,
+        **toolz.assoc(node_input.kwargs, "state", node_input.state)
+        if node.is_stateful
+        else node_input.kwargs,
+    )
+
+
 @gamla.curry
 def _run_keeping_choices(
-    unbound_input,
-    handled_exceptions,
+    make_input,
     node,
     incoming_edges,
     value_choices,
 ):
-    try:
-        return (
-            _apply(
-                node,
-                _get_computation_input(
-                    incoming_edges,
-                    node,
-                    unbound_input(node),
-                    _choices_to_values(value_choices),
-                ),
-            ),
-            _decisions_from_value_choices(value_choices),
-        )
-    except handled_exceptions as exception:
-        _log_handled_exception(type(exception))
-        return None
+    node_input = make_input(
+        node,
+        incoming_edges,
+        _choices_to_values(value_choices),
+    )
+    return (
+        _wrap_in_result_if_needed(_apply(node, node_input)),
+        _decisions_from_value_choices(value_choices),
+    )
 
 
 @gamla.curry
@@ -524,7 +512,9 @@ def _on_value_options(
     incoming_edges,
 ):
     return map(
-        f(node, incoming_edges),
+        f,
+        itertools.repeat(node),
+        itertools.repeat(incoming_edges),
         _edges_to_value_choices(incoming_edges, accumulated_outputs),
     )
 
@@ -584,9 +574,16 @@ def execute_graph(
                 _on_incoming_edge_options(
                     graph,
                     _on_value_options(
-                        _run_keeping_choices(
-                            _get_node_unbound_input(graph, unbound_input),
+                        toolz.excepts(
                             tuple(handled_exceptions),
+                            _run_keeping_choices(
+                                _get_computation_input(graph, unbound_input),
+                            ),
+                            gamla.compose_left(
+                                type,
+                                _log_handled_exception,
+                                gamla.just(None),
+                            ),
                         ),
                     ),
                 ),
