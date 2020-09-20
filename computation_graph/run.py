@@ -560,7 +560,10 @@ def execute_graph(
                 _per_values_option(
                     graph,
                     lambda f: toolz.excepts(
-                        tuple(handled_exceptions) + (_NotCoherent,),
+                        (
+                            *handled_exceptions,
+                            _NotCoherent,
+                        ),
                         f,
                         gamla.compose_left(
                             type,
