@@ -1,10 +1,11 @@
+import asyncio
 import dataclasses
 import itertools
 import logging
 import pathlib
 import sys
 import traceback
-from typing import Any, Callable, Dict, FrozenSet, Optional, Set, Text, Tuple, Type
+from typing import Any, Callable, Dict, FrozenSet, Set, Text, Tuple, Type
 
 import gamla
 import toolz
@@ -59,13 +60,19 @@ def _make_computation_input(args, kwargs):
     return base_types.ComputationInput(args=args, kwargs=kwargs)
 
 
-_incoming_edge_options = toolz.compose_left(
+_incoming_edge_options = gamla.compose_left(
     graph.get_incoming_edges_for_node,
-    curried.groupby(lambda edge: edge.key),
-    curried.valmap(toolz.compose_left(curried.sorted(key=lambda edge: edge.priority))),
-    dict.values,
-    gamla.star(itertools.product),
-    curried.map(tuple),
+    gamla.after(
+        gamla.compose_left(
+            curried.groupby(lambda edge: edge.key),
+            curried.valmap(
+                gamla.compose_left(curried.sorted(key=lambda edge: edge.priority)),
+            ),
+            dict.values,
+            gamla.star(itertools.product),
+            curried.map(tuple),
+        ),
+    ),
 )
 
 
@@ -186,9 +193,9 @@ def _node_to_value_choices(
     result_dependencies: _ResultDependenciesType,
     node: base_types.ComputationNode,
 ) -> Callable[[base_types.ComputationNode], _ResultDecisionPairAndNodeTupleType]:
-    return toolz.pipe(
+    return gamla.pipe(
         node,
-        curried.excepts(
+        toolz.excepts(
             KeyError,
             toolz.compose_left(result_dependencies.__getitem__, dict.items, tuple),
             gamla.ignore_input(dict),
@@ -212,7 +219,6 @@ def _edge_to_value_choices(
     )
 
 
-@gamla.curry
 def _edges_to_value_choices(
     result_dependencies: _ResultDependenciesType,
     edges: base_types.GraphType,
@@ -287,17 +293,7 @@ def _wrap_in_result_if_needed(result):
     return base_types.ComputationResult(result=result, state=None)
 
 
-def to_callable(
-    edges: base_types.GraphType,
-    handled_exceptions: FrozenSet[Type[Exception]],
-) -> Callable:
-    def inner(*args, **kwargs) -> base_types.ComputationResult:
-        return execute_graph(edges, handled_exceptions, args, kwargs)
-
-    return inner
-
-
-def _get_unbound_input(args, kwargs) -> base_types.ComputationInput:
+def _get_unbound_input(*args, **kwargs) -> base_types.ComputationInput:
     unbound_input = _make_computation_input(args, kwargs)
 
     if unbound_input.state is not None:
@@ -365,39 +361,41 @@ def _choices_to_values(
     )
 
 
-@toolz.curry
+@gamla.curry
 def _construct_computation_state(
-    sink_node: base_types.ComputationNode,
     edges: base_types.GraphType,
-    previous_state: Optional[Dict],
     result_dependencies: _ResultDependenciesType,
+    sink_node: base_types.ComputationNode,
 ) -> Tuple[int, Any]:
     return toolz.pipe(
         toolz.merge(
-            previous_state or {},
+            {sink_node: toolz.first(result_dependencies[sink_node]).state},
             toolz.pipe(
-                toolz.merge(
-                    {sink_node: toolz.first(result_dependencies[sink_node]).state},
-                    toolz.pipe(
-                        result_dependencies,
-                        curried.get_in(
-                            [sink_node, toolz.first(result_dependencies[sink_node])],
-                        ),
-                        curried.valmap(lambda x: x.state),
-                    ),
+                result_dependencies,
+                curried.get_in(
+                    [sink_node, toolz.first(result_dependencies[sink_node])],
                 ),
-                curried.keymap(graph.infer_node_id(edges)),
+                curried.valmap(lambda x: x.state),
             ),
         ),
+        curried.keymap(graph.infer_node_id(edges)),
+    )
+
+
+def _merge_with_previous_state(
+    previous_state: Dict,
+    result,
+    state,
+):
+    return base_types.ComputationResult(
+        result=result,
         # Convert to tuples (node id, state) so this would be hashable.
-        dict.items,
-        tuple,
+        state=tuple(toolz.merge(previous_state or {}, state).items()),
     )
 
 
 @gamla.curry
 def _construct_computation_result(
-    previous_state: Dict,
     edges: base_types.GraphType,
     result_dependencies: _ResultDependenciesType,
 ):
@@ -413,21 +411,13 @@ def _construct_computation_result(
             ),
         ),
         gamla.check(toolz.identity, ComputationFailed),
-        gamla.juxt(
-            gamla.compose_left(toolz.first, _result_from_computation_result),
-            gamla.compose_left(
-                toolz.second,
+        gamla.stack(
+            (
+                _result_from_computation_result,
                 _construct_computation_state(
-                    edges=edges,
-                    previous_state=previous_state,
-                    result_dependencies=result_dependencies,
+                    edges,
+                    result_dependencies,
                 ),
-            ),
-        ),
-        gamla.star(
-            lambda result, state: base_types.ComputationResult(
-                result=result,
-                state=state,
             ),
         ),
     )
@@ -489,60 +479,82 @@ def _apply(node, node_input):
 
 
 @gamla.curry
-def _run_keeping_choices(
-    make_input,
-    node,
-    incoming_edges,
-    value_choices,
-):
-    node_input = make_input(
-        node,
-        incoming_edges,
-        _choices_to_values(value_choices),
-    )
-    return (
-        _wrap_in_result_if_needed(_apply(node, node_input)),
-        _decisions_from_value_choices(value_choices),
-    )
-
-
-@gamla.curry
-def _process_layer_in_parallel(f, state, layer):
-    return toolz.merge(state, *gamla.map(f(state), layer))
-
-
-@gamla.curry
-def _dag_reduce(reducer: Callable, graph: base_types.GraphType):
-    """Directed acyclic graph reduction."""
-    return gamla.pipe(
-        graph,
-        _toposort_nodes,
-        gamla.reduce(
-            _process_layer_in_parallel(reducer),
-            {},
+def _run_keeping_choices(apply, make_input):
+    return gamla.compose_left(
+        lambda node, incoming_edges, value_choices: (
+            (
+                node,
+                make_input(
+                    node,
+                    incoming_edges,
+                    _choices_to_values(value_choices),
+                ),
+            ),
+            _decisions_from_value_choices(value_choices),
+        ),
+        gamla.juxt(
+            gamla.compose_left(
+                toolz.first,
+                gamla.star(apply),
+                _wrap_in_result_if_needed,
+            ),
+            toolz.second,
         ),
     )
 
 
-@gamla.curry
-def _per_values_option(excepting, f, accumulated_outputs, node, edge_option):
-    return gamla.pipe(
-        edge_option,
-        gamla.juxt(gamla.wrap_tuple, _edges_to_value_choices(accumulated_outputs)),
+def _process_layer_in_parallel(f):
+    return gamla.compose_left(
+        lambda state, layer: ((state,), layer),
         gamla.star(itertools.product),
-        curried.map(gamla.star(excepting(f(node)))),
+        gamla.map(f),
+        gamla.star(toolz.merge),
+    )
+
+
+def _dag_layer_reduce(f: Callable):
+    """Directed acyclic graph reduction."""
+    return gamla.compose_left(
+        _toposort_nodes,
+        gamla.reduce_curried(f, {}),
+    )
+
+
+def _per_values_option(f):
+    return gamla.compose_left(
+        lambda accumulated_outputs, node, edge_option: (
+            (node,),
+            (edge_option,),
+            _edges_to_value_choices(accumulated_outputs, edge_option),
+        ),
+        gamla.star(itertools.product),
+        gamla.map(gamla.star(f)),
         curried.filter(None),
         dict,
     )
 
 
 @gamla.curry
-def _per_edge_option(graph, f, accumulated_outputs, node):
-    return gamla.pipe(
-        _incoming_edge_options(graph, node),
-        curried.map(f(accumulated_outputs, node)),
-        gamla.star(toolz.merge),
-        curried.assoc(accumulated_outputs, node),
+def _per_edge_option(get_edge_options, f):
+    return gamla.compose_left(
+        gamla.star(
+            lambda accumulated_output, node: (
+                accumulated_output,
+                node,
+                get_edge_options(node),
+            ),
+        ),
+        gamla.juxt(
+            toolz.first,
+            toolz.second,
+            gamla.compose_left(
+                gamla.stack((itertools.repeat, itertools.repeat, toolz.identity)),
+                gamla.star(zip),
+                gamla.map(gamla.star(f)),
+                gamla.star(toolz.merge),
+            ),
+        ),
+        gamla.star(curried.assoc),
     )
 
 
@@ -552,32 +564,58 @@ def execute_graph(
     args,
     kwargs,
 ) -> base_types.ComputationResult:
-    unbound_input = _get_unbound_input(args, kwargs)
-    return gamla.pipe(
-        graph,
-        _dag_reduce(
-            _per_edge_option(
-                graph,
-                _per_values_option(
-                    lambda f: toolz.excepts(
-                        (
-                            *handled_exceptions,
-                            _NotCoherent,
-                        ),
-                        f,
-                        gamla.compose_left(
-                            type,
-                            _log_handled_exception,
-                            gamla.just(None),
-                        ),
+    return to_callable(graph, handled_exceptions)(*args, **kwargs)
+
+
+_is_graph_async = gamla.compose_left(
+    curried.mapcat(lambda edge: (edge.source, *edge.args)),
+    curried.filter(None),
+    curried.map(lambda node: node.func),
+    gamla.anymap(asyncio.iscoroutinefunction),
+)
+
+assert_coro = gamla.check(asyncio.iscoroutinefunction, AssertionError)
+
+
+def to_callable(
+    graph: base_types.GraphType,
+    handled_exceptions: FrozenSet[Type[Exception]],
+) -> Callable:
+    return gamla.compose_left(
+        _get_unbound_input,
+        gamla.pair_with(
+            gamla.compose(
+                _construct_computation_result(graph),
+                gamla.to_awaitable if _is_graph_async(graph) else toolz.identity,
+                gamla.apply(graph),
+                _dag_layer_reduce,
+                _process_layer_in_parallel,
+                _per_edge_option(_incoming_edge_options(graph)),
+                _per_values_option,
+                gamla.excepts(
+                    (
+                        *handled_exceptions,
+                        _NotCoherent,
                     ),
-                    _run_keeping_choices(
-                        _get_computation_input(graph, unbound_input),
+                    gamla.compose_left(
+                        type,
+                        _log_handled_exception,
+                        gamla.just(None),
                     ),
                 ),
+                _run_keeping_choices(
+                    gamla.compose(gamla.to_awaitable, _apply)
+                    if _is_graph_async(graph)
+                    else _apply,
+                ),
+                _get_computation_input(graph),
             ),
         ),
-        _construct_computation_result(unbound_input.state, graph),
+        gamla.star(
+            lambda result_and_state, computation_input: _merge_with_previous_state(
+                computation_input.state, *result_and_state
+            ),
+        ),
     )
 
 
