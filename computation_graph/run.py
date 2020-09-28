@@ -569,14 +569,15 @@ def to_callable(
     return gamla.compose_left(
         _make_computation_input,
         gamla.pair_with(
-            gamla.compose(
-                _construct_computation_result(graph),
-                gamla.to_awaitable if _is_graph_async(graph) else toolz.identity,
-                gamla.apply(graph),
-                _dag_layer_reduce,
-                _process_layer_in_parallel,
-                _per_edge_option(_incoming_edge_options(graph)),
-                _per_values_option,
+            # Note: this is a higher order pipeline which builds a function, until the call to `apply`.
+            gamla.compose_left(
+                _get_node_unbound_input(graph),
+                _get_computation_input,
+                _run_keeping_choices(
+                    gamla.compose(gamla.to_awaitable, _apply)
+                    if _is_graph_async(graph)
+                    else _apply,
+                ),
                 gamla.excepts(
                     (
                         *handled_exceptions,
@@ -588,13 +589,13 @@ def to_callable(
                         gamla.just(None),
                     ),
                 ),
-                _run_keeping_choices(
-                    gamla.compose(gamla.to_awaitable, _apply)
-                    if _is_graph_async(graph)
-                    else _apply,
-                ),
-                _get_computation_input,
-                _get_node_unbound_input(graph),
+                _per_values_option,
+                _per_edge_option(_incoming_edge_options(graph)),
+                _process_layer_in_parallel,
+                _dag_layer_reduce,
+                gamla.apply(graph),
+                gamla.to_awaitable if _is_graph_async(graph) else toolz.identity,
+                _construct_computation_result(graph),
             ),
         ),
         gamla.star(
