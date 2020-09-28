@@ -133,6 +133,7 @@ def infer_graph_sink(edges: base_types.GraphType) -> base_types.ComputationNode:
     return toolz.first(leafs)
 
 
+@gamla.curry
 def get_incoming_edges_for_node(
     edges: base_types.GraphType,
     node: base_types.ComputationNode,

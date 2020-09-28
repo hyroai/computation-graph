@@ -1,10 +1,11 @@
+import asyncio
 import dataclasses
 import itertools
 import logging
 import pathlib
 import sys
 import traceback
-from typing import Any, Callable, Dict, FrozenSet, Optional, Set, Text, Tuple, Type
+from typing import Any, Callable, Dict, FrozenSet, Set, Text, Tuple, Type
 
 import gamla
 import toolz
@@ -48,24 +49,30 @@ def _result_from_computation_result(
     return computation_result.result
 
 
-def _make_computation_input(args, kwargs):
+def _make_computation_input(*args, **kwargs) -> base_types.ComputationInput:
     if "state" in kwargs:
         return base_types.ComputationInput(
             args=args,
             kwargs=toolz.dissoc(kwargs, "state"),
-            state=kwargs["state"],
+            state=dict(kwargs["state"]),
         )
 
     return base_types.ComputationInput(args=args, kwargs=kwargs)
 
 
-_get_node_ambiguous_edge_groups = toolz.compose_left(
+_incoming_edge_options = gamla.compose_left(
     graph.get_incoming_edges_for_node,
-    curried.groupby(lambda edge: edge.key),
-    curried.valmap(toolz.compose_left(curried.sorted(key=lambda edge: edge.priority))),
-    dict.values,
-    gamla.star(itertools.product),
-    curried.map(tuple),
+    gamla.after(
+        gamla.compose_left(
+            curried.groupby(lambda edge: edge.key),
+            curried.valmap(
+                gamla.compose_left(curried.sorted(key=lambda edge: edge.priority)),
+            ),
+            dict.values,
+            gamla.star(itertools.product),
+            curried.map(tuple),
+        ),
+    ),
 )
 
 
@@ -167,7 +174,7 @@ class _NotCoherent(Exception):
     pass
 
 
-class _ComputationFailed(Exception):
+class ComputationFailed(Exception):
     pass
 
 
@@ -186,9 +193,9 @@ def _node_to_value_choices(
     result_dependencies: _ResultDependenciesType,
     node: base_types.ComputationNode,
 ) -> Callable[[base_types.ComputationNode], _ResultDecisionPairAndNodeTupleType]:
-    return toolz.pipe(
+    return gamla.pipe(
         node,
-        curried.excepts(
+        toolz.excepts(
             KeyError,
             toolz.compose_left(result_dependencies.__getitem__, dict.items, tuple),
             gamla.ignore_input(dict),
@@ -213,8 +220,8 @@ def _edge_to_value_choices(
 
 
 def _edges_to_value_choices(
-    edges: base_types.GraphType,
     result_dependencies: _ResultDependenciesType,
+    edges: base_types.GraphType,
 ) -> Tuple[Tuple[_ResultDecisionPairAndNodeTupleType, ...], ...]:
     return toolz.pipe(
         edges,
@@ -238,21 +245,27 @@ def _signature_difference(
     )
 
 
+@gamla.curry
 def _get_computation_input(
-    edges: base_types.GraphType,
+    get_unbound_input_for_node: Callable[
+        [base_types.ComputationNode],
+        base_types.ComputationInput,
+    ],
     node: base_types.ComputationNode,
+    incoming_edges_for_node: base_types.GraphType,
     results: Tuple[Tuple[base_types.ComputationResult, ...], ...],
-    unbound_input: base_types.ComputationInput,
 ) -> base_types.ComputationInput:
     bound_signature = base_types.NodeSignature(
-        is_args=node.signature.is_args and any(edge.args for edge in edges),
-        kwargs=tuple(filter(None, map(lambda edge: edge.key, edges))),
+        is_args=node.signature.is_args
+        and any(edge.args for edge in incoming_edges_for_node),
+        kwargs=tuple(filter(None, map(lambda edge: edge.key, incoming_edges_for_node))),
     )
     unbound_signature = _signature_difference(node.signature, bound_signature)
+    unbound_input_for_node = get_unbound_input_for_node(node)
 
     if (
         not (unbound_signature.is_args or bound_signature.is_args)
-        and sum(map(lambda edge: edge.key is None, edges)) == 1
+        and sum(map(lambda edge: edge.key is None, incoming_edges_for_node)) == 1
     ):
         return base_types.ComputationInput(
             args=(),
@@ -261,77 +274,45 @@ def _get_computation_input(
                 toolz.first(toolz.first(results)),
                 unbound_signature,
             ),
-            state=unbound_input.state,
+            state=unbound_input_for_node.state,
         )
 
     return base_types.ComputationInput(
         args=_get_args(
-            edges,
+            incoming_edges_for_node,
             unbound_signature,
             bound_signature,
             results,
-            unbound_input,
+            unbound_input_for_node,
         ),
-        kwargs=_get_kwargs(edges, unbound_signature, results, unbound_input),
-        state=unbound_input.state,
+        kwargs=_get_kwargs(
+            incoming_edges_for_node,
+            unbound_signature,
+            results,
+            unbound_input_for_node,
+        ),
+        state=unbound_input_for_node.state,
     )
 
 
-def _apply(
-    node: base_types.ComputationNode,
-    node_input: base_types.ComputationInput,
-) -> base_types.ComputationResult:
-    assert node.func is not None, f"cannot apply {node}"
-    if node.is_stateful:
-        return node.func(
-            *node_input.args,
-            **toolz.assoc(node_input.kwargs, "state", node_input.state),
-        )
-
-    result = node.func(*node_input.args, **node_input.kwargs)
-
-    # We could have gotten a `ComputationResult` (In the case `node` is a nested `ComputationNode` for example).
-    # Unwrap to avoid nested results.
+def _wrap_in_result_if_needed(result):
     if isinstance(result, base_types.ComputationResult):
-        return base_types.ComputationResult(result.result, result.state)
-
-    return base_types.ComputationResult(result=result, state=node_input.state)
-
-
-def to_callable(
-    edges: base_types.GraphType,
-    handled_exceptions: FrozenSet[Type[Exception]],
-) -> Callable:
-    def inner(*args, **kwargs) -> base_types.ComputationResult:
-        return execute_graph(edges, handled_exceptions, args, kwargs)
-
-    return inner
+        return result
+    return base_types.ComputationResult(result=result, state=None)
 
 
-def _get_unbound_input(args, kwargs) -> base_types.ComputationInput:
-    unbound_input = _make_computation_input(args, kwargs)
-
-    if unbound_input.state is not None:
-        unbound_input = dataclasses.replace(
-            unbound_input,
-            state=dict(unbound_input.state),
-        )
-
-    return unbound_input
-
-
+@gamla.curry
 def _get_node_unbound_input(
     edges: base_types.GraphType,
-    node: base_types.ComputationNode,
     unbound_input: base_types.ComputationInput,
+    node: base_types.ComputationNode,
 ) -> base_types.ComputationInput:
     if unbound_input.state is None:
         return unbound_input
+    node_id = graph.infer_node_id(edges, node)
     return dataclasses.replace(
         unbound_input,
-        state=unbound_input.state[graph.infer_node_id(edges, node)]
-        if graph.infer_node_id(edges, node) in unbound_input.state
-        else None,
+        state=unbound_input.state[node_id] if node_id in unbound_input.state else None,
     )
 
 
@@ -354,14 +335,14 @@ def _decisions_from_value_choices(
             choices,
             curried.concat,
             curried.map(
-                toolz.juxt(toolz.second, toolz.compose_left(toolz.first, toolz.first)),
+                gamla.juxt(toolz.second, toolz.compose_left(toolz.first, toolz.first)),
             ),
             dict,
         ),
     )
 
 
-def _results_from_value_choices(
+def _choices_to_values(
     choices: Tuple[_ResultDecisionPairAndNodeTupleType, ...],
 ) -> Tuple[Tuple[base_types.ComputationResult, ...], ...]:
     return toolz.pipe(
@@ -376,69 +357,63 @@ def _results_from_value_choices(
     )
 
 
-@toolz.curry
+@gamla.curry
 def _construct_computation_state(
-    sink_node: base_types.ComputationNode,
     edges: base_types.GraphType,
-    previous_state: Optional[Dict],
     result_dependencies: _ResultDependenciesType,
+    sink_node: base_types.ComputationNode,
 ) -> Tuple[int, Any]:
     return toolz.pipe(
         toolz.merge(
-            previous_state or {},
+            {sink_node: toolz.first(result_dependencies[sink_node]).state},
             toolz.pipe(
-                toolz.merge(
-                    {sink_node: toolz.first(result_dependencies[sink_node]).state},
-                    toolz.pipe(
-                        result_dependencies,
-                        curried.get_in(
-                            [sink_node, toolz.first(result_dependencies[sink_node])],
-                        ),
-                        curried.valmap(lambda x: x.state),
-                    ),
+                result_dependencies,
+                curried.get_in(
+                    [sink_node, toolz.first(result_dependencies[sink_node])],
                 ),
-                curried.keymap(graph.infer_node_id(edges)),
+                curried.valmap(lambda x: x.state),
             ),
         ),
-        # Convert to tuples (node id, state) so this would be hashable.
-        dict.items,
-        tuple,
+        curried.keymap(graph.infer_node_id(edges)),
     )
 
 
+def _merge_with_previous_state(
+    previous_state: Dict,
+    result: base_types.ComputationResult,
+    state: Dict,
+) -> base_types.ComputationResult:
+    return base_types.ComputationResult(
+        result=result,
+        # Convert to tuples (node id, state) so this would be hashable.
+        state=tuple(toolz.merge(previous_state or {}, state).items()),
+    )
+
+
+@gamla.curry
 def _construct_computation_result(
     edges: base_types.GraphType,
     result_dependencies: _ResultDependenciesType,
-    previous_state: Dict,
 ):
-
-    return toolz.pipe(
+    return gamla.pipe(
         edges,
         graph.infer_graph_sink,
         debug_trace(edges, result_dependencies),
         gamla.pair_with(
             gamla.translate_exception(
-                lambda sink: toolz.first(result_dependencies[sink]),
+                gamla.compose_left(result_dependencies.__getitem__, toolz.first),
                 KeyError,
-                _ComputationFailed,
+                ComputationFailed,
             ),
         ),
-        gamla.check(toolz.identity, _ComputationFailed),
-        curried.juxt(
-            toolz.compose_left(toolz.first, _result_from_computation_result),
-            toolz.compose_left(
-                toolz.second,
+        gamla.check(toolz.identity, ComputationFailed),
+        gamla.stack(
+            (
+                _result_from_computation_result,
                 _construct_computation_state(
-                    edges=edges,
-                    previous_state=previous_state,
-                    result_dependencies=result_dependencies,
+                    edges,
+                    result_dependencies,
                 ),
-            ),
-        ),
-        gamla.star(
-            lambda result, state: base_types.ComputationResult(
-                result=result,
-                state=state,
             ),
         ),
     )
@@ -490,51 +465,145 @@ def node_computation_trace(
     )
 
 
-def execute_graph(
-    edges: base_types.GraphType,
+def _apply(node, node_input):
+    return node.func(
+        *node_input.args,
+        **toolz.assoc(node_input.kwargs, "state", node_input.state)
+        if node.is_stateful
+        else node_input.kwargs,
+    )
+
+
+@gamla.curry
+def _run_keeping_choices(apply, make_input):
+    return gamla.compose_left(
+        lambda node, incoming_edges, value_choices: (
+            (
+                node,
+                make_input(
+                    node,
+                    incoming_edges,
+                    _choices_to_values(value_choices),
+                ),
+            ),
+            _decisions_from_value_choices(value_choices),
+        ),
+        gamla.juxt(
+            gamla.compose_left(
+                toolz.first,
+                gamla.star(apply),
+                _wrap_in_result_if_needed,
+            ),
+            toolz.second,
+        ),
+    )
+
+
+def _process_layer_in_parallel(f):
+    return gamla.compose_left(
+        lambda state, layer: ((state,), layer),
+        gamla.star(itertools.product),
+        gamla.map(f),
+        gamla.star(toolz.merge),
+    )
+
+
+def _dag_layer_reduce(f: Callable):
+    """Directed acyclic graph reduction."""
+    return gamla.compose_left(
+        _toposort_nodes,
+        gamla.reduce_curried(f, {}),
+    )
+
+
+def _per_values_option(f):
+    return gamla.compose_left(
+        lambda accumulated_outputs, node, edge_option: (
+            (node,),
+            (edge_option,),
+            _edges_to_value_choices(accumulated_outputs, edge_option),
+        ),
+        gamla.star(itertools.product),
+        gamla.map(gamla.star(f)),
+        curried.filter(None),
+        dict,
+    )
+
+
+@gamla.curry
+def _per_edge_option(get_edge_options, f):
+    return gamla.compose_left(
+        gamla.star(
+            lambda accumulated_output, node: (
+                accumulated_output,
+                node,
+                get_edge_options(node),
+            ),
+        ),
+        gamla.juxt(
+            toolz.first,
+            toolz.second,
+            gamla.compose_left(
+                gamla.stack((itertools.repeat, itertools.repeat, toolz.identity)),
+                gamla.star(zip),
+                gamla.map(gamla.star(f)),
+                gamla.star(toolz.merge),
+            ),
+        ),
+        gamla.star(curried.assoc),
+    )
+
+
+_is_graph_async = gamla.compose_left(
+    curried.mapcat(lambda edge: (edge.source, *edge.args)),
+    curried.filter(None),
+    curried.map(lambda node: node.func),
+    gamla.anymap(asyncio.iscoroutinefunction),
+)
+
+
+def to_callable(
+    graph: base_types.GraphType,
     handled_exceptions: FrozenSet[Type[Exception]],
-    args,
-    kwargs,
-) -> base_types.ComputationResult:
-    unbound_input = _get_unbound_input(args, kwargs)
-    last_exception: Exception = StopIteration()
-    result_dependencies: _ResultDependenciesType = {}
-    for node_set in _toposort_nodes(edges):
-        for node in node_set:
-            node_unbound_input = _get_node_unbound_input(edges, node, unbound_input)
-            for node_edges in _get_node_ambiguous_edge_groups(edges, node):
-                for choices in _edges_to_value_choices(node_edges, result_dependencies):
-                    try:
-                        decisions = _decisions_from_value_choices(choices)
-                    except _NotCoherent:
-                        continue
-
-                    computation_input = _get_computation_input(
-                        node_edges,
-                        node,
-                        _results_from_value_choices(choices),
-                        node_unbound_input,
-                    )
-
-                    try:
-                        if node not in result_dependencies:
-                            result_dependencies[node] = {}
-
-                        result_dependencies[node][
-                            _apply(node, computation_input)
-                        ] = decisions
-
-                    except tuple(handled_exceptions) as exception:
-                        _log_handled_exception(type(exception))
-                        last_exception = exception
-    try:
-        return _construct_computation_result(
-            edges,
-            result_dependencies,
-            unbound_input.state,
-        )
-    except _ComputationFailed:
-        raise last_exception
+) -> Callable:
+    return gamla.compose_left(
+        _make_computation_input,
+        gamla.pair_with(
+            # Note: this is a higher order pipeline which builds a function, until the call to `apply`.
+            gamla.compose_left(
+                _get_node_unbound_input(graph),
+                _get_computation_input,
+                _run_keeping_choices(
+                    gamla.compose(gamla.to_awaitable, _apply)
+                    if _is_graph_async(graph)
+                    else _apply,
+                ),
+                gamla.excepts(
+                    (
+                        *handled_exceptions,
+                        _NotCoherent,
+                    ),
+                    gamla.compose_left(
+                        type,
+                        _log_handled_exception,
+                        gamla.just(None),
+                    ),
+                ),
+                _per_values_option,
+                _per_edge_option(_incoming_edge_options(graph)),
+                _process_layer_in_parallel,
+                _dag_layer_reduce,
+                gamla.apply(graph),
+                gamla.to_awaitable if _is_graph_async(graph) else toolz.identity,
+                _construct_computation_result(graph),
+            ),
+        ),
+        gamla.star(
+            lambda result_and_state, computation_input: _merge_with_previous_state(
+                computation_input.state, *result_and_state
+            ),
+        ),
+    )
 
 
 def _log_handled_exception(exception_type: Type[Exception]):

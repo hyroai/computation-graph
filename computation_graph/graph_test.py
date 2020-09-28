@@ -1,3 +1,4 @@
+import asyncio
 import functools
 import json
 import os
@@ -9,6 +10,9 @@ import toolz
 
 from computation_graph import base_types, composers, config, graph, run
 
+pytestmark = pytest.mark.asyncio
+
+
 _ROOT_VALUE = "root"
 
 
@@ -17,6 +21,11 @@ class GraphTestException(Exception):
 
 
 def node1(arg1):
+    return f"node1({arg1})"
+
+
+async def node1_async(arg1):
+    await asyncio.sleep(0.1)
     return f"node1({arg1})"
 
 
@@ -108,6 +117,17 @@ def test_simple():
     assert result.result == f"node2(node1({_ROOT_VALUE}))"
 
 
+async def test_simple_async():
+    cg = run.to_callable(
+        (graph.make_edge(source=node1_async, destination=node2, key="arg1"),),
+        frozenset([GraphTestException]),
+    )
+    result = await cg(arg1=_ROOT_VALUE)
+
+    assert isinstance(result, base_types.ComputationResult)
+    assert result.result == f"node2(node1({_ROOT_VALUE}))"
+
+
 def test_kwargs():
     cg = run.to_callable(
         (
@@ -164,7 +184,7 @@ def test_multiple_inputs():
 
 
 def test_exception():
-    with pytest.raises(GraphTestException):
+    with pytest.raises(run.ComputationFailed):
         edges = (
             graph.make_edge(source=node1, destination=unactionable_node, key="arg1"),
         )
@@ -253,7 +273,7 @@ def test_first():
 
 
 def test_first_all_unactionable():
-    with pytest.raises(GraphTestException):
+    with pytest.raises(run.ComputationFailed):
         cg = run.to_callable(
             composers.make_first(unactionable_node),
             frozenset([GraphTestException]),
@@ -302,7 +322,7 @@ def test_first_with_and():
 
 
 def test_and_with_unactionable():
-    with pytest.raises(GraphTestException):
+    with pytest.raises(run.ComputationFailed):
         edges = composers.make_and(
             funcs=(reducer_node, node2, node1, unactionable_node),
             merge_fn=merger,
