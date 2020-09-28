@@ -54,7 +54,7 @@ def _make_computation_input(*args, **kwargs) -> base_types.ComputationInput:
         return base_types.ComputationInput(
             args=args,
             kwargs=toolz.dissoc(kwargs, "state"),
-            state=dict(kwargs["state"]),
+            state=dict(kwargs["state"] or {}),
         )
 
     return base_types.ComputationInput(args=args, kwargs=kwargs)
