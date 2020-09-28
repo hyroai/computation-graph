@@ -380,9 +380,9 @@ def _construct_computation_state(
 
 def _merge_with_previous_state(
     previous_state: Dict,
-    result,
-    state,
-):
+    result: base_types.ComputationResult,
+    state: Dict,
+) -> base_types.ComputationResult:
     return base_types.ComputationResult(
         result=result,
         # Convert to tuples (node id, state) so this would be hashable.
