@@ -49,7 +49,7 @@ def _result_from_computation_result(
     return computation_result.result
 
 
-def _make_computation_input(*args, **kwargs):
+def _make_computation_input(*args, **kwargs) -> base_types.ComputationInput:
     if "state" in kwargs:
         return base_types.ComputationInput(
             args=args,
