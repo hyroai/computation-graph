@@ -49,12 +49,12 @@ def _result_from_computation_result(
     return computation_result.result
 
 
-def _make_computation_input(args, kwargs):
+def _make_computation_input(*args, **kwargs):
     if "state" in kwargs:
         return base_types.ComputationInput(
             args=args,
             kwargs=toolz.dissoc(kwargs, "state"),
-            state=kwargs["state"],
+            state=dict(kwargs["state"]),
         )
 
     return base_types.ComputationInput(args=args, kwargs=kwargs)
@@ -247,8 +247,10 @@ def _signature_difference(
 
 @gamla.curry
 def _get_computation_input(
-    graph,
-    unbound_input,
+    get_unbound_input_for_node: Callable[
+        [base_types.ComputationNode],
+        base_types.ComputationInput,
+    ],
     node: base_types.ComputationNode,
     edges: base_types.GraphType,
     results: Tuple[Tuple[base_types.ComputationResult, ...], ...],
@@ -258,7 +260,7 @@ def _get_computation_input(
         kwargs=tuple(filter(None, map(lambda edge: edge.key, edges))),
     )
     unbound_signature = _signature_difference(node.signature, bound_signature)
-    unbound_input = _get_node_unbound_input(graph, unbound_input, node)
+    unbound_input = get_unbound_input_for_node(node)
 
     if (
         not (unbound_signature.is_args or bound_signature.is_args)
@@ -291,18 +293,6 @@ def _wrap_in_result_if_needed(result):
     if isinstance(result, base_types.ComputationResult):
         return result
     return base_types.ComputationResult(result=result, state=None)
-
-
-def _get_unbound_input(*args, **kwargs) -> base_types.ComputationInput:
-    unbound_input = _make_computation_input(args, kwargs)
-
-    if unbound_input.state is not None:
-        unbound_input = dataclasses.replace(
-            unbound_input,
-            state=dict(unbound_input.state),
-        )
-
-    return unbound_input
 
 
 @gamla.curry
@@ -582,7 +572,7 @@ def to_callable(
     handled_exceptions: FrozenSet[Type[Exception]],
 ) -> Callable:
     return gamla.compose_left(
-        _get_unbound_input,
+        _make_computation_input,
         gamla.pair_with(
             gamla.compose(
                 _construct_computation_result(graph),
@@ -608,7 +598,8 @@ def to_callable(
                     if _is_graph_async(graph)
                     else _apply,
                 ),
-                _get_computation_input(graph),
+                _get_computation_input,
+                _get_node_unbound_input(graph),
             ),
         ),
         gamla.star(
