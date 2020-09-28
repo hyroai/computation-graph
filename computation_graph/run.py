@@ -252,19 +252,20 @@ def _get_computation_input(
         base_types.ComputationInput,
     ],
     node: base_types.ComputationNode,
-    edges: base_types.GraphType,
+    incoming_edges_for_node: base_types.GraphType,
     results: Tuple[Tuple[base_types.ComputationResult, ...], ...],
 ) -> base_types.ComputationInput:
     bound_signature = base_types.NodeSignature(
-        is_args=node.signature.is_args and any(edge.args for edge in edges),
-        kwargs=tuple(filter(None, map(lambda edge: edge.key, edges))),
+        is_args=node.signature.is_args
+        and any(edge.args for edge in incoming_edges_for_node),
+        kwargs=tuple(filter(None, map(lambda edge: edge.key, incoming_edges_for_node))),
     )
     unbound_signature = _signature_difference(node.signature, bound_signature)
     unbound_input_for_node = get_unbound_input_for_node(node)
 
     if (
         not (unbound_signature.is_args or bound_signature.is_args)
-        and sum(map(lambda edge: edge.key is None, edges)) == 1
+        and sum(map(lambda edge: edge.key is None, incoming_edges_for_node)) == 1
     ):
         return base_types.ComputationInput(
             args=(),
@@ -278,13 +279,18 @@ def _get_computation_input(
 
     return base_types.ComputationInput(
         args=_get_args(
-            edges,
+            incoming_edges_for_node,
             unbound_signature,
             bound_signature,
             results,
             unbound_input_for_node,
         ),
-        kwargs=_get_kwargs(edges, unbound_signature, results, unbound_input_for_node),
+        kwargs=_get_kwargs(
+            incoming_edges_for_node,
+            unbound_signature,
+            results,
+            unbound_input_for_node,
+        ),
         state=unbound_input_for_node.state,
     )
 
