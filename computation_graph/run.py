@@ -260,7 +260,7 @@ def _get_computation_input(
         kwargs=tuple(filter(None, map(lambda edge: edge.key, edges))),
     )
     unbound_signature = _signature_difference(node.signature, bound_signature)
-    unbound_input = get_unbound_input_for_node(node)
+    unbound_input_for_node = get_unbound_input_for_node(node)
 
     if (
         not (unbound_signature.is_args or bound_signature.is_args)
@@ -273,7 +273,7 @@ def _get_computation_input(
                 toolz.first(toolz.first(results)),
                 unbound_signature,
             ),
-            state=unbound_input.state,
+            state=unbound_input_for_node.state,
         )
 
     return base_types.ComputationInput(
@@ -282,10 +282,10 @@ def _get_computation_input(
             unbound_signature,
             bound_signature,
             results,
-            unbound_input,
+            unbound_input_for_node,
         ),
-        kwargs=_get_kwargs(edges, unbound_signature, results, unbound_input),
-        state=unbound_input.state,
+        kwargs=_get_kwargs(edges, unbound_signature, results, unbound_input_for_node),
+        state=unbound_input_for_node.state,
     )
 
 
