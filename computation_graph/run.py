@@ -570,8 +570,6 @@ _is_graph_async = gamla.compose_left(
     gamla.anymap(asyncio.iscoroutinefunction),
 )
 
-assert_coro = gamla.check(asyncio.iscoroutinefunction, AssertionError)
-
 
 def to_callable(
     graph: base_types.GraphType,
