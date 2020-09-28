@@ -554,15 +554,6 @@ def _per_edge_option(get_edge_options, f):
     )
 
 
-def execute_graph(
-    graph: base_types.GraphType,
-    handled_exceptions: FrozenSet[Type[Exception]],
-    args,
-    kwargs,
-) -> base_types.ComputationResult:
-    return to_callable(graph, handled_exceptions)(*args, **kwargs)
-
-
 _is_graph_async = gamla.compose_left(
     curried.mapcat(lambda edge: (edge.source, *edge.args)),
     curried.filter(None),
