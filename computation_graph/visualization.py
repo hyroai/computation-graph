@@ -41,7 +41,7 @@ def _add_computation_node(
         pgv_graph.add_edge(node_id, node_id)
 
 
-def computation_graph_to_graphviz(edges: base_types.GraphType) -> pgv.AGraph:
+def _computation_graph_to_graphviz(edges: base_types.GraphType) -> pgv.AGraph:
     pgv_graph = pgv.AGraph(directed=True)
     for edge in edges:
         _add_computation_node(pgv_graph, edge.destination)
@@ -78,7 +78,7 @@ def _do_add_node(result_graph: pgv.AGraph) -> Callable[[pgv.Node], pgv.AGraph]:
     )
 
 
-def union_graphviz(graphs: Tuple[pgv.AGraph, ...]) -> pgv.AGraph:
+def _union_graphviz(graphs: Tuple[pgv.AGraph, ...]) -> pgv.AGraph:
     return toolz.pipe(
         graphs,
         # copy to avoid side effects that influence caller
@@ -110,16 +110,16 @@ def union_graphviz(graphs: Tuple[pgv.AGraph, ...]) -> pgv.AGraph:
     )
 
 
-def save_graphviz_as_png(filename: Text) -> Callable[[pgv.AGraph], pgv.AGraph]:
+def _save_graphviz_as_png(filename: Text) -> Callable[[pgv.AGraph], pgv.AGraph]:
     return curried.do(lambda pgv_graph: pgv_graph.draw(filename, prog="dot"))
 
 
-def save_graphviz_as_dot(filename: Text) -> Callable[[pgv.AGraph], pgv.AGraph]:
+def _save_graphviz_as_dot(filename: Text) -> Callable[[pgv.AGraph], pgv.AGraph]:
     return curried.do(lambda pgv_graph: pgv_graph.write(filename))
 
 
 @toolz.curry
-def computation_trace_to_graphviz(
+def _computation_trace_to_graphviz(
     computation_trace: Tuple[
         Tuple[base_types.ComputationNode, base_types.ComputationResult]
     ],
@@ -140,15 +140,17 @@ def computation_trace_to_graphviz(
 
 
 visualize_graph = gamla.compose_left(
-    computation_graph_to_graphviz,
-    save_graphviz_as_png("topology.png"),
+    _computation_graph_to_graphviz,
+    _save_graphviz_as_png("topology.png"),
 )
 serialize_computation_trace = toolz.compose_left(
-    save_graphviz_as_dot,
+    _save_graphviz_as_dot,
     gamla.before(
         gamla.compose_left(
-            gamla.stack([computation_graph_to_graphviz, computation_trace_to_graphviz]),
-            union_graphviz,
+            gamla.stack(
+                [_computation_graph_to_graphviz, _computation_trace_to_graphviz],
+            ),
+            _union_graphviz,
             curried.do(lambda g: g.layout(prog="dot")),
         ),
     ),
