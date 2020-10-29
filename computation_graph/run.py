@@ -325,7 +325,7 @@ def _decisions_from_value_choices(
             curried.concat,
             curried.map(toolz.compose_left(toolz.first, toolz.second)),
             tuple,
-            gamla.curried_ternary(
+            gamla.ternary(
                 toolz.identity,
                 curried.reduce(_merge_decision),
                 dict,
@@ -402,7 +402,7 @@ def _construct_computation_result(
         gamla.pair_with(
             gamla.translate_exception(
                 gamla.compose_left(result_dependencies.__getitem__, toolz.first),
-                KeyError,
+                (StopIteration, KeyError),
                 ComputationFailed,
             ),
         ),

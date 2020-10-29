@@ -52,7 +52,7 @@ def _infer_callable_name(func: Callable) -> Text:
 
 
 get_edge_nodes = functools.lru_cache(maxsize=1024)(
-    gamla.curried_ternary(
+    gamla.ternary(
         lambda edge: edge.args,
         lambda edge: edge.args + (edge.destination,),
         lambda edge: (edge.source, edge.destination),
