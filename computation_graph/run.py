@@ -24,29 +24,23 @@ class _ComputationGraphException(Exception):
 def _transpose_graph(
     graph: Dict[base_types.ComputationNode, Set[base_types.ComputationNode]],
 ) -> Dict[base_types.ComputationNode, Set[base_types.ComputationNode]]:
-    return gamla.pipe(graph.keys(), gamla.groupby_many(graph.get), curried.valmap(set))
+    return gamla.pipe(graph.keys(), gamla.groupby_many(graph.get), gamla.valmap(set))
 
 
-def _toposort_nodes(
-    edges: base_types.GraphType,
-) -> Tuple[FrozenSet[base_types.ComputationNode], ...]:
-    return gamla.pipe(
-        edges,
-        gamla.groupby_many(lambda edge: edge.args or (edge.source,)),
-        curried.valmap(
-            gamla.compose_left(gamla.map(lambda edge: edge.destination), set),
-        ),
-        _transpose_graph,
-        toposort.toposort,
-        gamla.map(frozenset),
-        tuple,
-    )
+def _get_edge_sources(edge: base_types.ComputationEdge):
+    return edge.args or (edge.source,)
 
 
-def _result_from_computation_result(
-    computation_result: base_types.ComputationResult,
-) -> base_types.ComputationResult:
-    return computation_result.result
+_toposort_nodes = gamla.compose_left(
+    gamla.groupby_many(_get_edge_sources),
+    gamla.valmap(
+        gamla.compose_left(gamla.map(lambda edge: edge.destination), set),
+    ),
+    _transpose_graph,
+    toposort.toposort,
+    gamla.map(frozenset),
+    tuple,
+)
 
 
 def _make_computation_input(*args, **kwargs) -> base_types.ComputationInput:
@@ -65,7 +59,7 @@ _incoming_edge_options = gamla.compose_left(
     gamla.after(
         gamla.compose_left(
             curried.groupby(lambda edge: edge.key),
-            curried.valmap(
+            gamla.valmap(
                 gamla.compose_left(curried.sorted(key=lambda edge: edge.priority)),
             ),
             dict.values,
@@ -92,7 +86,7 @@ def _get_args(
             gamla.filter(gamla.compose_left(toolz.second, lambda edge: edge.args)),
             toolz.first,
             toolz.first,
-            gamla.map(_result_from_computation_result),
+            gamla.map(gamla.attrgetter("result")),
             tuple,
         )
 
@@ -143,12 +137,12 @@ def _get_kwargs(
         zip(edges, results),
         gamla.filter(gamla.compose_left(toolz.first, lambda edge: edge.key)),
         curried.groupby(gamla.compose_left(toolz.first, lambda edge: edge.key)),
-        curried.valmap(
+        gamla.valmap(
             gamla.compose_left(
                 toolz.first,
                 toolz.second,
                 toolz.first,
-                _result_from_computation_result,
+                gamla.attrgetter("result"),
             ),
         ),
         lambda x: toolz.merge(kwargs, x),
@@ -186,46 +180,23 @@ _merge_decision = curried.merge_with(
 )
 
 
-def _node_to_value_choices(result_dependencies: _ResultDependenciesType):
+def _node_to_value_choices(node_to_results):
     return gamla.compose_left(
         gamla.wrap_tuple,
         gamla.pair_with(
             gamla.excepts(
                 KeyError,
-                gamla.ignore_input(dict),
-                gamla.compose_left(
-                    toolz.first,
-                    result_dependencies.__getitem__,
-                    dict.items,
-                    tuple,
-                ),
+                gamla.just(()),
+                gamla.compose_left(toolz.first, node_to_results, dict.items),
             ),
         ),
         gamla.star(itertools.product),
     )
 
 
-def _edge_to_value_choices(
-    result_dependencies: _ResultDependenciesType,
-) -> Callable[
-    [base_types.ComputationEdge],
-    Tuple[_ResultDecisionPairAndNodeTupleType, ...],
-]:
+def _map_product_tuple(f):
     return gamla.compose_left(
-        lambda edge: edge.args or (edge.source,),
-        gamla.map(_node_to_value_choices(result_dependencies)),
-        gamla.star(itertools.product),
-        tuple,
-    )
-
-
-def _edges_to_value_choices(
-    result_dependencies: _ResultDependenciesType,
-    edges: base_types.GraphType,
-) -> Tuple[Tuple[_ResultDecisionPairAndNodeTupleType, ...], ...]:
-    return gamla.pipe(
-        edges,
-        gamla.map(_edge_to_value_choices(result_dependencies)),
+        gamla.map(f),
         gamla.star(itertools.product),
         tuple,
     )
@@ -371,7 +342,7 @@ def _construct_computation_state(
                 curried.get_in(
                     [sink_node, toolz.first(result_dependencies[sink_node])],
                 ),
-                curried.valmap(lambda x: x.state),
+                gamla.valmap(lambda x: x.state),
             ),
         ),
         curried.keymap(graph.infer_node_id(edges)),
@@ -409,7 +380,7 @@ def _construct_computation_result(
         gamla.check(gamla.identity, ComputationFailed),
         gamla.stack(
             (
-                _result_from_computation_result,
+                gamla.attrgetter("result"),
                 _construct_computation_state(
                     edges,
                     result_dependencies,
@@ -521,7 +492,17 @@ def _per_values_option(f):
         lambda accumulated_outputs, node, edge_option: (
             (node,),
             (edge_option,),
-            _edges_to_value_choices(accumulated_outputs, edge_option),
+            gamla.pipe(
+                edge_option,
+                _map_product_tuple(
+                    gamla.compose_left(
+                        _get_edge_sources,
+                        _map_product_tuple(
+                            _node_to_value_choices(accumulated_outputs.__getitem__),
+                        ),
+                    ),
+                ),
+            ),
         ),
         gamla.star(itertools.product),
         gamla.map(gamla.star(f)),
