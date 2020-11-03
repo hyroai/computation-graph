@@ -3,7 +3,6 @@ from __future__ import annotations
 from typing import Any, Callable, Optional, Text, Tuple, Union
 
 import gamla
-import toolz
 from toolz import curried
 
 from computation_graph import base_types, graph
@@ -19,7 +18,7 @@ class _ComputationError:
 
 _callable_or_graph_type_to_node_or_graph_type = gamla.curried_ternary(
     lambda x: isinstance(x, tuple),
-    toolz.identity,
+    gamla.identity,
     graph.make_computation_node,
 )
 
@@ -32,7 +31,7 @@ def _get_edges_from_node_or_graph(
     return node_or_graph
 
 
-@toolz.curry
+@gamla.curry
 def _get_unbound_signature_for_single_node(
     node: base_types.ComputationNode,
     edges: base_types.GraphType,
@@ -40,10 +39,10 @@ def _get_unbound_signature_for_single_node(
     """Computes the new signature of unbound variables after considering internal edges."""
     incoming_edges = graph.get_incoming_edges_for_node(edges, node)
 
-    bound_kwargs: Tuple[Text, ...] = toolz.pipe(
+    bound_kwargs: Tuple[Text, ...] = gamla.pipe(
         incoming_edges,
-        curried.map(lambda edge: edge.key),
-        curried.filter(None),
+        gamla.map(lambda edge: edge.key),
+        gamla.filter(gamla.identity),
     )
 
     return base_types.NodeSignature(
@@ -56,7 +55,7 @@ def _get_unbound_signature_for_single_node(
     )
 
 
-@toolz.curry
+@gamla.curry
 def make_optional(
     func: _ComposersInputType,
     default_value: Any,
@@ -73,14 +72,14 @@ def make_and(funcs, merge_fn: Callable) -> base_types.GraphType:
 
     merge_node = graph.make_computation_node(args_to_tuple)
 
-    return toolz.pipe(
+    return gamla.pipe(
         funcs,
-        curried.map(_callable_or_graph_type_to_node_or_graph_type),
+        gamla.map(_callable_or_graph_type_to_node_or_graph_type),
         tuple,
         gamla.juxtcat(
             curried.mapcat(_get_edges_from_node_or_graph),
             curried.compose_left(
-                curried.map(_infer_sink),
+                gamla.map(_infer_sink),
                 tuple,
                 lambda nodes: (
                     graph.make_edge(source=nodes, destination=merge_node),
@@ -98,22 +97,22 @@ def make_and(funcs, merge_fn: Callable) -> base_types.GraphType:
 
 def make_or(funcs, merge_fn: Callable) -> base_types.GraphType:
     def filter_computation_errors(*args):
-        return toolz.pipe(
+        return gamla.pipe(
             args,
-            curried.filter(lambda x: not isinstance(x, _ComputationError)),
+            gamla.filter(lambda x: not isinstance(x, _ComputationError)),
             tuple,
         )
 
     filter_node = graph.make_computation_node(filter_computation_errors)
     merge_node = graph.make_computation_node(merge_fn)
-    return toolz.pipe(
+    return gamla.pipe(
         funcs,
-        curried.map(make_optional(default_value=_ComputationError())),
+        gamla.map(make_optional(default_value=_ComputationError())),
         tuple,
         gamla.juxtcat(
             curried.concat,
-            toolz.compose_left(
-                curried.map(_infer_sink),
+            gamla.compose_left(
+                gamla.map(_infer_sink),
                 tuple,
                 lambda sinks: (
                     graph.make_edge(source=sinks, destination=filter_node),
@@ -162,9 +161,9 @@ def make_first(*funcs: _ComposersInputType) -> base_types.GraphType:
 
     first_node = graph.make_computation_node(first)
 
-    return toolz.pipe(
+    return gamla.pipe(
         funcs,
-        curried.map(_callable_or_graph_type_to_node_or_graph_type),
+        gamla.map(_callable_or_graph_type_to_node_or_graph_type),
         enumerate,
         curried.mapcat(
             gamla.star(
@@ -180,11 +179,11 @@ def make_first(*funcs: _ComposersInputType) -> base_types.GraphType:
     )
 
 
-@toolz.curry
+@gamla.curry
 def _infer_composition_edges(
+    key: Optional[Text],
     source: _ComputationNodeOrGraphType,
     destination: _ComputationNodeOrGraphType,
-    key: Optional[Text] = None,
 ) -> base_types.GraphType:
     if isinstance(destination, base_types.ComputationNode):
         assert (
@@ -201,22 +200,22 @@ def _infer_composition_edges(
         )
 
     return (
-        toolz.pipe(
+        gamla.pipe(
             destination,
             curried.mapcat(graph.get_edge_nodes),
             curried.unique,
-            curried.filter(
-                toolz.compose_left(
+            gamla.filter(
+                gamla.compose_left(
                     _get_unbound_signature_for_single_node(edges=destination),
                     lambda signature: key in signature.kwargs,
                 ),
             ),
             # Do not add edges to nodes from source that are already present in destination (cycle).
-            curried.filter(
+            gamla.filter(
                 lambda node: isinstance(source, base_types.ComputationNode)
                 or node not in graph.get_all_nodes(source),
             ),
-            curried.map(
+            gamla.map(
                 lambda node: graph.make_edge(
                     source=_infer_sink(source),
                     destination=node,
@@ -225,7 +224,7 @@ def _infer_composition_edges(
             ),
             tuple,
             gamla.check(
-                toolz.identity,
+                gamla.identity,
                 AssertionError(
                     f"Cannot compose, destination signature does not contain key '{key}'",
                 ),
@@ -239,11 +238,11 @@ def _infer_composition_edges(
 def make_compose(
     *funcs: _ComposersInputType, key: Optional[Text] = None
 ) -> base_types.GraphType:
-    return toolz.pipe(
+    return gamla.pipe(
         funcs,
         reversed,
-        curried.map(_callable_or_graph_type_to_node_or_graph_type),
+        gamla.map(_callable_or_graph_type_to_node_or_graph_type),
         curried.sliding_window(2),
-        curried.mapcat(gamla.star(_infer_composition_edges(key=key))),
+        curried.mapcat(gamla.star(_infer_composition_edges(key))),
         tuple,
     )

@@ -65,27 +65,27 @@ def _computation_graph_to_graphviz(edges: base_types.GraphType) -> pgv.AGraph:
 
 
 def _do_add_edge(result_graph: pgv.AGraph) -> Callable[[pgv.Edge], pgv.AGraph]:
-    return lambda edge: toolz.pipe(
+    return lambda edge: gamla.pipe(
         result_graph,
         curried.do(lambda g: g.add_edge(edge, **edge.attr)),
     )
 
 
 def _do_add_node(result_graph: pgv.AGraph) -> Callable[[pgv.Node], pgv.AGraph]:
-    return lambda node: toolz.pipe(
+    return lambda node: gamla.pipe(
         result_graph,
         curried.do(lambda g: g.add_node(node, **node.attr)),
     )
 
 
 def _union_graphviz(graphs: Tuple[pgv.AGraph, ...]) -> pgv.AGraph:
-    return toolz.pipe(
+    return gamla.pipe(
         graphs,
         # copy to avoid side effects that influence caller
         gamla.juxt(gamla.compose_left(toolz.first, pgv.AGraph.copy), curried.drop(1)),
         gamla.star(
             gamla.reduce(
-                lambda result_graph, another_graph: toolz.pipe(
+                lambda result_graph, another_graph: gamla.pipe(
                     another_graph,
                     # following does side effects on result_graph, that's why we return just(result_graph)
                     # we assume no parallelization in gamla.juxt
@@ -118,7 +118,6 @@ def _save_graphviz_as_dot(filename: Text) -> Callable[[pgv.AGraph], pgv.AGraph]:
     return curried.do(lambda pgv_graph: pgv_graph.write(filename))
 
 
-@toolz.curry
 def _computation_trace_to_graphviz(
     computation_trace: Tuple[
         Tuple[base_types.ComputationNode, base_types.ComputationResult]
@@ -143,7 +142,7 @@ visualize_graph = gamla.compose_left(
     _computation_graph_to_graphviz,
     _save_graphviz_as_png("topology.png"),
 )
-serialize_computation_trace = toolz.compose_left(
+serialize_computation_trace = gamla.compose_left(
     _save_graphviz_as_dot,
     gamla.before(
         gamla.compose_left(

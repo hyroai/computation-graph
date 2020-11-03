@@ -4,9 +4,9 @@ import json
 import os
 import pathlib
 
+import gamla
 import pygraphviz as pgv
 import pytest
-import toolz
 
 from computation_graph import base_types, composers, config, graph, run
 
@@ -50,12 +50,12 @@ def node_with_side_effect(arg1, side_effects, state):
     )
 
 
-@toolz.curry
+@gamla.curry
 def curried_node(arg1, arg2):
     return f"curried_node(arg1={arg1}, arg2={arg2})"
 
 
-@toolz.curry
+@gamla.curry
 def curried_stateful_node(arg1, arg2, state):
     if state is None:
         state = 0

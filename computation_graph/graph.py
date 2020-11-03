@@ -12,7 +12,7 @@ from computation_graph import base_types
 def get_all_nodes(
     edges: base_types.GraphType,
 ) -> FrozenSet[base_types.ComputationNode]:
-    return toolz.pipe(edges, curried.mapcat(get_edge_nodes), toolz.unique, frozenset)
+    return gamla.pipe(edges, curried.mapcat(get_edge_nodes), toolz.unique, frozenset)
 
 
 def _is_reducer_type(node: Callable) -> bool:
@@ -60,16 +60,16 @@ get_edge_nodes = functools.lru_cache(maxsize=1024)(
 )
 
 
-_edges_to_node_id_map = toolz.compose_left(
+_edges_to_node_id_map = gamla.compose_left(
     curried.mapcat(get_edge_nodes),
     curried.unique,
     enumerate,
-    curried.map(reversed),
+    gamla.map(reversed),
     dict,
 )
 
 
-@toolz.curry
+@gamla.curry
 def infer_node_id(edges: base_types.GraphType, node: base_types.ComputationNode) -> int:
     return _edges_to_node_id_map(edges)[node]
 
@@ -115,10 +115,10 @@ def make_edge(
 
 
 def get_leaves(edges: base_types.GraphType) -> FrozenSet[base_types.ComputationNode]:
-    return toolz.pipe(
+    return gamla.pipe(
         edges,
         get_all_nodes,
-        curried.filter(
+        gamla.filter(
             lambda node: not any(
                 edge.source == node or node in edge.args for edge in edges
             ),
@@ -145,8 +145,8 @@ def get_outgoing_edges_for_node(
     edges: base_types.GraphType,
     node: base_types.ComputationNode,
 ) -> FrozenSet[base_types.ComputationEdge]:
-    return toolz.pipe(
+    return gamla.pipe(
         edges,
-        curried.filter(lambda edge: node == edge.source or node in edge.args),
+        gamla.filter(lambda edge: node == edge.source or node in edge.args),
         frozenset,
     )
