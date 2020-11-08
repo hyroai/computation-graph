@@ -12,7 +12,7 @@ import toolz
 import toposort
 from toolz import curried
 
-from computation_graph import base_types, config, graph
+from computation_graph import base_types, config, graph, visualization
 
 COMPUTATION_TRACE_DOT_FILENAME = "computation.dot"
 
@@ -325,7 +325,9 @@ def _construct_computation_result(
     return gamla.pipe(
         edges,
         graph.infer_graph_sink,
-        _debug_trace(edges, _node_computation_trace(result_to_dependencies)),
+        _debug_trace(edges, _node_computation_trace(result_to_dependencies))
+        if config.DEBUG_SAVE_COMPUTATION_TRACE
+        else gamla.identity,
         gamla.pair_with(
             gamla.translate_exception(
                 gamla.compose_left(result_to_dependencies, toolz.first),
@@ -357,20 +359,15 @@ def _debug_trace(
     edges: base_types.GraphType,
     computation_trace: _ComputationTrace,
 ) -> Callable[[base_types.ComputationNode], Any]:
-    if config.DEBUG_SAVE_COMPUTATION_TRACE:
-        from computation_graph import visualization
-
-        return curried.do(
-            gamla.compose_left(
-                computation_trace,
-                gamla.pair_with(gamla.just(edges)),
-                visualization.serialize_computation_trace(
-                    COMPUTATION_TRACE_DOT_FILENAME,
-                ),
+    return curried.do(
+        gamla.compose_left(
+            computation_trace,
+            gamla.pair_with(gamla.just(edges)),
+            visualization.serialize_computation_trace(
+                COMPUTATION_TRACE_DOT_FILENAME,
             ),
-        )
-
-    return gamla.identity
+        ),
+    )
 
 
 def _node_computation_trace(node_to_results: _NodeToResults) -> _ComputationTrace:
