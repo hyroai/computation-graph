@@ -373,7 +373,7 @@ def _node_computation_trace(node_to_results: _NodeToResults) -> _ComputationTrac
     )
 
 
-def _apply(node, node_input):
+def _apply(node: base_types.ComputationNode, node_input: base_types.ComputationInput):
     return node.func(
         *node_input.args,
         **toolz.assoc(node_input.kwargs, "state", node_input.state)
@@ -387,14 +387,15 @@ def _run_keeping_choices(apply, make_input):
     return gamla.juxt(
         gamla.compose_left(
             gamla.juxt(
-                toolz.first,
-                gamla.compose_left(
+                toolz.first,  # node
+                gamla.compose_left(  # computation input
                     gamla.juxt(
-                        gamla.compose_left(toolz.first, make_input),
+                        gamla.compose_left(toolz.first, make_input),  # unbound input
+                        # node signature
                         gamla.compose_left(toolz.first, gamla.attrgetter("signature")),
-                        toolz.second,
-                        gamla.compose_left(
-                            curried.nth(2),
+                        toolz.second,  # edges choice
+                        gamla.compose_left(  # dependencies
+                            curried.nth(2),  # values for edges choice
                             _maptuple(_maptuple(_choice_to_value)),
                         ),
                     ),
@@ -523,9 +524,8 @@ def to_callable(
 def _log_handled_exception(exception_type: Type[Exception]):
     _, exception, exception_traceback = sys.exc_info()
     filename, line_num, func_name, _ = traceback.extract_tb(exception_traceback)[-1]
+    reason = ""
     if str(exception):
         reason = f": {exception}"
-    else:
-        reason = ""
     code_location = f"{pathlib.Path(filename).name}:{line_num}"
     logging.debug(f"'{func_name.strip('_')}' {exception_type}@{code_location}{reason}")
