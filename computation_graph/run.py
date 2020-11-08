@@ -373,9 +373,7 @@ def _debug_trace(
 def _node_computation_trace(node_to_results: _NodeToResults) -> _ComputationTrace:
     return gamla.compose_left(
         gamla.juxt(
-            gamla.pair_right(
-                gamla.compose_left(node_to_results, dict.keys, toolz.first),
-            ),
+            gamla.pair_right(gamla.compose_left(node_to_results, toolz.first)),
             gamla.compose_left(node_to_results, dict.values, toolz.first, dict.items),
         ),
         gamla.star(toolz.cons),
@@ -426,10 +424,7 @@ def _process_layer_in_parallel(f):
 
 def _dag_layer_reduce(f: Callable):
     """Directed acyclic graph reduction."""
-    return gamla.compose_left(
-        _toposort_nodes,
-        gamla.reduce_curried(f, {}),
-    )
+    return gamla.compose_left(_toposort_nodes, gamla.reduce_curried(f, {}))
 
 
 def _per_values_option(f):
@@ -511,15 +506,8 @@ def to_callable(
                     else _apply,
                 ),
                 gamla.excepts(
-                    (
-                        *handled_exceptions,
-                        _NotCoherent,
-                    ),
-                    gamla.compose_left(
-                        type,
-                        _log_handled_exception,
-                        gamla.just(None),
-                    ),
+                    (*handled_exceptions, _NotCoherent),
+                    gamla.compose_left(type, _log_handled_exception, gamla.just(None)),
                 ),
                 _per_values_option,
                 _per_edge_option(_incoming_edge_options(edges)),
