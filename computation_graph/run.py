@@ -92,7 +92,7 @@ def _get_args(
 
 
 def _get_unary_computation_input(
-    node: base_types.ComputationNode,
+    kwargs,
     value: base_types.ComputationResult,
     unbound_signature: base_types.NodeSignature,
 ) -> Dict[Text, Any]:
@@ -108,11 +108,7 @@ def _get_unary_computation_input(
                 "got a single input function with more than 1 unbound arguments. cannot bind function",
             ),
         ),
-        gamla.curried_ternary(
-            gamla.len_equals(1),
-            gamla.identity,
-            lambda _: node.signature.kwargs,
-        ),
+        gamla.ternary(gamla.len_equals(1), gamla.identity, lambda _: kwargs),
         toolz.first,
         lambda first_kwarg: {first_kwarg: value.result},
     )
@@ -177,15 +173,9 @@ _NodeToResults = Callable[[base_types.ComputationNode], _ResultToDecisionsType]
 
 def _node_to_value_choices(node_to_results: _NodeToResults):
     return gamla.compose_left(
-        gamla.wrap_tuple,
-        gamla.pair_with(
-            gamla.excepts(
-                KeyError,
-                gamla.just(()),
-                gamla.compose_left(toolz.first, node_to_results, dict.items),
-            ),
-        ),
-        gamla.star(itertools.product),
+        gamla.pair_with(gamla.compose_left(node_to_results, dict.items)),
+        gamla.stack([toolz.identity, itertools.repeat]),
+        gamla.star(zip),
     )
 
 
@@ -238,7 +228,7 @@ def _get_computation_input(
         return base_types.ComputationInput(
             args=(),
             kwargs=_get_unary_computation_input(
-                node,
+                node.signature.kwargs,
                 toolz.first(toolz.first(results)),
                 unbound_signature,
             ),
@@ -266,13 +256,11 @@ def _wrap_in_result_if_needed(result):
 
 @gamla.curry
 def _get_node_unbound_input(
-    edges: base_types.GraphType,
     unbound_input: base_types.ComputationInput,
-    node: base_types.ComputationNode,
+    node_id: int,
 ) -> base_types.ComputationInput:
     if unbound_input.state is None:
         return unbound_input
-    node_id = graph.infer_node_id(edges, node)
     return dataclasses.replace(
         unbound_input,
         state=unbound_input.state[node_id] if node_id in unbound_input.state else None,
@@ -283,29 +271,23 @@ def _maptuple(f):
     return gamla.compose_left(gamla.map(f), tuple)
 
 
+def _mapdict(f):
+    return gamla.compose_left(gamla.map(f), dict)
+
+
+_choice_to_value = gamla.compose_left(toolz.first, toolz.first)
+
 _decisions_from_value_choices = gamla.compose_left(
     toolz.concat,
     gamla.bifurcate(
         gamla.compose_left(
-            _maptuple(gamla.compose_left(toolz.first, toolz.second)),
-            gamla.ternary(
-                gamla.identity,
-                curried.reduce(_merge_decision),
-                dict,
-            ),
+            gamla.map(gamla.compose_left(toolz.first, toolz.second)),
+            gamla.reduce(_merge_decision, gamla.frozendict()),
         ),
-        gamla.compose_left(
-            gamla.map(
-                gamla.juxt(toolz.second, gamla.compose_left(toolz.first, toolz.first)),
-            ),
-            dict,
-        ),
+        _mapdict(gamla.juxt(toolz.second, _choice_to_value)),
     ),
     toolz.merge,
 )
-
-
-_choice_to_value = _maptuple(gamla.compose_left(toolz.first, toolz.first))
 
 
 def _construct_computation_state(
@@ -314,14 +296,12 @@ def _construct_computation_state(
 ) -> Dict:
     first_result = toolz.first(results)
     return toolz.merge(
-        [
-            {sink_node: first_result.state},
-            gamla.pipe(
-                results,
-                gamla.itemgetter(first_result),
-                gamla.valmap(gamla.attrgetter("state")),
-            ),
-        ],
+        {sink_node: first_result.state},
+        gamla.pipe(
+            results,
+            gamla.itemgetter(first_result),
+            gamla.valmap(gamla.attrgetter("state")),
+        ),
     )
 
 
@@ -416,26 +396,25 @@ def _apply(node, node_input):
 
 @gamla.curry
 def _run_keeping_choices(apply, make_input):
-    return gamla.compose_left(
-        lambda node, incoming_edges, value_choices: (
-            (
-                node,
-                make_input(
-                    node,
-                    incoming_edges,
-                    _maptuple(_choice_to_value)(value_choices),
+    return gamla.juxt(
+        gamla.compose_left(
+            gamla.juxt(
+                toolz.first,
+                gamla.compose_left(
+                    gamla.stack(
+                        [
+                            toolz.identity,
+                            toolz.identity,
+                            _maptuple(_maptuple(_choice_to_value)),
+                        ],
+                    ),
+                    gamla.star(make_input),
                 ),
             ),
-            _decisions_from_value_choices(value_choices),
+            gamla.star(apply),
+            _wrap_in_result_if_needed,
         ),
-        gamla.juxt(
-            gamla.compose_left(
-                toolz.first,
-                gamla.star(apply),
-                _wrap_in_result_if_needed,
-            ),
-            toolz.second,
-        ),
+        gamla.compose_left(curried.nth(2), _decisions_from_value_choices),
     )
 
 
@@ -444,7 +423,7 @@ def _process_layer_in_parallel(f):
         lambda state, layer: ((state,), layer),
         gamla.star(itertools.product),
         gamla.map(f),
-        gamla.star(toolz.merge),
+        toolz.merge,
     )
 
 
@@ -458,23 +437,31 @@ def _dag_layer_reduce(f: Callable):
 
 def _per_values_option(f):
     return gamla.compose_left(
-        lambda accumulated_outputs, node, edge_option: (
-            (node,),
-            (edge_option,),
-            gamla.pipe(
-                edge_option,
-                _map_product(
-                    gamla.compose_left(
-                        _get_edge_sources,
-                        _map_product(
-                            _node_to_value_choices(accumulated_outputs.__getitem__),
+        gamla.star(
+            lambda accumulated_outputs, node, edge_option: (
+                (node,),
+                (edge_option,),
+                gamla.pipe(
+                    edge_option,
+                    _map_product(
+                        gamla.compose_left(
+                            _get_edge_sources,
+                            _map_product(
+                                _node_to_value_choices(
+                                    gamla.excepts(
+                                        KeyError,
+                                        gamla.just(gamla.frozendict()),
+                                        accumulated_outputs.__getitem__,
+                                    ),
+                                ),
+                            ),
                         ),
                     ),
                 ),
             ),
         ),
         gamla.star(itertools.product),
-        gamla.map(gamla.star(f)),
+        gamla.map(f),
         gamla.filter(gamla.identity),
         dict,
     )
@@ -483,21 +470,18 @@ def _per_values_option(f):
 @gamla.curry
 def _per_edge_option(get_edge_options, f):
     return gamla.compose_left(
-        gamla.star(
-            lambda accumulated_output, node: (
-                accumulated_output,
-                node,
-                get_edge_options(node),
-            ),
-        ),
         gamla.juxt(
             toolz.first,
             toolz.second,
             gamla.compose_left(
-                gamla.stack((itertools.repeat, itertools.repeat, gamla.identity)),
+                gamla.juxt(
+                    gamla.compose_left(toolz.first, itertools.repeat),
+                    gamla.compose_left(toolz.second, itertools.repeat),
+                    gamla.compose_left(toolz.second, get_edge_options),
+                ),
                 gamla.star(zip),
-                gamla.map(gamla.star(f)),
-                gamla.star(toolz.merge),
+                gamla.map(f),
+                toolz.merge,
             ),
         ),
         gamla.star(curried.assoc),
@@ -513,7 +497,7 @@ _is_graph_async = gamla.compose_left(
 
 
 def to_callable(
-    graph: base_types.GraphType,
+    edges: base_types.GraphType,
     handled_exceptions: FrozenSet[Type[Exception]],
 ) -> Callable:
     return gamla.compose_left(
@@ -521,11 +505,12 @@ def to_callable(
         gamla.pair_with(
             # Note: this is a higher order pipeline which builds a function, until the call to `apply`.
             gamla.compose_left(
-                _get_node_unbound_input(graph),
+                _get_node_unbound_input,
+                gamla.before(graph.infer_node_id(edges)),
                 _get_computation_input,
                 _run_keeping_choices(
                     gamla.compose(gamla.to_awaitable, _apply)
-                    if _is_graph_async(graph)
+                    if _is_graph_async(edges)
                     else _apply,
                 ),
                 gamla.excepts(
@@ -540,13 +525,13 @@ def to_callable(
                     ),
                 ),
                 _per_values_option,
-                _per_edge_option(_incoming_edge_options(graph)),
+                _per_edge_option(_incoming_edge_options(edges)),
                 _process_layer_in_parallel,
                 _dag_layer_reduce,
-                gamla.apply(graph),
-                gamla.to_awaitable if _is_graph_async(graph) else gamla.identity,
+                gamla.apply(edges),
+                gamla.to_awaitable if _is_graph_async(edges) else gamla.identity,
                 gamla.attrgetter("__getitem__"),
-                _construct_computation_result(graph),
+                _construct_computation_result(edges),
             ),
         ),
         gamla.star(
