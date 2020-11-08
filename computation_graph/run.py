@@ -203,7 +203,12 @@ def _get_computation_input(
 ) -> base_types.ComputationInput:
     bound_signature = base_types.NodeSignature(
         is_args=signature.is_args and any(edge.args for edge in incoming_edges),
-        kwargs=tuple(filter(None, map(_get_edge_key, incoming_edges))),
+        kwargs=gamla.pipe(
+            incoming_edges,
+            gamla.map(_get_edge_key),
+            gamla.remove(gamla.equals(None)),
+            tuple,
+        ),
     )
     unbound_signature = _signature_difference(signature, bound_signature)
     if (
