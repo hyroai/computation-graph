@@ -114,12 +114,11 @@ def _get_unary_computation_input(
     )
 
 
-def _get_kwargs(
-    edges_to_results,
+def _get_outer_kwargs(
     unbound_signature: base_types.NodeSignature,
     unbound_input: base_types.ComputationInput,
 ) -> Dict[Text, Any]:
-    kwargs = gamla.pipe(
+    return gamla.pipe(
         unbound_signature.kwargs,
         gamla.filter(lambda arg: arg != "state"),
         gamla.map(gamla.pair_right(unbound_input.kwargs.get)),
@@ -127,22 +126,20 @@ def _get_kwargs(
         dict,
     )
 
-    return gamla.pipe(
-        edges_to_results,
-        curried.keyfilter(_get_edge_key),
-        dict.items,
-        curried.groupby(gamla.compose_left(toolz.first, _get_edge_key)),
-        gamla.valmap(
-            gamla.compose_left(
-                toolz.first,
-                toolz.second,
-                toolz.first,
-                gamla.attrgetter("result"),
-            ),
+
+_get_inner_kwargs = gamla.compose_left(
+    curried.keyfilter(_get_edge_key),
+    dict.items,
+    curried.groupby(gamla.compose_left(toolz.first, _get_edge_key)),
+    gamla.valmap(
+        gamla.compose_left(
+            toolz.first,
+            toolz.second,
+            toolz.first,
+            gamla.attrgetter("result"),
         ),
-        lambda x: (kwargs, x),
-        toolz.merge,
-    )
+    ),
+)
 
 
 _DecisionsType = Dict[base_types.ComputationNode, base_types.ComputationResult]
@@ -243,7 +240,10 @@ def _get_computation_input(
             bound_signature,
             unbound_input_for_node,
         ),
-        kwargs=_get_kwargs(edges_to_results, unbound_signature, unbound_input_for_node),
+        kwargs=toolz.merge(
+            _get_outer_kwargs(unbound_signature, unbound_input_for_node),
+            _get_inner_kwargs(edges_to_results),
+        ),
         state=unbound_input_for_node.state,
     )
 
