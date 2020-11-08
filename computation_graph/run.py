@@ -71,7 +71,10 @@ _incoming_edge_options = gamla.compose_left(
 
 
 def _get_args(
-    edges_to_results,
+    edges_to_results: Dict[
+        base_types.ComputationEdge,
+        Tuple[base_types.ComputationResult, ...],
+    ],
     unbound_signature: base_types.NodeSignature,
     bound_signature: base_types.NodeSignature,
     unbound_input: base_types.ComputationInput,
