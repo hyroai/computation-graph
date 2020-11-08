@@ -427,29 +427,30 @@ def _dag_layer_reduce(f: Callable):
     return gamla.compose_left(_toposort_nodes, gamla.reduce_curried(f, {}))
 
 
+def _edge_to_value_options(accumulated_outputs):
+    return _map_product(
+        gamla.compose_left(
+            _get_edge_sources,
+            _map_product(
+                _node_to_value_choices(
+                    gamla.excepts(
+                        KeyError,
+                        gamla.just(gamla.frozendict()),
+                        accumulated_outputs.__getitem__,
+                    ),
+                ),
+            ),
+        ),
+    )
+
+
 def _per_values_option(f):
     return gamla.compose_left(
         gamla.star(
-            lambda accumulated_outputs, node, edge_option: (
+            lambda node, edge_option, edge_to_value_options: (
                 (node,),
                 (edge_option,),
-                gamla.pipe(
-                    edge_option,
-                    _map_product(
-                        gamla.compose_left(
-                            _get_edge_sources,
-                            _map_product(
-                                _node_to_value_choices(
-                                    gamla.excepts(
-                                        KeyError,
-                                        gamla.just(gamla.frozendict()),
-                                        accumulated_outputs.__getitem__,
-                                    ),
-                                ),
-                            ),
-                        ),
-                    ),
-                ),
+                edge_to_value_options(edge_option),
             ),
         ),
         gamla.star(itertools.product),
@@ -467,9 +468,13 @@ def _per_edge_option(get_edge_options, f):
             toolz.second,
             gamla.compose_left(
                 gamla.juxt(
-                    gamla.compose_left(toolz.first, itertools.repeat),
                     gamla.compose_left(toolz.second, itertools.repeat),
                     gamla.compose_left(toolz.second, get_edge_options),
+                    gamla.compose_left(
+                        toolz.first,
+                        _edge_to_value_options,
+                        itertools.repeat,
+                    ),
                 ),
                 gamla.star(zip),
                 gamla.map(f),
