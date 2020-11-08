@@ -78,7 +78,6 @@ def _get_args(
 ) -> Tuple[base_types.ComputationResult, ...]:
     if unbound_signature.is_args:
         return unbound_input.args
-
     if bound_signature.is_args:
         return gamla.pipe(
             edges_to_results,
@@ -87,7 +86,6 @@ def _get_args(
             toolz.first,
             _maptuple(gamla.attrgetter("result")),
         )
-
     return ()
 
 
