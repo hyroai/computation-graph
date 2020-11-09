@@ -180,10 +180,6 @@ def _node_to_value_choices(node_to_results: _NodeToResults):
     )
 
 
-def _mapduct(f):
-    return gamla.compose_left(gamla.map(f), gamla.star(itertools.product))
-
-
 def _signature_difference(
     sig_a: base_types.NodeSignature,
     sig_b: base_types.NodeSignature,
@@ -266,13 +262,10 @@ def _get_node_unbound_input(
     )
 
 
-def _maptuple(f):
-    return gamla.compose_left(gamla.map(f), tuple)
-
-
-def _mapdict(f):
-    return gamla.compose_left(gamla.map(f), dict)
-
+_juxtduct = gamla.compose_left(gamla.juxt, gamla.after(gamla.star(itertools.product)))
+_mapdict = gamla.compose_left(gamla.map, gamla.after(dict))
+_mapduct = gamla.compose_left(gamla.map, gamla.after(gamla.star(itertools.product)))
+_maptuple = gamla.compose_left(gamla.map, gamla.after(tuple))
 
 _choice_to_value = gamla.compose_left(toolz.first, toolz.first)
 
@@ -444,9 +437,6 @@ def _edge_to_value_options(accumulated_outputs):
             ),
         ),
     )
-
-
-_juxtduct = gamla.compose_left(gamla.juxt, gamla.after(gamla.star(itertools.product)))
 
 
 @gamla.curry
