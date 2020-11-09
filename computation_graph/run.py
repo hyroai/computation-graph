@@ -5,7 +5,7 @@ import logging
 import pathlib
 import sys
 import traceback
-from typing import Any, Callable, Dict, FrozenSet, Set, Text, Tuple, Type
+from typing import Any, Callable, Dict, FrozenSet, Iterable, Set, Text, Tuple, Type
 
 import gamla
 import toolz
@@ -363,12 +363,12 @@ def _debug_trace(
 
 
 def _node_computation_trace(node_to_results: _NodeToResults) -> _ComputationTrace:
-    return gamla.compose_left(
-        gamla.juxt(
+    return _compose_many_to_one(
+        [
             gamla.pair_right(gamla.compose_left(node_to_results, toolz.first)),
             gamla.compose_left(node_to_results, dict.values, toolz.first, dict.items),
-        ),
-        gamla.star(toolz.cons),
+        ],
+        toolz.cons,
     )
 
 
@@ -381,27 +381,41 @@ def _apply(node: base_types.ComputationNode, node_input: base_types.ComputationI
     )
 
 
+def _compose_many_to_one(incoming: Iterable[Callable], f: Callable):
+    return gamla.compose_left(gamla.juxt(*incoming), gamla.star(f))
+
+
 @gamla.curry
-def _run_keeping_choices(apply, make_input):
+def _run_keeping_choices(
+    apply,
+    node_to_external_input: Callable[
+        [base_types.ComputationNode],
+        base_types.ComputationInput,
+    ],
+):
     return gamla.juxt(
         gamla.compose_left(
-            gamla.juxt(
-                toolz.first,  # node
-                gamla.compose_left(  # computation input
-                    gamla.juxt(
-                        gamla.compose_left(toolz.first, make_input),  # unbound input
-                        # node signature
-                        gamla.compose_left(toolz.first, gamla.attrgetter("signature")),
-                        toolz.second,  # edges choice
-                        gamla.compose_left(  # dependencies
-                            curried.nth(2),  # values for edges choice
-                            _maptuple(_maptuple(_choice_to_value)),
-                        ),
+            _compose_many_to_one(
+                [
+                    toolz.first,  # node
+                    _compose_many_to_one(  # computation input
+                        [
+                            gamla.compose_left(toolz.first, node_to_external_input),
+                            gamla.compose_left(
+                                toolz.first,
+                                gamla.attrgetter("signature"),
+                            ),
+                            toolz.second,  # edges choice
+                            gamla.compose_left(  # dependencies
+                                curried.nth(2),  # values for edges choice
+                                _maptuple(_maptuple(_choice_to_value)),
+                            ),
+                        ],
+                        _get_computation_input,
                     ),
-                    gamla.star(_get_computation_input),
-                ),
+                ],
+                apply,
             ),
-            gamla.star(apply),
             _wrap_in_result_if_needed,
         ),
         gamla.compose_left(curried.nth(2), _decisions_from_value_choices),
@@ -441,8 +455,8 @@ def _edge_to_value_options(accumulated_outputs):
 
 @gamla.curry
 def _process_node(get_edge_options, f):
-    return gamla.compose_left(
-        gamla.juxt(
+    return _compose_many_to_one(
+        [
             toolz.first,  # accumulated
             toolz.second,  # node
             gamla.compose_left(  # results
@@ -467,8 +481,8 @@ def _process_node(get_edge_options, f):
                 gamla.filter(gamla.identity),
                 dict,
             ),
-        ),
-        gamla.star(curried.assoc),
+        ],
+        curried.assoc,
     )
 
 
