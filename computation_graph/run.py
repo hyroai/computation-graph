@@ -61,7 +61,7 @@ _incoming_edge_options = gamla.compose_left(
     gamla.after(
         gamla.compose_left(
             curried.groupby(_get_edge_key),
-            gamla.valmap(curried.sorted(key=lambda edge: edge.priority)),
+            gamla.valmap(curried.sorted(key=gamla.attrgetter("priority"))),
             dict.values,
             gamla.star(itertools.product),
             gamla.map(tuple),
@@ -99,8 +99,11 @@ def _get_unary_computation_input(
 ) -> Dict[Text, Any]:
     return gamla.pipe(
         unbound_signature.kwargs,
-        gamla.filter(
-            lambda arg: arg not in unbound_signature.optional_kwargs and arg != "state",
+        gamla.remove(
+            gamla.anyjuxt(
+                gamla.contains(unbound_signature.optional_kwargs),
+                gamla.equals("state"),
+            ),
         ),
         tuple,
         gamla.check(
@@ -121,9 +124,9 @@ def _get_outer_kwargs(
 ) -> Dict[Text, Any]:
     return gamla.pipe(
         unbound_signature.kwargs,
-        gamla.filter(lambda arg: arg != "state"),
+        gamla.remove(gamla.equals("state")),
         gamla.map(gamla.pair_right(unbound_input.kwargs.get)),
-        gamla.filter(gamla.star(lambda _, value: value is not None)),
+        gamla.remove(gamla.compose_left(toolz.second, gamla.equals(None))),
         dict,
     )
 
@@ -481,8 +484,8 @@ def _process_node(get_edge_options, f):
 
 _is_graph_async = gamla.compose_left(
     curried.mapcat(lambda edge: (edge.source, *edge.args)),
-    gamla.filter(gamla.identity),
-    gamla.map(lambda node: node.func),
+    gamla.remove(gamla.equals(None)),
+    gamla.map(gamla.attrgetter("func")),
     gamla.anymap(asyncio.iscoroutinefunction),
 )
 
