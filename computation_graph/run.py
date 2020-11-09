@@ -490,20 +490,22 @@ _is_graph_async = gamla.compose_left(
 def _make_runner(edges, handled_exceptions):
     return gamla.compose_left(
         # Higher order pipeline that constructs a graph runner.
-        _get_node_unbound_input,
-        gamla.before(graph.infer_node_id(edges)),
-        _run_keeping_choices(
-            gamla.compose(gamla.to_awaitable, _apply)
-            if _is_graph_async(edges)
-            else _apply,
+        gamla.compose(
+            _dag_layer_reduce,
+            _process_layer_in_parallel,
+            _process_node(_incoming_edge_options(edges)),
+            gamla.excepts(
+                (*handled_exceptions, _NotCoherent),
+                gamla.compose_left(type, _log_handled_exception, gamla.just(None)),
+            ),
+            _run_keeping_choices(
+                gamla.compose(gamla.to_awaitable, _apply)
+                if _is_graph_async(edges)
+                else _apply,
+            ),
+            gamla.before(graph.infer_node_id(edges)),
+            _get_node_unbound_input,
         ),
-        gamla.excepts(
-            (*handled_exceptions, _NotCoherent),
-            gamla.compose_left(type, _log_handled_exception, gamla.just(None)),
-        ),
-        _process_node(_incoming_edge_options(edges)),
-        _process_layer_in_parallel,
-        _dag_layer_reduce,
         # At this point we move to a regular pipeline of values.
         gamla.apply(edges),
         gamla.to_awaitable if _is_graph_async(edges) else gamla.identity,
