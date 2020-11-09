@@ -487,7 +487,7 @@ _is_graph_async = gamla.compose_left(
 )
 
 
-def _make_runner(edges, handled_exceptions):
+def _make_runner(async_decoration, edges, handled_exceptions):
     return gamla.compose_left(
         # Higher order pipeline that constructs a graph runner.
         gamla.compose(
@@ -498,17 +498,12 @@ def _make_runner(edges, handled_exceptions):
                 (*handled_exceptions, _NotCoherent),
                 gamla.compose_left(type, _log_handled_exception, gamla.just(None)),
             ),
-            _run_keeping_choices(
-                gamla.compose(gamla.to_awaitable, _apply)
-                if _is_graph_async(edges)
-                else _apply,
-            ),
+            _run_keeping_choices(async_decoration(_apply)),
             gamla.before(graph.infer_node_id(edges)),
             _get_node_unbound_input,
         ),
         # At this point we move to a regular pipeline of values.
-        gamla.apply(edges),
-        gamla.to_awaitable if _is_graph_async(edges) else gamla.identity,
+        async_decoration(gamla.apply(edges)),
         gamla.attrgetter("__getitem__"),
         _construct_computation_result(edges),
     )
@@ -520,7 +515,15 @@ def to_callable(
 ) -> Callable:
     return gamla.compose_left(
         _make_outer_computation_input,
-        gamla.pair_with(_make_runner(edges, handled_exceptions)),
+        gamla.pair_with(
+            _make_runner(
+                gamla.after(gamla.to_awaitable)
+                if _is_graph_async(edges)
+                else gamla.identity,
+                edges,
+                handled_exceptions,
+            ),
+        ),
         gamla.star(
             lambda result_and_state, computation_input: _merge_with_previous_state(
                 computation_input.state, *result_and_state
