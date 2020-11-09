@@ -250,7 +250,7 @@ def _wrap_in_result_if_needed(result):
 
 
 @gamla.curry
-def _get_node_unbound_input(
+def _inject_state(
     unbound_input: base_types.ComputationInput,
     node_id: int,
 ) -> base_types.ComputationInput:
@@ -493,7 +493,7 @@ def _make_runner(async_decoration, edges, handled_exceptions):
             ),
             _run_keeping_choices(async_decoration(_apply)),
             gamla.before(graph.infer_node_id(edges)),
-            _get_node_unbound_input,
+            _inject_state,
         ),
         # At this point we move to a regular pipeline of values.
         async_decoration(gamla.apply(edges)),
