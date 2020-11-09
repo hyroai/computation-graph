@@ -12,17 +12,14 @@ from computation_graph import base_types
 def _get_edge_label(edge: base_types.ComputationEdge):
     if edge.key in (None, "args"):
         return ""
-
     if edge.key == "first_input":
         return str(edge.priority)
-
     return edge.key or ""
 
 
 def _get_node_shape(node: base_types.ComputationNode):
     if node.name == "first":
         return "triangle"
-
     return "ellipse"
 
 
@@ -36,31 +33,33 @@ def _add_computation_node(
         label=saxutils.quoteattr(str(node)),
         shape=_get_node_shape(node),
     )
-
     if node.is_stateful:
         pgv_graph.add_edge(node_id, node_id)
+
+
+def _handle_edge(pgv_graph, edge):
+    _add_computation_node(pgv_graph, edge.destination)
+    if edge.source:
+        _add_computation_node(pgv_graph, edge.source)
+        pgv_graph.add_edge(
+            hash(edge.source),
+            hash(edge.destination),
+            label=_get_edge_label(edge),
+        )
+    else:
+        for source in edge.args:
+            _add_computation_node(pgv_graph, source)
+            pgv_graph.add_edge(
+                hash(source),
+                hash(edge.destination),
+                label=_get_edge_label(edge),
+            )
 
 
 def _computation_graph_to_graphviz(edges: base_types.GraphType) -> pgv.AGraph:
     pgv_graph = pgv.AGraph(directed=True)
     for edge in edges:
-        _add_computation_node(pgv_graph, edge.destination)
-        if edge.source:
-            _add_computation_node(pgv_graph, edge.source)
-            pgv_graph.add_edge(
-                hash(edge.source),
-                hash(edge.destination),
-                label=_get_edge_label(edge),
-            )
-        else:
-            for source in edge.args:
-                _add_computation_node(pgv_graph, source)
-                pgv_graph.add_edge(
-                    hash(source),
-                    hash(edge.destination),
-                    label=_get_edge_label(edge),
-                )
-
+        _handle_edge(pgv_graph, edge)
     return pgv_graph
 
 
