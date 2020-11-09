@@ -487,35 +487,38 @@ _is_graph_async = gamla.compose_left(
 )
 
 
+def _make_runner(edges, handled_exceptions):
+    # Higher order pipeline that constructs a graph runner.
+    return gamla.compose_left(
+        _get_node_unbound_input,
+        gamla.before(graph.infer_node_id(edges)),
+        _run_keeping_choices(
+            gamla.compose(gamla.to_awaitable, _apply)
+            if _is_graph_async(edges)
+            else _apply,
+        ),
+        gamla.excepts(
+            (*handled_exceptions, _NotCoherent),
+            gamla.compose_left(type, _log_handled_exception, gamla.just(None)),
+        ),
+        _process_node(_incoming_edge_options(edges)),
+        _process_layer_in_parallel,
+        _dag_layer_reduce,
+        # At this point we have the runer funct
+        gamla.apply(edges),
+        gamla.to_awaitable if _is_graph_async(edges) else gamla.identity,
+        gamla.attrgetter("__getitem__"),
+        _construct_computation_result(edges),
+    )
+
+
 def to_callable(
     edges: base_types.GraphType,
     handled_exceptions: FrozenSet[Type[Exception]],
 ) -> Callable:
     return gamla.compose_left(
         _make_outer_computation_input,
-        gamla.pair_with(
-            # Note: this is a higher order pipeline which builds a function, until the call to `apply`.
-            gamla.compose_left(
-                _get_node_unbound_input,
-                gamla.before(graph.infer_node_id(edges)),
-                _run_keeping_choices(
-                    gamla.compose(gamla.to_awaitable, _apply)
-                    if _is_graph_async(edges)
-                    else _apply,
-                ),
-                gamla.excepts(
-                    (*handled_exceptions, _NotCoherent),
-                    gamla.compose_left(type, _log_handled_exception, gamla.just(None)),
-                ),
-                _process_node(_incoming_edge_options(edges)),
-                _process_layer_in_parallel,
-                _dag_layer_reduce,
-                gamla.apply(edges),
-                gamla.to_awaitable if _is_graph_async(edges) else gamla.identity,
-                gamla.attrgetter("__getitem__"),
-                _construct_computation_result(edges),
-            ),
-        ),
+        gamla.pair_with(_make_runner(edges, handled_exceptions)),
         gamla.star(
             lambda result_and_state, computation_input: _merge_with_previous_state(
                 computation_input.state, *result_and_state
