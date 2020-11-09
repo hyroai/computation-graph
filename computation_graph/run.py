@@ -387,36 +387,36 @@ def _compose_many_to_one(incoming: Iterable[Callable], f: Callable):
 
 @gamla.curry
 def _run_keeping_choices(
-    apply,
+    run_node_for_input: Callable[
+        [base_types.ComputationNode, base_types.ComputationInput],
+        base_types.ComputationResult,
+    ],
     node_to_external_input: Callable[
         [base_types.ComputationNode],
         base_types.ComputationInput,
     ],
 ):
     return gamla.juxt(
-        gamla.compose_left(
-            _compose_many_to_one(
-                [
-                    toolz.first,  # node
-                    _compose_many_to_one(  # computation input
-                        [
-                            gamla.compose_left(toolz.first, node_to_external_input),
-                            gamla.compose_left(
-                                toolz.first,
-                                gamla.attrgetter("signature"),
-                            ),
-                            toolz.second,  # edges choice
-                            gamla.compose_left(  # dependencies
-                                curried.nth(2),  # values for edges choice
-                                _maptuple(_maptuple(_choice_to_value)),
-                            ),
-                        ],
-                        _get_computation_input,
-                    ),
-                ],
-                apply,
-            ),
-            _wrap_in_result_if_needed,
+        _compose_many_to_one(
+            [
+                toolz.first,  # node
+                _compose_many_to_one(  # computation input
+                    [
+                        gamla.compose_left(toolz.first, node_to_external_input),
+                        gamla.compose_left(
+                            toolz.first,
+                            gamla.attrgetter("signature"),
+                        ),
+                        toolz.second,  # edges choice
+                        gamla.compose_left(  # dependencies
+                            curried.nth(2),  # values for edges choice
+                            _maptuple(_maptuple(_choice_to_value)),
+                        ),
+                    ],
+                    _get_computation_input,
+                ),
+            ],
+            run_node_for_input,
         ),
         gamla.compose_left(curried.nth(2), _decisions_from_value_choices),
     )
@@ -504,7 +504,9 @@ def _make_runner(async_decoration, edges, handled_exceptions):
                 (*handled_exceptions, _NotCoherent),
                 gamla.compose_left(type, _log_handled_exception, gamla.just(None)),
             ),
-            _run_keeping_choices(async_decoration(_apply)),
+            _run_keeping_choices(
+                gamla.compose_left(async_decoration(_apply), _wrap_in_result_if_needed),
+            ),
             gamla.before(graph.infer_node_id(edges)),
             _inject_state,
         ),
