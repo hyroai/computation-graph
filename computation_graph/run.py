@@ -457,10 +457,9 @@ def _edge_to_value_options(accumulated_outputs):
 def _process_node(get_edge_options, f):
     return _compose_many_to_one(
         [
-            toolz.first,  # accumulated
+            toolz.first,  # accumulated results
             toolz.second,  # node
-            gamla.compose_left(  # results
-                # TODO(uri): Merge these two chunks by making `_get_computation_input` not require edges.
+            gamla.compose_left(  # new results
                 _juxtduct(
                     gamla.compose_left(toolz.second, gamla.wrap_tuple),
                     gamla.compose_left(toolz.second, get_edge_options),
