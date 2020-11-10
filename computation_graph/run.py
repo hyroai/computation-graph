@@ -36,7 +36,7 @@ def _get_edge_sources(edge: base_types.ComputationEdge):
 _toposort_nodes = gamla.compose_left(
     gamla.groupby_many(_get_edge_sources),
     gamla.valmap(
-        gamla.compose_left(gamla.map(lambda edge: edge.destination), set),
+        gamla.compose_left(gamla.map(gamla.attrgetter("destination")), set),
     ),
     _transpose_graph,
     toposort.toposort,
@@ -93,7 +93,7 @@ def _get_args(
 
 
 def _get_unary_computation_input(
-    kwargs,
+    kwargs: Tuple[Text, ...],
     value: base_types.ComputationResult,
     unbound_signature: base_types.NodeSignature,
 ) -> Dict[Text, Any]:
@@ -194,7 +194,6 @@ def _signature_difference(
     )
 
 
-@gamla.curry
 def _get_computation_input(
     unbound_input: base_types.ComputationInput,
     signature: base_types.NodeSignature,
