@@ -110,7 +110,7 @@ def _get_unary_computation_input(
                 "got a single input function with more than 1 unbound arguments. cannot bind function",
             ),
         ),
-        gamla.ternary(gamla.len_equals(1), gamla.identity, lambda _: kwargs),
+        gamla.ternary(gamla.len_equals(1), gamla.identity, gamla.just(kwargs)),
         toolz.first,
         lambda first_kwarg: {first_kwarg: value.result},
     )
