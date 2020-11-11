@@ -310,7 +310,7 @@ def _merge_with_previous_state(
 def _construct_computation_result(
     edges: base_types.GraphType,
     result_to_dependencies: _ResultToDependencies,
-):
+) -> Tuple[base_types.ComputationResult, Dict]:
     return gamla.pipe(
         edges,
         graph.infer_graph_sink,
