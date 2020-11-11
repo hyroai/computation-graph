@@ -38,7 +38,7 @@ GraphType = Tuple[ComputationEdge, ...]
 @dataclasses.dataclass(frozen=True)
 class ComputationNode:
     name: Text
-    func: Optional[Callable]
+    func: Callable
     signature: NodeSignature
     is_stateful: bool
 
