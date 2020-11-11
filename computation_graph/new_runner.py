@@ -53,6 +53,8 @@ _index_facts = gamla.juxt(
     gamla.groupby_many(lambda fact: [fact.node]),
     gamla.groupby_many(lambda fact: [fact.interval.start]),
     gamla.groupby_many(lambda fact: [(fact.node, fact.interval.start)]),
+    # Fact to dependencies.
+    gamla.compose_left(gamla.groupby_many(gamla.attrgetter("dependencies")), gamla.reverse_graph)
 )
 
 
