@@ -5,7 +5,7 @@ A functional composition framework that supports:
 1. State - functions which retain state for their next turn of action.
 2. Ambiguity - non deterministic composition with priorities.
 3. Injection of compositions into long pipelines (deep dependency injection).
-4. Non cancerous asyncio support.
+4. Non cancerous `asyncio` support.
 
 `pip install computation-graph`
 
