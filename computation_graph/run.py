@@ -82,7 +82,7 @@ def _get_args(
     if bound_signature.is_args:
         return gamla.pipe(
             edges_to_results,
-            gamla.keyfilter(gamla.attrgetter("args")),
+            curried.keyfilter(gamla.attrgetter("args")),
             dict.values,
             toolz.first,
             _maptuple(gamla.attrgetter("result")),
@@ -130,7 +130,7 @@ def _get_outer_kwargs(
 
 
 _get_inner_kwargs = gamla.compose_left(
-    gamla.keyfilter(_get_edge_key),
+    curried.keyfilter(_get_edge_key),
     dict.items,
     curried.groupby(gamla.compose_left(toolz.first, _get_edge_key)),
     gamla.valmap(
