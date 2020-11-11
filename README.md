@@ -20,9 +20,8 @@ sudo apt update && apt install graphviz
 pip install pygraphviz
 ```
 
-Debugging is possible by setting
-`config.DEBUG_SAVE_COMPUTATION_TRACE = True` or environment variable CG_DEBUG_SAVE_COMPUTATION_TRACE to true/t/1.
-This will save a file, on each graph execution, named `computation.dot` to current working directory.
+Debugging is possible by replacing `to_callable` with `run.to_callable_with_side_effect` with `debug.debugger(filename)` as the first argument.
+This will save a file on each graph execution to current working directory.
 
 You can use this file in a graph viewer like [gephi](https://gephi.org/).
 Nodes colored red are part of the 'winning' computation path.

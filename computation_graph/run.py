@@ -5,16 +5,14 @@ import logging
 import pathlib
 import sys
 import traceback
-from typing import Any, Callable, Dict, FrozenSet, Iterable, Set, Text, Tuple, Type
+from typing import Any, Callable, Dict, FrozenSet, Set, Text, Tuple, Type
 
 import gamla
 import toolz
 import toposort
 from toolz import curried
 
-from computation_graph import base_types, config, graph, visualization
-
-COMPUTATION_TRACE_DOT_FILENAME = "computation.dot"
+from computation_graph import base_types, graph
 
 _get_edge_key = gamla.attrgetter("key")
 
@@ -169,10 +167,10 @@ _merge_decision = curried.merge_with(
     ),
 )
 
-_NodeToResults = Callable[[base_types.ComputationNode], _ResultToDecisionsType]
+NodeToResults = Callable[[base_types.ComputationNode], _ResultToDecisionsType]
 
 
-def _node_to_value_choices(node_to_results: _NodeToResults):
+def _node_to_value_choices(node_to_results: NodeToResults):
     return gamla.compose_left(
         gamla.pair_with(gamla.compose_left(node_to_results, dict.items)),
         gamla.stack([toolz.identity, itertools.repeat]),
@@ -316,9 +314,6 @@ def _construct_computation_result(
     return gamla.pipe(
         edges,
         graph.infer_graph_sink,
-        _debug_trace(edges, _node_computation_trace(result_to_dependencies))
-        if config.DEBUG_SAVE_COMPUTATION_TRACE
-        else gamla.identity,
         gamla.pair_with(
             gamla.translate_exception(
                 gamla.compose_left(result_to_dependencies, toolz.first),
@@ -340,37 +335,6 @@ def _construct_computation_result(
     )
 
 
-_ComputationTrace = Callable[
-    [base_types.ComputationNode],
-    Tuple[Tuple[base_types.ComputationNode, base_types.ComputationResult]],
-]
-
-
-def _debug_trace(
-    edges: base_types.GraphType,
-    computation_trace: _ComputationTrace,
-) -> Callable[[base_types.ComputationNode], Any]:
-    return curried.do(
-        gamla.compose_left(
-            computation_trace,
-            gamla.pair_with(gamla.just(edges)),
-            visualization.serialize_computation_trace(
-                COMPUTATION_TRACE_DOT_FILENAME,
-            ),
-        ),
-    )
-
-
-def _node_computation_trace(node_to_results: _NodeToResults) -> _ComputationTrace:
-    return _compose_many_to_one(
-        [
-            gamla.pair_right(gamla.compose_left(node_to_results, toolz.first)),
-            gamla.compose_left(node_to_results, dict.values, toolz.first, dict.items),
-        ],
-        toolz.cons,
-    )
-
-
 def _apply(node: base_types.ComputationNode, node_input: base_types.ComputationInput):
     return node.func(
         *node_input.args,
@@ -378,10 +342,6 @@ def _apply(node: base_types.ComputationNode, node_input: base_types.ComputationI
         if node.is_stateful
         else node_input.kwargs,
     )
-
-
-def _compose_many_to_one(incoming: Iterable[Callable], f: Callable):
-    return gamla.compose_left(gamla.juxt(*incoming), gamla.star(f))
 
 
 @gamla.curry
@@ -396,10 +356,10 @@ def _run_keeping_choices(
     ],
 ):
     return gamla.juxt(
-        _compose_many_to_one(
+        gamla.compose_many_to_one(
             [
                 toolz.first,  # node
-                _compose_many_to_one(  # computation input
+                gamla.compose_many_to_one(  # computation input
                     [
                         gamla.compose_left(toolz.first, node_to_external_input),
                         gamla.compose_left(
@@ -454,7 +414,7 @@ def _edge_to_value_options(accumulated_outputs):
 
 @gamla.curry
 def _process_node(get_edge_options, f):
-    return _compose_many_to_one(
+    return gamla.compose_many_to_one(
         [
             toolz.first,  # accumulated results
             toolz.second,  # node
@@ -492,7 +452,7 @@ _is_graph_async = gamla.compose_left(
 )
 
 
-def _make_runner(async_decoration, edges, handled_exceptions):
+def _make_runner(side_effect, async_decoration, edges, handled_exceptions):
     return gamla.compose_left(
         # Higher order pipeline that constructs a graph runner.
         gamla.compose(
@@ -512,11 +472,13 @@ def _make_runner(async_decoration, edges, handled_exceptions):
         # At this point we move to a regular pipeline of values.
         async_decoration(gamla.apply(edges)),
         gamla.attrgetter("__getitem__"),
+        curried.do(side_effect),
         _construct_computation_result(edges),
     )
 
 
-def to_callable(
+def to_callable_with_side_effect(
+    side_effect: Callable,
     edges: base_types.GraphType,
     handled_exceptions: FrozenSet[Type[Exception]],
 ) -> Callable:
@@ -524,6 +486,7 @@ def to_callable(
         _make_outer_computation_input,
         gamla.pair_with(
             _make_runner(
+                side_effect(edges),
                 gamla.after(gamla.to_awaitable)
                 if _is_graph_async(edges)
                 else gamla.identity,
@@ -537,6 +500,9 @@ def to_callable(
             ),
         ),
     )
+
+
+to_callable = gamla.curry(to_callable_with_side_effect)(gamla.just(gamla.just(None)))
 
 
 def _log_handled_exception(exception_type: Type[Exception]):
