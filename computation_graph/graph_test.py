@@ -1,14 +1,11 @@
 import asyncio
 import functools
 import json
-import os
-import pathlib
 
 import gamla
-import pygraphviz as pgv
 import pytest
 
-from computation_graph import base_types, composers, config, graph, run
+from computation_graph import base_types, composers, graph, run
 
 pytestmark = pytest.mark.asyncio
 
@@ -551,34 +548,6 @@ def test_first_after_compose():
     )
 
     result = cg(arg1="arg1")
-    assert result.result == "node1(node2(arg1))"
-
-
-def test_computation_trace(tmp_path: pathlib.Path):
-    inner_edges = composers.make_compose(node1, node2)
-    cg = run.to_callable(
-        composers.make_first(unactionable_node, inner_edges, node1),
-        frozenset([GraphTestException]),
-    )
-
-    config.DEBUG_SAVE_COMPUTATION_TRACE = True
-
-    cwd = os.getcwd()
-    os.chdir(tmp_path)
-    result = cg(arg1="arg1")
-    assert (tmp_path / run.COMPUTATION_TRACE_DOT_FILENAME).exists()
-    g = pgv.AGraph()
-    g.read(str(tmp_path / run.COMPUTATION_TRACE_DOT_FILENAME))
-
-    assert g.get_node(id(node1)).attr["result"] == "node1(node2(arg1))"
-    assert g.get_node(id(node1)).attr["color"] == "red"
-    assert g.get_node(id(node2)).attr["result"] == "node2(arg1)"
-    assert g.get_node(id(node2)).attr["color"] == "red"
-
-    assert not g.get_node(id(unactionable_node)).attr["color"]
-    os.chdir(cwd)
-
-    config.DEBUG_SAVE_COMPUTATION_TRACE = False
     assert result.result == "node1(node2(arg1))"
 
 

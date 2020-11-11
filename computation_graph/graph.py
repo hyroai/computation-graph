@@ -4,7 +4,6 @@ from typing import Callable, FrozenSet, Optional, Text, Tuple, Union
 
 import gamla
 import toolz
-from toolz import curried
 
 from computation_graph import base_types
 
@@ -12,7 +11,7 @@ from computation_graph import base_types
 def get_all_nodes(
     edges: base_types.GraphType,
 ) -> FrozenSet[base_types.ComputationNode]:
-    return gamla.pipe(edges, curried.mapcat(get_edge_nodes), toolz.unique, frozenset)
+    return gamla.pipe(edges, gamla.mapcat(get_edge_nodes), toolz.unique, frozenset)
 
 
 def _is_reducer_type(node: Callable) -> bool:
@@ -53,7 +52,7 @@ def _infer_callable_name(func: Callable) -> Text:
 
 get_edge_nodes = functools.lru_cache(maxsize=1024)(
     gamla.ternary(
-        lambda edge: edge.args,
+        gamla.attrgetter("args"),
         lambda edge: edge.args + (edge.destination,),
         lambda edge: (edge.source, edge.destination),
     ),
@@ -61,8 +60,8 @@ get_edge_nodes = functools.lru_cache(maxsize=1024)(
 
 
 _edges_to_node_id_map = gamla.compose_left(
-    curried.mapcat(get_edge_nodes),
-    curried.unique,
+    gamla.mapcat(get_edge_nodes),
+    gamla.unique,
     enumerate,
     gamla.map(reversed),
     dict,

@@ -41,7 +41,7 @@ def _get_unbound_signature_for_single_node(
 
     bound_kwargs: Tuple[Text, ...] = gamla.pipe(
         incoming_edges,
-        gamla.map(lambda edge: edge.key),
+        gamla.map(gamla.attrgetter("key")),
         gamla.filter(gamla.identity),
     )
 
@@ -77,8 +77,8 @@ def make_and(funcs, merge_fn: Callable) -> base_types.GraphType:
         gamla.map(_callable_or_graph_type_to_node_or_graph_type),
         tuple,
         gamla.juxtcat(
-            curried.mapcat(_get_edges_from_node_or_graph),
-            curried.compose_left(
+            gamla.mapcat(_get_edges_from_node_or_graph),
+            gamla.compose_left(
                 gamla.map(_infer_sink),
                 tuple,
                 lambda nodes: (
@@ -110,7 +110,7 @@ def make_or(funcs, merge_fn: Callable) -> base_types.GraphType:
         gamla.map(make_optional(default_value=_ComputationError())),
         tuple,
         gamla.juxtcat(
-            curried.concat,
+            gamla.concat,
             gamla.compose_left(
                 gamla.map(_infer_sink),
                 tuple,
@@ -165,7 +165,7 @@ def make_first(*funcs: _ComposersInputType) -> base_types.GraphType:
         funcs,
         gamla.map(_callable_or_graph_type_to_node_or_graph_type),
         enumerate,
-        curried.mapcat(
+        gamla.mapcat(
             gamla.star(
                 lambda priority, node: _add_first_edge(
                     destination=first_node,
@@ -202,8 +202,8 @@ def _infer_composition_edges(
     return (
         gamla.pipe(
             destination,
-            curried.mapcat(graph.get_edge_nodes),
-            curried.unique,
+            gamla.mapcat(graph.get_edge_nodes),
+            gamla.unique,
             gamla.filter(
                 gamla.compose_left(
                     _get_unbound_signature_for_single_node(edges=destination),
@@ -243,6 +243,6 @@ def make_compose(
         reversed,
         gamla.map(_callable_or_graph_type_to_node_or_graph_type),
         curried.sliding_window(2),
-        curried.mapcat(gamla.star(_infer_composition_edges(key))),
+        gamla.mapcat(gamla.star(_infer_composition_edges(key))),
         tuple,
     )
