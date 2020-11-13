@@ -50,17 +50,12 @@ def _is_coherent(
     return True
 
 
-@gamla.curry
-def _is_already_done(facts, task):
-    return gamla.anymap(
-        gamla.alljuxt(
-            gamla.compose_left(gamla.attrgetter("inputs"), gamla.equals(task.values)),
-            gamla.compose_left(
-                gamla.attrgetter("node"),
-                gamla.equals(task.node),
-            ),
-        ),
-    )(facts)
+_is_already_done = gamla.compose_left(
+    gamla.map(gamla.juxt(gamla.attrgetter("inputs"), gamla.attrgetter("node"))),
+    gamla.star(zip),
+    gamla.map(gamla.compose_left(frozenset, gamla.contains)),
+    gamla.star(gamla.alljuxt),
+)
 
 
 _facts_to_values = gamla.compose_left(gamla.map(gamla.attrgetter("value")), tuple)
@@ -74,6 +69,8 @@ def _make_tasks(facts):
         get_by_node_and_start_and_end,
         fact_to_inputs,
     ) = _index_facts(facts)
+
+    is_already_done = _is_already_done(facts)
 
     @gamla.curry
     def find_inputs(
@@ -118,7 +115,7 @@ def _make_tasks(facts):
                     _facts_to_values(inputs),
                 ),
             ),
-            gamla.remove(_is_already_done(facts)),
+            gamla.remove(is_already_done),
             gamla.filter(_is_coherent(fact_to_inputs)),
         )
 
@@ -196,29 +193,42 @@ def number(x):
     return x
 
 
-def char(x):
-    return x
+def string(x, y):
+    return x + y
+
+
+def is_larger_than_50(number):
+    return number > 50
+
+
+def describe(is_large, number):
+    description = "larger than 50" if is_large else "not larger than 50"
+    return f"{number} is {description}"
 
 
 run(
     frozenset(
         [
+            make_attention(describe, [is_larger_than_50, number]),
             Attention(addition, (number, parse_plus, number), is_sequential=True),
             make_attention(number, [parse_number]),
+            make_attention(is_larger_than_50, [number]),
             make_attention(number, [addition]),
-            make_attention(parse_number, [char]),
-            make_attention(parse_plus, [char]),
+            make_attention(parse_number, [string]),
+            make_attention(parse_number, [string]),
+            Attention(string, (string, string), is_sequential=True),
+            make_attention(parse_plus, [string]),
         ],
     ),
     frozenset(
         [
             *gamla.pipe(
-                "4+5+7",
+                "4+5+777",
                 enumerate,
                 gamla.map(
                     gamla.star(
                         lambda index, current_char: Fact(
-                            node=char,
+                            node=string,
                             value=current_char,
                             interval=Interval(index, index + 1),
                             inputs=(),
