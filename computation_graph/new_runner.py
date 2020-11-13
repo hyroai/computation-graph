@@ -82,7 +82,7 @@ def _make_tasks(facts):
     ) -> FrozenSet[Tuple[Fact, ...]]:
         index = len(inputs_so_far)
         if index == len(sources):
-            return gamla.wrap_tuple(inputs_so_far)
+            return frozenset([inputs_so_far])
         current_node = sources[index]
         if inputs_so_far:
             prev = gamla.last(inputs_so_far)
@@ -105,6 +105,7 @@ def _make_tasks(facts):
                 ),
             ),
             gamla.concat,
+            frozenset,
         )
 
     def make_tasks(attention: Attention) -> Iterable[Task]:
@@ -187,18 +188,11 @@ def parse_plus(some_string):
 
 
 def parse_number(some_string):
-    try:
-        return int(some_string)
-    except ValueError:
-        raise RefuseProcessing
+    return int(some_string)
 
 
 def number(x):
     return x
-
-
-def string(x, y):
-    return x + y
 
 
 def is_larger_than_50(number):
@@ -210,35 +204,58 @@ def describe(is_large, number):
     return f"{number} is {description}"
 
 
-run(
-    frozenset(
-        [
-            make_attention(describe, [is_larger_than_50, number]),
-            Attention(addition, (number, parse_plus, number), is_sequential=True),
-            make_attention(number, [parse_number]),
-            make_attention(is_larger_than_50, [number]),
-            make_attention(number, [addition]),
-            make_attention(parse_number, [string]),
-            Attention(string, (string, string), is_sequential=True),
-            make_attention(parse_plus, [string]),
-        ],
-    ),
-    frozenset(
-        [
-            *gamla.pipe(
-                "4+5+777",
-                enumerate,
-                gamla.map(
-                    gamla.star(
-                        lambda index, current_char: Fact(
-                            node=string,
-                            value=current_char,
-                            interval=Interval(index, index + 1),
-                            inputs=(),
+def char(x):
+    return x
+
+
+def digit(x):
+    if x in map(str, range(10)):
+        return x
+    raise RefuseProcessing
+
+
+def digits(x, y):
+    return x + y
+
+
+gamla.pipe(
+    run(
+        frozenset(
+            [
+                make_attention(parse_plus, [char]),
+                # Digits to numbers
+                make_attention(digit, [char]),
+                Attention(digits, (digit, digit), is_sequential=True),
+                Attention(digits, (digits, digit), is_sequential=True),
+                make_attention(parse_number, [digit]),
+                make_attention(parse_number, [digits]),
+                make_attention(number, [parse_number]),
+                # Number stuff
+                make_attention(number, [addition]),
+                make_attention(is_larger_than_50, [number]),
+                make_attention(describe, [is_larger_than_50, number]),
+                Attention(addition, (number, parse_plus, number), is_sequential=True),
+            ],
+        ),
+        frozenset(
+            [
+                *gamla.pipe(
+                    "5+75+75+74+5+777+5+777+5+777+5",
+                    enumerate,
+                    gamla.map(
+                        gamla.star(
+                            lambda index, current_char: Fact(
+                                node=char,
+                                value=current_char,
+                                interval=Interval(index, index + 1),
+                                inputs=(),
+                            ),
                         ),
                     ),
                 ),
-            ),
-        ],
+            ],
+        ),
     ),
+    gamla.filter(lambda fact: fact.interval.start == 0),
+    gamla.sort_by(lambda fact: fact.interval.end - fact.interval.start),
 )
