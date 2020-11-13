@@ -164,6 +164,7 @@ def run(program: FrozenSet[Attention], facts: FrozenSet[Fact]) -> FrozenSet[Fact
     return gamla.pipe(
         program,
         gamla.mapcat(_make_tasks(facts)),
+        # TODO(uri): Prevent redundant calls to `_runner`.
         gamla.map(gamla.excepts(RefuseProcessing, gamla.just(None), _runner)),
         gamla.remove(gamla.equals(None)),
         gamla.concat_with(facts),
@@ -217,7 +218,6 @@ run(
             make_attention(number, [parse_number]),
             make_attention(is_larger_than_50, [number]),
             make_attention(number, [addition]),
-            make_attention(parse_number, [string]),
             make_attention(parse_number, [string]),
             Attention(string, (string, string), is_sequential=True),
             make_attention(parse_plus, [string]),
