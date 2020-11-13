@@ -1,9 +1,9 @@
 import dataclasses
-from typing import Any, Collection, FrozenSet, Tuple
+from typing import Any, Callable, FrozenSet, Iterable, Tuple
 
 import gamla
 
-NodeId = int
+NodeId = Callable
 
 
 @dataclasses.dataclass(frozen=True)
@@ -16,72 +16,166 @@ class Interval:
 class Fact:
     node: NodeId
     interval: Interval
-    dependencies: FrozenSet["Fact"]
-    output: Any
+    inputs: Tuple[Any, ...]
+    value: Any
 
 
 @dataclasses.dataclass(frozen=True)
 class Attention:
-    target: NodeId
+    node: NodeId
     sources: Tuple[NodeId, ...]
     is_sequential: bool
-    silence: Tuple[int, ...]
+
+
+def make_attention(node, sources: Iterable):
+    return Attention(node, tuple(sources), False)
 
 
 @dataclasses.dataclass(frozen=True)
 class Task:
-    attention: Attention
-    inputs: Tuple
+    node: NodeId
+    intervals: Tuple[Interval, ...]
+    values: Tuple[Fact, ...]
 
 
 class RefuseProcessing(Exception):
     pass
 
 
-def _make_tasks_helper(nodes_to_find, is_sequential):
-    pass
+@gamla.curry
+def _is_coherent(
+    fact_to_inputs: Callable[[Fact], FrozenSet[FrozenSet[Fact]]],
+    task: Task,
+) -> bool:
+    return True
 
 
-def _make_tasks(facts_index, attention: Attention):
-    get_by_node, get_by_start, get_by_node_and_start = facts_index
-    sources = attention.sources
-    for x in sources:
-        facts_index.get_by_node()
+@gamla.curry
+def _is_already_done(facts, task):
+    return gamla.anymap(
+        gamla.alljuxt(
+            gamla.compose_left(gamla.attrgetter("inputs"), gamla.equals(task.values)),
+            gamla.compose_left(
+                gamla.attrgetter("node"),
+                gamla.equals(task.node),
+            ),
+        ),
+    )(facts)
 
 
-_index_facts = gamla.juxt(
-    gamla.groupby_many(lambda fact: [fact.node]),
-    gamla.groupby_many(lambda fact: [fact.interval.start]),
-    gamla.groupby_many(lambda fact: [(fact.node, fact.interval.start)]),
-    # Fact to dependencies.
-    gamla.compose_left(gamla.groupby_many(gamla.attrgetter("dependencies")), gamla.reverse_graph)
+_facts_to_values = gamla.compose_left(gamla.map(gamla.attrgetter("value")), tuple)
+_facts_to_intervals = gamla.compose_left(gamla.map(gamla.attrgetter("interval")), tuple)
+
+
+def _make_tasks(facts):
+    (
+        get_by_node,
+        get_by_node_and_start,
+        get_by_node_and_start_and_end,
+        fact_to_inputs,
+    ) = _index_facts(facts)
+
+    @gamla.curry
+    def find_inputs(
+        attention: Attention,
+        inputs_so_far: Tuple[Fact, ...],
+    ) -> FrozenSet[Tuple[Fact, ...]]:
+        index = len(inputs_so_far)
+        if index == len(attention.sources):
+            return gamla.wrap_tuple(inputs_so_far)
+        current_node = attention.sources[index]
+        if inputs_so_far:
+            prev = gamla.last(inputs_so_far)
+            first_interval_start = prev.interval.start
+            first_interval_end = prev.interval.end
+            if attention.is_sequential:
+                options = get_by_node_and_start((current_node, first_interval_end))
+            else:
+                options = get_by_node_and_start_and_end(
+                    (current_node, first_interval_start, first_interval_end),
+                )
+        else:
+            options = get_by_node(current_node)
+        return gamla.pipe(
+            options,
+            gamla.map(
+                gamla.compose_left(
+                    lambda option: (*inputs_so_far, option),
+                    find_inputs(attention),
+                ),
+            ),
+            gamla.concat,
+        )
+
+    def make_tasks(attention: Attention) -> Iterable[Task]:
+        return gamla.pipe(
+            (),
+            find_inputs(attention),
+            gamla.map(
+                lambda inputs: Task(
+                    attention.node,
+                    _facts_to_intervals(inputs),
+                    _facts_to_values(inputs),
+                ),
+            ),
+            gamla.remove(_is_already_done(facts)),
+            gamla.filter(_is_coherent(fact_to_inputs)),
+        )
+
+    return make_tasks
+
+
+def _runner(task: Task):
+    return Fact(
+        node=task.node,
+        value=task.node(*task.values),
+        inputs=task.values,
+        interval=Interval(
+            gamla.head(task.intervals).start,
+            gamla.last(task.intervals).end,
+        ),
+    )
+
+
+_index_facts = gamla.compose_left(
+    gamla.juxt(
+        gamla.groupby_many(lambda fact: [fact.node]),
+        gamla.groupby_many(lambda fact: [(fact.node, fact.interval.start)]),
+        gamla.groupby_many(
+            lambda fact: [(fact.node, fact.interval.start, fact.interval.end)],
+        ),
+        # Fact to inputs.
+        gamla.compose_left(
+            gamla.groupby_many(gamla.attrgetter("inputs")),
+            gamla.reverse_graph,
+        ),
+    ),
+    gamla.map(
+        gamla.compose_left(
+            gamla.attrgetter("__getitem__"),
+            gamla.excepts(KeyError, gamla.just(frozenset())),
+        ),
+    ),
 )
 
 
-def run(program: Collection[Attention], facts: Collection[Fact], node_id_to_callable):
-    already_run = set()
-    while True:
-        new_tasks = (
-            frozenset(gamla.mapcat(_make_tasks(_index_facts(facts)), program))
-            - already_run
-        )
-        if not new_tasks:
-            break
-        for task in new_tasks:
-            try:
-                facts.add(
-                    Fact(value=node_id_to_callable(task.attention.target)(*task.inputs), ...)
-                )
-                already_run.add(task)
-            except RefuseProcessing:
-                continue
-    return facts
+@gamla.curry
+def run(program: FrozenSet[Attention], facts: FrozenSet[Fact]) -> FrozenSet[Fact]:
+    return gamla.pipe(
+        program,
+        gamla.mapcat(_make_tasks(facts)),
+        gamla.map(gamla.excepts(RefuseProcessing, gamla.just(None), _runner)),
+        gamla.remove(gamla.equals(None)),
+        gamla.concat_with(facts),
+        frozenset,
+        gamla.ternary(gamla.len_equals(len(facts)), gamla.identity, run(program)),
+    )
 
 
 # TEST CASE
 
 
-def addition(a, c):
+def addition(a, _, c):
     return a + c
 
 
@@ -98,37 +192,40 @@ def parse_number(some_string):
         raise RefuseProcessing
 
 
-def head_word(sentence):
-    first_space = sentence.index(" ")
-    return sentence[:first_space]
-
-
-def tail_words(sentence):
-    first_space = sentence.index(" ")
-    remainder = sentence[first_space:]
-    if remainder:
-        return remainder
-    raise RefuseProcessing
-
-
 def number(x):
     return x
 
 
-program = [
-    Attention(addition, [number, parse_plus, number], silence=[1], is_sequential=True),
-    Attention(number, [parse_number]),
-    Attention(number, [addition]),
-    Attention(parse_number, [head_word]),
-    Attention(parse_plus, [head_word]),
-    Attention(head_word, [tail_words]),
-    Attention(tail_words, [tail_words]),
-]
+def char(x):
+    return x
 
 
-Fact(
-    node=tail_words,
-    value="4 + 5 + 7",
-    interval=Interval(0, 1),
-    dependencies=frozenset(),
+run(
+    frozenset(
+        [
+            Attention(addition, (number, parse_plus, number), is_sequential=True),
+            make_attention(number, [parse_number]),
+            make_attention(number, [addition]),
+            make_attention(parse_number, [char]),
+            make_attention(parse_plus, [char]),
+        ],
+    ),
+    frozenset(
+        [
+            *gamla.pipe(
+                "4+5+7",
+                enumerate,
+                gamla.map(
+                    gamla.star(
+                        lambda index, current_char: Fact(
+                            node=char,
+                            value=current_char,
+                            interval=Interval(index, index + 1),
+                            inputs=(),
+                        ),
+                    ),
+                ),
+            ),
+        ],
+    ),
 )
