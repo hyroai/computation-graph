@@ -1,4 +1,5 @@
 import dataclasses
+import functools
 from typing import Any, Callable, FrozenSet, Iterable, Tuple
 
 import gamla
@@ -73,19 +74,21 @@ def _make_tasks(facts):
     is_already_done = _is_already_done(facts)
 
     @gamla.curry
+    @functools.lru_cache(maxsize=None)
     def find_inputs(
-        attention: Attention,
+        sources: Tuple[NodeId, ...],
+        is_sequential: bool,
         inputs_so_far: Tuple[Fact, ...],
     ) -> FrozenSet[Tuple[Fact, ...]]:
         index = len(inputs_so_far)
-        if index == len(attention.sources):
+        if index == len(sources):
             return gamla.wrap_tuple(inputs_so_far)
-        current_node = attention.sources[index]
+        current_node = sources[index]
         if inputs_so_far:
             prev = gamla.last(inputs_so_far)
             first_interval_start = prev.interval.start
             first_interval_end = prev.interval.end
-            if attention.is_sequential:
+            if is_sequential:
                 options = get_by_node_and_start((current_node, first_interval_end))
             else:
                 options = get_by_node_and_start_and_end(
@@ -98,7 +101,7 @@ def _make_tasks(facts):
             gamla.map(
                 gamla.compose_left(
                     lambda option: (*inputs_so_far, option),
-                    find_inputs(attention),
+                    find_inputs(sources, is_sequential),
                 ),
             ),
             gamla.concat,
@@ -107,7 +110,7 @@ def _make_tasks(facts):
     def make_tasks(attention: Attention) -> Iterable[Task]:
         return gamla.pipe(
             (),
-            find_inputs(attention),
+            find_inputs(attention.sources, attention.is_sequential),
             gamla.map(
                 lambda inputs: Task(
                     attention.node,
