@@ -32,6 +32,10 @@ def make_attention(node, sources: Iterable):
     return Attention(node, tuple(sources), False)
 
 
+def sequential_attention(node, sources):
+    return Attention(node, tuple(sources), True)
+
+
 @dataclasses.dataclass(frozen=True)
 class Task:
     node: NodeId
@@ -174,88 +178,140 @@ def run(program: FrozenSet[Attention], facts: FrozenSet[Fact]) -> FrozenSet[Fact
     )
 
 
-# TEST CASE
+def test_parsing():
+    def addition(a, _, c):
+        return a + c
 
+    def parse_plus(some_string):
+        if some_string == "+":
+            return some_string
+        raise RefuseProcessing
 
-def addition(a, _, c):
-    return a + c
+    def parse_int(some_string):
+        return int(some_string)
 
-
-def parse_plus(some_string):
-    if some_string == "+":
-        return some_string
-    raise RefuseProcessing
-
-
-def parse_number(some_string):
-    return int(some_string)
-
-
-def number(x):
-    return x
-
-
-def is_larger_than_50(number):
-    return number > 50
-
-
-def describe(is_large, number):
-    description = "larger than 50" if is_large else "not larger than 50"
-    return f"{number} is {description}"
-
-
-def char(x):
-    return x
-
-
-def digit(x):
-    if x in map(str, range(10)):
+    def number(x):
         return x
-    raise RefuseProcessing
 
+    def is_larger_than_50(number):
+        return number > 50
 
-def digits(x, y):
-    return x + y
+    def describe(is_large, number):
+        description = "larger than 50" if is_large else "not larger than 50"
+        return f"{number} is {description}"
 
+    def char(x):
+        return x
 
-gamla.pipe(
-    run(
-        frozenset(
-            [
-                make_attention(parse_plus, [char]),
-                # Digits to numbers
-                make_attention(digit, [char]),
-                Attention(digits, (digit, digit), is_sequential=True),
-                Attention(digits, (digits, digit), is_sequential=True),
-                make_attention(parse_number, [digit]),
-                make_attention(parse_number, [digits]),
-                make_attention(number, [parse_number]),
-                # Number stuff
-                make_attention(number, [addition]),
-                make_attention(is_larger_than_50, [number]),
-                make_attention(describe, [is_larger_than_50, number]),
-                Attention(addition, (number, parse_plus, number), is_sequential=True),
-            ],
-        ),
-        frozenset(
-            [
-                *gamla.pipe(
-                    "5+75+75+74+5+777+5+777+5+777+5",
-                    enumerate,
-                    gamla.map(
-                        gamla.star(
-                            lambda index, current_char: Fact(
-                                node=char,
-                                value=current_char,
-                                interval=Interval(index, index + 1),
-                                inputs=(),
+    def digit(x):
+        if x in map(str, range(10)):
+            return x
+        raise RefuseProcessing
+
+    def digits(x, y):
+        return x + y
+
+    gamla.pipe(
+        run(
+            frozenset(
+                [
+                    make_attention(parse_plus, [char]),
+                    # Digits to numbers
+                    make_attention(digit, [char]),
+                    sequential_attention(digits, [digit, digit]),
+                    sequential_attention(digits, [digits, digit]),
+                    make_attention(parse_int, [digit]),
+                    make_attention(parse_int, [digits]),
+                    make_attention(number, [parse_int]),
+                    # Number stuff
+                    make_attention(number, [addition]),
+                    make_attention(is_larger_than_50, [number]),
+                    make_attention(describe, [is_larger_than_50, number]),
+                    sequential_attention(addition, [number, parse_plus, number]),
+                ],
+            ),
+            frozenset(
+                [
+                    *gamla.pipe(
+                        "5+75+75+74+5+777+5+777+5+777+5",
+                        enumerate,
+                        gamla.map(
+                            gamla.star(
+                                lambda index, current_char: Fact(
+                                    node=char,
+                                    value=current_char,
+                                    interval=Interval(index, index + 1),
+                                    inputs=(),
+                                ),
                             ),
                         ),
                     ),
-                ),
-            ],
+                ],
+            ),
         ),
-    ),
-    gamla.filter(lambda fact: fact.interval.start == 0),
-    gamla.sort_by(lambda fact: fact.interval.end - fact.interval.start),
-)
+        gamla.filter(lambda fact: fact.interval.start == 0),
+        gamla.sort_by(lambda fact: fact.interval.end - fact.interval.start),
+    )
+
+
+def test_memory():
+    def describe(phone_number):
+        return f"Your phone number is {phone_number}"
+
+    def char(x):
+        return x
+
+    def digit(x):
+        if x in map(str, range(10)):
+            return x
+        raise RefuseProcessing
+
+    def digits(x, y):
+        return x + y
+
+    def parse_phone_number(digits):
+        if len(digits) != 9:
+            raise RefuseProcessing
+        return digits
+
+    def remember(something):
+        return something
+
+    gamla.pipe(
+        run(
+            frozenset(
+                [
+                    # Digits to numbers
+                    make_attention(digit, [char]),
+                    sequential_attention(digits, [digit, digit]),
+                    sequential_attention(digits, [digits, digit]),
+                    make_attention(parse_phone_number, [digits]),
+                    # memory
+                    make_attention(remember, [parse_phone_number]),
+                    make_attention(remember, [remember], delay=1),
+                    # final answer
+                    make_attention(describe, [parse_phone_number]),
+                ],
+            ),
+            frozenset(
+                [
+                    *gamla.pipe(
+                        "0123456789",
+                        enumerate,
+                        gamla.map(
+                            gamla.star(
+                                lambda index, current_char: Fact(
+                                    node=char,
+                                    value=current_char,
+                                    interval=Interval(index, index + 1),
+                                    inputs=(),
+                                ),
+                            ),
+                        ),
+                    ),
+                ],
+            ),
+        ),
+        gamla.filter(lambda fact: fact.interval.start == 0),
+        gamla.sort_by(lambda fact: fact.interval.end - fact.interval.start),
+    )
