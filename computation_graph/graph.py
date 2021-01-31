@@ -4,7 +4,6 @@ from typing import Callable, FrozenSet, Optional, Text, Tuple, Union
 
 import gamla
 
-
 from computation_graph import base_types
 
 

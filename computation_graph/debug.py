@@ -2,7 +2,6 @@ from typing import Callable, Text, Tuple
 
 import gamla
 
-
 from computation_graph import base_types, graph, run, visualization
 
 _ComputationTrace = Callable[

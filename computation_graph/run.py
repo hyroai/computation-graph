@@ -415,7 +415,7 @@ def _process_node(get_edge_options, f):
     return gamla.compose_many_to_one(
         [
             gamla.head,  # accumulated results
-            gamla.compose_left(gamla.second, gamla.wrap_tuple), # node
+            gamla.compose_left(gamla.second, gamla.wrap_tuple),  # node
             gamla.compose_left(  # new results
                 _juxtduct(
                     gamla.compose_left(gamla.second, gamla.wrap_tuple),
@@ -438,7 +438,7 @@ def _process_node(get_edge_options, f):
                 dict,
             ),
         ],
-        gamla.assoc_in
+        gamla.assoc_in,
     )
 
 
