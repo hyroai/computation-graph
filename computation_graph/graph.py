@@ -3,7 +3,7 @@ import inspect
 from typing import Callable, FrozenSet, Optional, Text, Tuple, Union
 
 import gamla
-import toolz
+
 
 from computation_graph import base_types
 
@@ -11,7 +11,7 @@ from computation_graph import base_types
 def get_all_nodes(
     edges: base_types.GraphType,
 ) -> FrozenSet[base_types.ComputationNode]:
-    return gamla.pipe(edges, gamla.mapcat(get_edge_nodes), toolz.unique, frozenset)
+    return gamla.pipe(edges, gamla.mapcat(get_edge_nodes), gamla.unique, frozenset)
 
 
 def _is_reducer_type(node: Callable) -> bool:
@@ -129,7 +129,7 @@ def get_leaves(edges: base_types.GraphType) -> FrozenSet[base_types.ComputationN
 def infer_graph_sink(edges: base_types.GraphType) -> base_types.ComputationNode:
     leafs = get_leaves(edges)
     assert len(leafs) == 1, f"computation graph has more than one sink: {leafs}"
-    return toolz.first(leafs)
+    return gamla.head(leafs)
 
 
 @gamla.curry

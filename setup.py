@@ -10,6 +10,6 @@ setuptools.setup(
     long_description=_LONG_DESCRIPTION,
     long_description_content_type="text/markdown",
     packages=setuptools.find_namespace_packages(),
-    install_requires=["toolz", "gamla>=30", "toposort"],
+    install_requires=["gamla>=69", "toposort"],
     extras_require={"test": ["pygraphviz", "pytest>=5.4.0"]},
 )
