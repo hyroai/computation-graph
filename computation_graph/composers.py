@@ -3,7 +3,6 @@ from __future__ import annotations
 from typing import Any, Callable, Optional, Text, Tuple, Union
 
 import gamla
-from toolz import curried
 
 from computation_graph import base_types, graph
 
@@ -16,7 +15,7 @@ class _ComputationError:
     pass
 
 
-_callable_or_graph_type_to_node_or_graph_type = gamla.curried_ternary(
+_callable_or_graph_type_to_node_or_graph_type = gamla.ternary(
     lambda x: isinstance(x, tuple),
     gamla.identity,
     graph.make_computation_node,
@@ -242,7 +241,7 @@ def make_compose(
         funcs,
         reversed,
         gamla.map(_callable_or_graph_type_to_node_or_graph_type),
-        curried.sliding_window(2),
+        gamla.sliding_window(2),
         gamla.mapcat(gamla.star(_infer_composition_edges(key))),
         tuple,
     )

@@ -1,7 +1,6 @@
 from typing import Callable, Text, Tuple
 
 import gamla
-import toolz
 
 from computation_graph import base_types, graph, run, visualization
 
@@ -14,10 +13,10 @@ _ComputationTrace = Callable[
 def _node_computation_trace(node_to_results: run.NodeToResults) -> _ComputationTrace:
     return gamla.compose_many_to_one(
         [
-            gamla.pair_right(gamla.compose_left(node_to_results, toolz.first)),
-            gamla.compose_left(node_to_results, dict.values, toolz.first, dict.items),
+            gamla.pair_right(gamla.compose_left(node_to_results, gamla.head)),
+            gamla.compose_left(node_to_results, dict.values, gamla.head, dict.items),
         ],
-        toolz.cons,
+        gamla.prefix,
     )
 
 
