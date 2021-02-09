@@ -3,8 +3,6 @@ from xml.sax import saxutils
 
 import gamla
 import pygraphviz as pgv
-import toolz
-from toolz import curried
 
 from computation_graph import base_types
 
@@ -66,14 +64,14 @@ def _computation_graph_to_graphviz(edges: base_types.GraphType) -> pgv.AGraph:
 def _do_add_edge(result_graph: pgv.AGraph) -> Callable[[pgv.Edge], pgv.AGraph]:
     return lambda edge: gamla.pipe(
         result_graph,
-        curried.do(lambda g: g.add_edge(edge, **edge.attr)),
+        gamla.side_effect(lambda g: g.add_edge(edge, **edge.attr)),
     )
 
 
 def _do_add_node(result_graph: pgv.AGraph) -> Callable[[pgv.Node], pgv.AGraph]:
     return lambda node: gamla.pipe(
         result_graph,
-        curried.do(lambda g: g.add_node(node, **node.attr)),
+        gamla.side_effect(lambda g: g.add_node(node, **node.attr)),
     )
 
 
@@ -81,14 +79,14 @@ def _union_graphviz(graphs: Tuple[pgv.AGraph, ...]) -> pgv.AGraph:
     return gamla.pipe(
         graphs,
         # copy to avoid side effects that influence caller
-        gamla.juxt(gamla.compose_left(toolz.first, pgv.AGraph.copy), curried.drop(1)),
+        gamla.juxt(gamla.compose_left(gamla.head, pgv.AGraph.copy), gamla.drop(1)),
         gamla.star(
             gamla.reduce(
                 lambda result_graph, another_graph: gamla.pipe(
                     another_graph,
                     # following does side effects on result_graph, that's why we return just(result_graph)
                     # we assume no parallelization in gamla.juxt
-                    curried.do(
+                    gamla.side_effect(
                         gamla.juxt(
                             gamla.compose_left(
                                 pgv.AGraph.nodes,
@@ -110,11 +108,11 @@ def _union_graphviz(graphs: Tuple[pgv.AGraph, ...]) -> pgv.AGraph:
 
 
 def _save_graphviz_as_png(filename: Text) -> Callable[[pgv.AGraph], pgv.AGraph]:
-    return curried.do(lambda pgv_graph: pgv_graph.draw(filename, prog="dot"))
+    return gamla.side_effect(lambda pgv_graph: pgv_graph.draw(filename, prog="dot"))
 
 
 def _save_graphviz_as_dot(filename: Text) -> Callable[[pgv.AGraph], pgv.AGraph]:
-    return curried.do(lambda pgv_graph: pgv_graph.write(filename))
+    return gamla.side_effect(lambda pgv_graph: pgv_graph.write(filename))
 
 
 def _computation_trace_to_graphviz(
@@ -149,7 +147,7 @@ serialize_computation_trace = gamla.compose_left(
                 [_computation_graph_to_graphviz, _computation_trace_to_graphviz],
             ),
             _union_graphviz,
-            curried.do(lambda g: g.layout(prog="dot")),
+            gamla.side_effect(lambda g: g.layout(prog="dot")),
         ),
     ),
 )
