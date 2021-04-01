@@ -16,9 +16,7 @@ class _ComputationError:
 
 
 _callable_or_graph_type_to_node_or_graph_type = gamla.ternary(
-    lambda x: isinstance(x, tuple),
-    gamla.identity,
-    graph.make_computation_node,
+    lambda x: isinstance(x, tuple), gamla.identity, graph.make_computation_node
 )
 
 
@@ -32,16 +30,13 @@ def _get_edges_from_node_or_graph(
 
 @gamla.curry
 def _get_unbound_signature_for_single_node(
-    node: base_types.ComputationNode,
-    edges: base_types.GraphType,
+    node: base_types.ComputationNode, edges: base_types.GraphType
 ) -> base_types.NodeSignature:
     """Computes the new signature of unbound variables after considering internal edges."""
     incoming_edges = graph.get_incoming_edges_for_node(edges, node)
 
     bound_kwargs: Tuple[Text, ...] = gamla.pipe(
-        incoming_edges,
-        gamla.map(gamla.attrgetter("key")),
-        gamla.filter(gamla.identity),
+        incoming_edges, gamla.map(gamla.attrgetter("key")), gamla.filter(gamla.identity)
     )
 
     return base_types.NodeSignature(
@@ -49,15 +44,14 @@ def _get_unbound_signature_for_single_node(
         and not any(edge.args for edge in incoming_edges),
         kwargs=tuple(filter(lambda x: x not in bound_kwargs, node.signature.kwargs)),
         optional_kwargs=tuple(
-            filter(lambda x: x not in bound_kwargs, node.signature.optional_kwargs),
+            filter(lambda x: x not in bound_kwargs, node.signature.optional_kwargs)
         ),
     )
 
 
 @gamla.curry
 def make_optional(
-    func: _ComposersInputType,
-    default_value: Any,
+    func: _ComposersInputType, default_value: Any
 ) -> base_types.GraphType:
     def return_default_value():
         return default_value
@@ -97,9 +91,7 @@ def make_and(funcs, merge_fn: Callable) -> base_types.GraphType:
 def make_or(funcs, merge_fn: Callable) -> base_types.GraphType:
     def filter_computation_errors(*args):
         return gamla.pipe(
-            args,
-            gamla.filter(lambda x: not isinstance(x, _ComputationError)),
-            tuple,
+            args, gamla.filter(lambda x: not isinstance(x, _ComputationError)), tuple
         )
 
     filter_node = graph.make_computation_node(filter_computation_errors)
@@ -116,9 +108,7 @@ def make_or(funcs, merge_fn: Callable) -> base_types.GraphType:
                 lambda sinks: (
                     graph.make_edge(source=sinks, destination=filter_node),
                     graph.make_edge(
-                        source=filter_node,
-                        destination=merge_node,
-                        key="args",
+                        source=filter_node, destination=merge_node, key="args"
                     ),
                 ),
             ),
@@ -171,8 +161,8 @@ def make_first(*funcs: _ComposersInputType) -> base_types.GraphType:
                     key="first_input",
                     priority=priority,
                     source=node,
-                ),
-            ),
+                )
+            )
         ),
         tuple,
     )
@@ -191,9 +181,7 @@ def _infer_composition_edges(
 
         return (
             graph.make_edge(
-                source=_infer_sink(source),
-                destination=destination,
-                key=key,
+                source=_infer_sink(source), destination=destination, key=key
             ),
             *_get_edges_from_node_or_graph(source),
         )
@@ -207,25 +195,23 @@ def _infer_composition_edges(
                 gamla.compose_left(
                     _get_unbound_signature_for_single_node(edges=destination),
                     lambda signature: key in signature.kwargs,
-                ),
+                )
             ),
             # Do not add edges to nodes from source that are already present in destination (cycle).
             gamla.filter(
                 lambda node: isinstance(source, base_types.ComputationNode)
-                or node not in graph.get_all_nodes(source),
+                or node not in graph.get_all_nodes(source)
             ),
             gamla.map(
                 lambda node: graph.make_edge(
-                    source=_infer_sink(source),
-                    destination=node,
-                    key=key,
-                ),
+                    source=_infer_sink(source), destination=node, key=key
+                )
             ),
             tuple,
             gamla.check(
                 gamla.identity,
                 AssertionError(
-                    f"Cannot compose, destination signature does not contain key '{key}'",
+                    f"Cannot compose, destination signature does not contain key '{key}'"
                 ),
             ),
         )

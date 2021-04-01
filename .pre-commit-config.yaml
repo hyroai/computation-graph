@@ -15,11 +15,6 @@ repos:
     hooks:
       - id: isort
 
-  - repo: https://github.com/asottile/add-trailing-comma
-    rev: v2.0.1
-    hooks:
-      - id: add-trailing-comma
-
   - repo: https://github.com/ambv/black
     rev: 5d33f20a2a2c85cfb521ae9c5f9254bfe9fc2fd9
     hooks:
