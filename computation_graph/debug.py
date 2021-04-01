@@ -22,13 +22,8 @@ def _node_computation_trace(node_to_results: run.NodeToResults) -> _ComputationT
 
 @gamla.curry
 def debugger(
-    filename: Text,
-    edges: base_types.GraphType,
-    node_to_results: run.NodeToResults,
+    filename: Text, edges: base_types.GraphType, node_to_results: run.NodeToResults
 ):
     return visualization.serialize_computation_trace(filename)(
-        [
-            edges,
-            _node_computation_trace(node_to_results)(graph.infer_graph_sink(edges)),
-        ],
+        [edges, _node_computation_trace(node_to_results)(graph.infer_graph_sink(edges))]
     )

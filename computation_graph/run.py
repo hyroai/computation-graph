@@ -307,6 +307,7 @@ def _merge_with_previous_state(
 @gamla.curry
 def _construct_computation_result(
     edges: base_types.GraphType,
+    edges_to_node_id,
     result_to_dependencies: _ResultToDependencies,
 ) -> Tuple[base_types.ComputationResult, Dict]:
     return gamla.pipe(
@@ -326,7 +327,7 @@ def _construct_computation_result(
                 gamla.compose_left(
                     gamla.pair_with(result_to_dependencies),
                     gamla.star(_construct_computation_state),
-                    gamla.keymap(graph.infer_node_id(edges)),
+                    gamla.keymap(edges_to_node_id),
                 ),
             ),
         ),
@@ -450,7 +451,13 @@ _is_graph_async = gamla.compose_left(
 )
 
 
-def _make_runner(side_effect, async_decoration, edges, handled_exceptions):
+def _make_runner(
+    side_effect,
+    async_decoration,
+    edges,
+    handled_exceptions,
+    edges_to_node_id,
+):
     return gamla.compose_left(
         # Higher order pipeline that constructs a graph runner.
         gamla.compose(
@@ -464,14 +471,14 @@ def _make_runner(side_effect, async_decoration, edges, handled_exceptions):
             _run_keeping_choices(
                 gamla.compose_left(async_decoration(_apply), _wrap_in_result_if_needed),
             ),
-            gamla.before(graph.infer_node_id(edges)),
+            gamla.before(edges_to_node_id),
             _inject_state,
         ),
         # At this point we move to a regular pipeline of values.
         async_decoration(gamla.apply(edges)),
         gamla.attrgetter("__getitem__"),
         gamla.side_effect(side_effect),
-        _construct_computation_result(edges),
+        _construct_computation_result(edges, edges_to_node_id),
     )
 
 
@@ -485,11 +492,12 @@ def to_callable_with_side_effect(
         gamla.pair_with(
             _make_runner(
                 side_effect(edges),
-                gamla.after(gamla.to_awaitable)
+                gamla.compose_left(gamla.after(gamla.to_awaitable), gamla.timeit)
                 if _is_graph_async(edges)
                 else gamla.identity,
                 edges,
                 handled_exceptions,
+                graph.edges_to_node_id_map(edges).__getitem__,
             ),
         ),
         gamla.star(

@@ -162,7 +162,7 @@ def test_state():
     assert isinstance(result, base_types.ComputationResult)
     assert (
         dict(result.state)[
-            graph.infer_node_id(edges, graph.make_computation_node(reducer_node))
+            graph.edges_to_node_id_map(edges)[graph.make_computation_node(reducer_node)]
         ]
         == 3
     )

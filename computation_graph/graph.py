@@ -58,18 +58,13 @@ get_edge_nodes = functools.lru_cache(maxsize=1024)(
 )
 
 
-_edges_to_node_id_map = gamla.compose_left(
+edges_to_node_id_map = gamla.compose_left(
     gamla.mapcat(get_edge_nodes),
     gamla.unique,
     enumerate,
     gamla.map(reversed),
     dict,
 )
-
-
-@gamla.curry
-def infer_node_id(edges: base_types.GraphType, node: base_types.ComputationNode) -> int:
-    return _edges_to_node_id_map(edges)[node]
 
 
 def make_computation_node(
