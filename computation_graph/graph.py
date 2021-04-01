@@ -7,9 +7,7 @@ import gamla
 from computation_graph import base_types
 
 
-def get_all_nodes(
-    edges: base_types.GraphType,
-) -> FrozenSet[base_types.ComputationNode]:
+def get_all_nodes(edges: base_types.GraphType) -> FrozenSet[base_types.ComputationNode]:
     return gamla.pipe(edges, gamla.mapcat(get_edge_nodes), gamla.unique, frozenset)
 
 
@@ -49,26 +47,20 @@ def _infer_callable_name(func: Callable) -> Text:
     return func.__name__
 
 
-get_edge_nodes = functools.lru_cache(maxsize=1024)(
-    gamla.ternary(
-        gamla.attrgetter("args"),
-        lambda edge: edge.args + (edge.destination,),
-        lambda edge: (edge.source, edge.destination),
-    ),
+get_edge_nodes = gamla.ternary(
+    gamla.attrgetter("args"),
+    lambda edge: edge.args + (edge.destination,),
+    lambda edge: (edge.source, edge.destination),
 )
 
 
 edges_to_node_id_map = gamla.compose_left(
-    gamla.mapcat(get_edge_nodes),
-    gamla.unique,
-    enumerate,
-    gamla.map(reversed),
-    dict,
+    gamla.mapcat(get_edge_nodes), gamla.unique, enumerate, gamla.map(reversed), dict
 )
 
 
 def make_computation_node(
-    func: Union[base_types.ComputationNode, Callable],
+    func: Union[base_types.ComputationNode, Callable]
 ) -> base_types.ComputationNode:
     assert func is not base_types.ComputationNode
     if isinstance(func, base_types.ComputationNode):
@@ -114,7 +106,7 @@ def get_leaves(edges: base_types.GraphType) -> FrozenSet[base_types.ComputationN
         gamla.filter(
             lambda node: not any(
                 edge.source == node or node in edge.args for edge in edges
-            ),
+            )
         ),
         frozenset,
     )
@@ -128,15 +120,13 @@ def infer_graph_sink(edges: base_types.GraphType) -> base_types.ComputationNode:
 
 @gamla.curry
 def get_incoming_edges_for_node(
-    edges: base_types.GraphType,
-    node: base_types.ComputationNode,
+    edges: base_types.GraphType, node: base_types.ComputationNode
 ) -> FrozenSet[base_types.ComputationEdge]:
     return frozenset(filter(lambda edge: edge.destination == node, edges))
 
 
 def get_outgoing_edges_for_node(
-    edges: base_types.GraphType,
-    node: base_types.ComputationNode,
+    edges: base_types.GraphType, node: base_types.ComputationNode
 ) -> FrozenSet[base_types.ComputationEdge]:
     return gamla.pipe(
         edges,
