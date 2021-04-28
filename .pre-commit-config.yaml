@@ -1,9 +1,12 @@
 repos:
   - repo: https://github.com/pre-commit/pre-commit-hooks
-    rev: v3.1.0
+    rev: v3.4.0
     hooks:
       - id: check-added-large-files
       - id: debug-statements
+      - id: check-json
+      - id: pretty-format-json
+        args: [ "--autofix", "--no-ensure-ascii", "--no-sort-keys" ]
 
   - repo: https://github.com/asottile/seed-isort-config
     rev: v2.2.0
@@ -11,7 +14,7 @@ repos:
       - id: seed-isort-config
 
   - repo: https://github.com/timothycrosley/isort
-    rev: 4.3.21
+    rev: 5.8.0
     hooks:
       - id: isort
 
@@ -22,7 +25,7 @@ repos:
         language_version: python3.8
 
   - repo: https://gitlab.com/pycqa/flake8
-    rev: 3.8.3
+    rev: 3.9.0
     hooks:
       - id: flake8
         additional_dependencies:
@@ -35,14 +38,8 @@ repos:
             "pep8-naming",
           ]
 
-  - repo: https://github.com/myint/autoflake
-    rev: v1.4
-    hooks:
-      - id: autoflake
-        entry: autoflake -i --remove-all-unused-imports
-
   - repo: https://github.com/pre-commit/mirrors-mypy
-    rev: v0.781
+    rev: v0.812
     hooks:
       - id: mypy
 
@@ -52,8 +49,19 @@ repos:
       - id: static-analysis
 
   - repo: https://github.com/codespell-project/codespell
-    rev: v1.16.0
+    rev: v2.0.0
     hooks:
       - id: codespell
         entry: codespell --ignore-words=.codespell_ignore --quiet-level=4 --check-filenames
         exclude: \.(csv|json|txt)$
+
+  - repo: https://github.com/myint/autoflake
+    rev: v1.4
+    hooks:
+      - id: autoflake
+        entry: autoflake -i --remove-all-unused-imports
+
+  - repo: https://github.com/alan-turing-institute/CleverCSV-pre-commit
+    rev: v0.6.7
+    hooks:
+      - id: clevercsv-standardize
