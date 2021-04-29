@@ -166,16 +166,26 @@ def test_state():
     )
 
 
+# node1_result = node1(_ROOT_VALUE)
+# node2_result = node2(node1_result)
+# node3(node1_result, node2_result)
+
+
+# @gamla.profileit
+def bla(x):
+    for i in range(1000):
+        result = x(arg1=_ROOT_VALUE)
+        assert result.result == "node3(arg1=node1(root), arg2=node2(node1(root)))"
+
+
 def test_multiple_inputs():
     edges = (
         graph.make_edge(source=node1, destination=node2, key="arg1"),
         graph.make_edge(source=node1, destination=node3, key="arg1"),
         graph.make_edge(source=node2, destination=node3, key="arg2"),
     )
-
-    result = run.to_callable(edges, frozenset([GraphTestException]))(arg1=_ROOT_VALUE)
-
-    assert result.result == "node3(arg1=node1(root), arg2=node2(node1(root)))"
+    x = run.to_callable(edges, frozenset([GraphTestException]))
+    bla(x)
 
 
 def test_exception():
