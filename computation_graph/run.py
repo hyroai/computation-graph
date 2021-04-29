@@ -115,11 +115,12 @@ def _get_outer_kwargs(
     unbound_input: base_types.ComputationInput,
 ) -> Dict[Text, Any]:
     return gamla.pipe(
-        unbound_signature.kwargs,
-        gamla.remove(gamla.equals("state")),
-        gamla.map(gamla.pair_right(unbound_input.kwargs.get)),
-        gamla.remove(gamla.compose_left(gamla.second, gamla.equals(None))),
-        dict,
+        unbound_input.kwargs,
+        gamla.keyfilter(
+            gamla.alljuxt(
+                gamla.not_equals("state"), gamla.contains(unbound_signature.kwargs)
+            )
+        ),
     )
 
 

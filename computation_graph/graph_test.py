@@ -112,6 +112,17 @@ def test_simple():
     assert result.result == f"node2(node1({_ROOT_VALUE}))"
 
 
+def test_none_as_input():
+    cg = run.to_callable(
+        (graph.make_edge(source=node1, destination=node2, key="arg1"),),
+        frozenset([GraphTestException]),
+    )
+    result = cg(arg1=None)
+
+    assert isinstance(result, base_types.ComputationResult)
+    assert result.result == "node2(node1(None))"
+
+
 async def test_simple_async():
     cg = run.to_callable(
         (graph.make_edge(source=node1_async, destination=node2, key="arg1"),),
