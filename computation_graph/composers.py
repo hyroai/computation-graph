@@ -223,6 +223,9 @@ def _infer_composition_edges(
 def make_compose(
     *funcs: _ComposersInputType, key: Optional[Text] = None
 ) -> base_types.GraphType:
+    assert (
+        len(funcs) > 1
+    ), f"Only {len(funcs)} function passed to compose, need at least 2, funcs={funcs}"
     return gamla.pipe(
         funcs,
         reversed,
