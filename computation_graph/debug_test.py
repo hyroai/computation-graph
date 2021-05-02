@@ -21,7 +21,7 @@ def test_computation_trace(tmp_path: pathlib.Path):
 
     inner_edges = composers.make_compose(node1, node2)
     cg = run.to_callable_with_side_effect(
-        debug.debugger(filename),
+        debug.serialize_computation_trace(filename),
         composers.make_first(unactionable_node, inner_edges, node1),
         frozenset([NotImplementedError]),
     )
