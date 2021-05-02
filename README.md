@@ -20,7 +20,7 @@ sudo apt update && apt install graphviz
 pip install pygraphviz
 ```
 
-Debugging is possible by replacing `to_callable` with `run.to_callable_with_side_effect` with `debug.serialize_computation_trace(filename)` as the first argument.
+Debugging is possible by replacing `to_callable` with `run.to_callable_with_side_effect` with `debug.gviz_computation_trace(filename)` as the first argument.
 This will save a file on each graph execution to current working directory.
 
 You can use this file in a graph viewer like [gephi](https://gephi.org/).

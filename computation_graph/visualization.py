@@ -7,7 +7,7 @@ import pygraphviz as pgv
 from computation_graph import base_types
 
 
-def _get_edge_label(edge: base_types.ComputationEdge):
+def get_edge_label(edge: base_types.ComputationEdge):
     if edge.key in (None, "args"):
         return ""
     if edge.key == "first_input":
@@ -35,13 +35,13 @@ def _handle_edge(pgv_graph, edge):
     if edge.source:
         _add_computation_node(pgv_graph, edge.source)
         pgv_graph.add_edge(
-            hash(edge.source), hash(edge.destination), label=_get_edge_label(edge)
+            hash(edge.source), hash(edge.destination), label=get_edge_label(edge)
         )
     else:
         for source in edge.args:
             _add_computation_node(pgv_graph, source)
             pgv_graph.add_edge(
-                hash(source), hash(edge.destination), label=_get_edge_label(edge)
+                hash(source), hash(edge.destination), label=get_edge_label(edge)
             )
 
 
