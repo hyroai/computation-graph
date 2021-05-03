@@ -1,27 +1,32 @@
 import logging
-from typing import FrozenSet, Tuple
+from typing import Callable, FrozenSet, Tuple
 
 import gamla
 
-from computation_graph import base_types, graph, run, visualization
+from computation_graph import base_types, graph, visualization
+
+_NodeToResults = Callable
 
 
 def _node_computation_trace(
-    node_to_results: run.NodeToResults, node: base_types.ComputationNode
+    node_to_results: _NodeToResults, node: base_types.ComputationNode
 ) -> FrozenSet[Tuple[base_types.ComputationNode, base_types.ComputationResult]]:
+    results = node_to_results(node)
+    try:
+        first_result = gamla.head(results)
+    except StopIteration:
+        return frozenset()
     return frozenset(
         [
-            (node, gamla.head(node_to_results(node))),
-            *gamla.pipe(node, node_to_results, dict.values, gamla.head, dict.items),
+            (node, first_result),
+            *gamla.pipe(results, dict.values, gamla.head, dict.items),
         ]
     )
 
 
 @gamla.curry
 def gviz_computation_trace(
-    filename: str,
-    graph_instance: base_types.GraphType,
-    node_to_results: run.NodeToResults,
+    filename: str, graph_instance: base_types.GraphType, node_to_results: _NodeToResults
 ):
     gviz = visualization.union_graphviz(
         [
@@ -72,7 +77,7 @@ def _is_edge_participating(in_trace_nodes):
 
 
 def mermaid_computation_trace(graph_instance: base_types.GraphType):
-    def mermaid_computation_trace(node_to_results: run.NodeToResults):
+    def mermaid_computation_trace(node_to_results: _NodeToResults):
         gamla.pipe(
             _node_computation_trace(
                 node_to_results, graph.infer_graph_sink(graph_instance)
