@@ -1,5 +1,5 @@
 import logging
-from typing import Iterable, Tuple
+from typing import FrozenSet, Tuple
 
 import gamla
 
@@ -8,7 +8,7 @@ from computation_graph import base_types, graph, run, visualization
 
 def _node_computation_trace(
     node_to_results: run.NodeToResults, node: base_types.ComputationNode
-) -> Iterable[Tuple[base_types.ComputationNode, base_types.ComputationResult]]:
+) -> FrozenSet[Tuple[base_types.ComputationNode, base_types.ComputationResult]]:
     return frozenset(
         [
             (node, gamla.head(node_to_results(node))),
@@ -73,13 +73,11 @@ def _is_edge_participating(in_trace_nodes):
 
 def mermaid_computation_trace(graph_instance: base_types.GraphType):
     def mermaid_computation_trace(node_to_results: run.NodeToResults):
-        trace = frozenset(
+        gamla.pipe(
             _node_computation_trace(
                 node_to_results, graph.infer_graph_sink(graph_instance)
-            )
-        )
-        gamla.pipe(
-            [
+            ),
+            lambda trace: [
                 "",  # This is to avoid the indent of the logging details.
                 "graph TD",
                 gamla.pipe(trace, gamla.map(_render_mermaid_node), "\n".join),
