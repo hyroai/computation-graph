@@ -231,3 +231,21 @@ def make_compose(
         gamla.mapcat(gamla.star(_infer_composition_edges(key))),
         tuple,
     )
+
+
+def _merge_edges(edges):
+    sources = gamla.pipe(edges, gamla.map(gamla.attrgetter("source")), tuple)
+    destination = gamla.pipe(edges, gamla.head, gamla.attrgetter("destination"))
+    return make_and(sources, merge_fn=destination)
+
+
+def merge_edges_with_same_destination_and_key(
+    edges: base_types.GraphType,
+) -> base_types.GraphType:
+    """ From (f1, key, dest), (f2, key, dest) you would get f1, f2 --> dest."""
+    return gamla.pipe(
+        edges,
+        gamla.groupby(lambda edge: (edge.key, edge.destination)),
+        gamla.valmap(gamla.when(gamla.len_greater(1), _merge_edges)),
+        dict.values,
+    )
