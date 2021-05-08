@@ -75,7 +75,8 @@ def computation_trace(graph_instance: base_types.GraphType):
         trace = trace_utils.node_computation_trace(
             node_to_results, graph.infer_graph_sink(graph_instance)
         )
-        # So we don't get a `KeyError` in cases where the computation graph raises.
+        # We set a default here so we don't get a `KeyError`.
+        # This happens when there isn't a working path, and the runner will raise outside.
         node_to_result = gamla.dict_to_getter_with_default(None, dict(trace))
         return gamla.pipe(
             sink,
