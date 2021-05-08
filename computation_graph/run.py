@@ -10,7 +10,8 @@ from typing import Any, Callable, Dict, FrozenSet, Set, Text, Tuple, Type
 import gamla
 import toposort
 
-from computation_graph import base_types, debug, graph
+from computation_graph import base_types, graph
+from computation_graph.debug import ascii
 
 _get_edge_key = gamla.attrgetter("key")
 
@@ -479,7 +480,7 @@ def to_callable_with_side_effect(
     )
 
 
-to_callable = gamla.curry(to_callable_with_side_effect)(debug.mermaid_computation_trace)
+to_callable = gamla.curry(to_callable_with_side_effect)(ascii.computation_trace)
 
 
 def _log_handled_exception(exception_type: Type[Exception]):

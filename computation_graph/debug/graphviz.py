@@ -4,15 +4,8 @@ from xml.sax import saxutils
 import gamla
 import pygraphviz as pgv
 
-from computation_graph import base_types
-
-
-def get_edge_label(edge: base_types.ComputationEdge):
-    if edge.key in (None, "args"):
-        return ""
-    if edge.key == "first_input":
-        return str(edge.priority)
-    return edge.key or ""
+from computation_graph import base_types, graph
+from computation_graph.debug import trace_utils
 
 
 def _get_node_shape(node: base_types.ComputationNode):
@@ -35,13 +28,17 @@ def _handle_edge(pgv_graph, edge):
     if edge.source:
         _add_computation_node(pgv_graph, edge.source)
         pgv_graph.add_edge(
-            hash(edge.source), hash(edge.destination), label=get_edge_label(edge)
+            hash(edge.source),
+            hash(edge.destination),
+            label=trace_utils.get_edge_label(edge),
         )
     else:
         for source in edge.args:
             _add_computation_node(pgv_graph, source)
             pgv_graph.add_edge(
-                hash(source), hash(edge.destination), label=get_edge_label(edge)
+                hash(source),
+                hash(edge.destination),
+                label=trace_utils.get_edge_label(edge),
             )
 
 
@@ -94,7 +91,7 @@ union_graphviz: Callable[[Iterable[pgv.AGraph]], pgv.AGraph] = gamla.compose_lef
 )
 
 
-def _save_graphviz_as_png(filename: Text) -> Callable[[pgv.AGraph], pgv.AGraph]:
+def _save_as_png(filename: Text) -> Callable[[pgv.AGraph], pgv.AGraph]:
     return gamla.side_effect(lambda pgv_graph: pgv_graph.draw(filename, prog="dot"))
 
 
@@ -115,5 +112,23 @@ def computation_trace_to_graphviz(
 
 
 visualize_graph = gamla.compose_left(
-    computation_graph_to_graphviz, _save_graphviz_as_png("topology.png")
+    computation_graph_to_graphviz, _save_as_png("topology.png")
 )
+
+
+@gamla.curry
+def computation_trace(
+    filename: str, graph_instance: base_types.GraphType, node_to_results: Callable
+):
+    gviz = union_graphviz(
+        [
+            computation_graph_to_graphviz(graph_instance),
+            computation_trace_to_graphviz(
+                trace_utils.node_computation_trace(
+                    node_to_results, graph.infer_graph_sink(graph_instance)
+                )
+            ),
+        ]
+    )
+    gviz.layout(prog="dot")
+    gviz.write(filename)
