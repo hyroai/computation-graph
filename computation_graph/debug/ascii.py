@@ -97,7 +97,9 @@ def computation_trace(graph_instance: base_types.GraphType):
                 gamla.nth(1),
                 _process_node(
                     gamla.compose_left(
-                        gamla.head, node_to_result, gamla.attrgetter("result")
+                        gamla.head,
+                        node_to_result,
+                        gamla.unless(gamla.equals(None), gamla.attrgetter("result")),
                     ),
                     source_and_destination_to_edges,
                 ),
