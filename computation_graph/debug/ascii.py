@@ -50,8 +50,7 @@ def _skip_uninsteresting_nodes(node_to_result, node, children):
 
 
 _index_by_destination = gamla.compose_left(
-    gamla.groupby(gamla.attrgetter("destination")),
-    gamla.dict_to_getter_with_default(()),
+    gamla.groupby(base_types.edge_destination), gamla.dict_to_getter_with_default(())
 )
 
 

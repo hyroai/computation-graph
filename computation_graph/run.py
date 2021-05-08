@@ -32,7 +32,7 @@ def _get_edge_sources(edge: base_types.ComputationEdge):
 
 _toposort_nodes = gamla.compose_left(
     gamla.groupby_many(_get_edge_sources),
-    gamla.valmap(gamla.compose_left(gamla.map(gamla.attrgetter("destination")), set)),
+    gamla.valmap(gamla.compose_left(gamla.map(base_types.edge_destination), set)),
     _transpose_graph,
     toposort.toposort,
     gamla.map(frozenset),
