@@ -1,3 +1,4 @@
+import logging
 import pprint
 from typing import Callable
 
@@ -37,6 +38,7 @@ _should_render = gamla.compose_left(str, gamla.len_smaller(1000))
 
 @gamla.curry
 def _skip_uninsteresting_nodes(node_to_result, node, children):
+    """To make the debug log more readable, we try to reduce uninteresting steps by some heuristics."""
     result = node_to_result(node)
     children = tuple(children)
     if len(children) == 1:
@@ -45,7 +47,7 @@ def _skip_uninsteresting_nodes(node_to_result, node, children):
             return first_child
         if result == node_to_result(children[0][0]):
             return first_child
-    return (node, children)
+    return node, children
 
 
 _index_by_destination = gamla.compose_left(
@@ -67,6 +69,7 @@ _index_by_source_and_destination = gamla.compose_left(
 def computation_trace(graph_instance: base_types.GraphType):
     destination_to_edges = _index_by_destination(graph_instance)
     source_and_destination_to_edges = _index_by_source_and_destination(graph_instance)
+    sink = graph.infer_graph_sink(graph_instance)
 
     def computation_trace(node_to_results: Callable):
         trace = trace_utils.node_computation_trace(
@@ -75,8 +78,7 @@ def computation_trace(graph_instance: base_types.GraphType):
         # So we don't get a `KeyError` in cases where the computation graph raises.
         node_to_result = gamla.dict_to_getter_with_default(None, dict(trace))
         gamla.pipe(
-            graph_instance,
-            graph.infer_graph_sink,
+            sink,
             gamla.tree_reduce(
                 gamla.compose_left(
                     destination_to_edges,
@@ -102,7 +104,6 @@ def computation_trace(graph_instance: base_types.GraphType):
                     source_and_destination_to_edges,
                 ),
             ),
-            pprint.pprint,
         )
 
-    return computation_trace
+    return gamla.compose_left(computation_trace, pprint.pformat, logging.info)
