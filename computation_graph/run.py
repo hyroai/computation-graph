@@ -11,7 +11,6 @@ import gamla
 import toposort
 
 from computation_graph import base_types, graph
-from computation_graph.debug import ascii
 
 
 class _ComputationGraphException(Exception):
@@ -481,7 +480,7 @@ def to_callable_with_side_effect(
     )
 
 
-to_callable = gamla.curry(to_callable_with_side_effect)(ascii.computation_trace)
+to_callable = gamla.curry(to_callable_with_side_effect)(gamla.just(gamla.just(None)))
 
 
 def _log_handled_exception(exception_type: Type[Exception]):
