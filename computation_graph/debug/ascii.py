@@ -18,11 +18,10 @@ def _process_node(node_to_result, source_and_destination_to_edges, node, childre
                 gamla.juxt(
                     gamla.compose_left(
                         gamla.head,
-                        lambda source_node: source_and_destination_to_edges(
-                            (source_node, node)
-                        ),
+                        gamla.pair_right(gamla.just(node)),
+                        source_and_destination_to_edges,
                         # In theory there can be >1 connections between two nodes.
-                        gamla.map(gamla.attrgetter("key")),
+                        gamla.map(base_types.edge_key),
                         frozenset,
                     ),
                     gamla.identity,

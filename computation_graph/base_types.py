@@ -66,3 +66,4 @@ class NodeSignature:
 
 
 edge_destination = gamla.attrgetter("destination")
+edge_key = gamla.attrgetter("key")

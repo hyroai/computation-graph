@@ -36,7 +36,7 @@ def _get_unbound_signature_for_single_node(
     incoming_edges = graph.get_incoming_edges_for_node(edges, node)
 
     bound_kwargs: Tuple[Text, ...] = gamla.pipe(
-        incoming_edges, gamla.map(gamla.attrgetter("key")), gamla.filter(gamla.identity)
+        incoming_edges, gamla.map(base_types.edge_key), gamla.filter(gamla.identity)
     )
 
     return base_types.NodeSignature(

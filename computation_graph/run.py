@@ -13,8 +13,6 @@ import toposort
 from computation_graph import base_types, graph
 from computation_graph.debug import ascii
 
-_get_edge_key = gamla.attrgetter("key")
-
 
 class _ComputationGraphException(Exception):
     pass
@@ -55,7 +53,7 @@ _incoming_edge_options = gamla.compose_left(
     graph.get_incoming_edges_for_node,
     gamla.after(
         gamla.compose_left(
-            gamla.groupby(_get_edge_key),
+            gamla.groupby(base_types.edge_key),
             gamla.valmap(gamla.sort_by(gamla.attrgetter("priority"))),
             dict.values,
             gamla.star(itertools.product),
@@ -126,9 +124,9 @@ def _get_outer_kwargs(
 
 
 _get_inner_kwargs = gamla.compose_left(
-    gamla.keyfilter(_get_edge_key),
+    gamla.keyfilter(base_types.edge_key),
     dict.items,
-    gamla.groupby(gamla.compose_left(gamla.head, _get_edge_key)),
+    gamla.groupby(gamla.compose_left(gamla.head, base_types.edge_key)),
     gamla.valmap(
         gamla.compose_left(
             gamla.head, gamla.second, gamla.head, gamla.attrgetter("result")
@@ -191,7 +189,7 @@ def _get_computation_input(
         is_args=signature.is_args and any(edge.args for edge in incoming_edges),
         kwargs=gamla.pipe(
             incoming_edges,
-            gamla.map(_get_edge_key),
+            gamla.map(base_types.edge_key),
             gamla.remove(gamla.equals(None)),
             tuple,
         ),
@@ -200,7 +198,10 @@ def _get_computation_input(
     if (
         not (unbound_signature.is_args or bound_signature.is_args)
         and sum(
-            map(gamla.compose_left(_get_edge_key, gamla.equals(None)), incoming_edges)
+            map(
+                gamla.compose_left(base_types.edge_key, gamla.equals(None)),
+                incoming_edges,
+            )
         )
         == 1
     ):
