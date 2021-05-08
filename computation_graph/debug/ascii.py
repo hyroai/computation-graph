@@ -77,7 +77,7 @@ def computation_trace(graph_instance: base_types.GraphType):
         )
         # So we don't get a `KeyError` in cases where the computation graph raises.
         node_to_result = gamla.dict_to_getter_with_default(None, dict(trace))
-        gamla.pipe(
+        return gamla.pipe(
             sink,
             gamla.tree_reduce(
                 gamla.compose_left(
