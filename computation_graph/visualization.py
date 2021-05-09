@@ -117,4 +117,3 @@ def computation_trace_to_graphviz(
 visualize_graph = gamla.compose_left(
     computation_graph_to_graphviz, _save_graphviz_as_dot("bot_computation_graph.dot")
 )
-
