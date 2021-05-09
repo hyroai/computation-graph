@@ -103,9 +103,12 @@ def get_leaves(edges: base_types.GraphType) -> FrozenSet[base_types.ComputationN
     return gamla.pipe(
         edges,
         get_all_nodes,
-        gamla.filter(
-            lambda node: not any(
-                edge.source == node or node in edge.args for edge in edges
+        gamla.remove(
+            gamla.pipe(
+                edges,
+                gamla.mapcat(lambda edge: (edge.source, *edge.args)),
+                frozenset,
+                gamla.contains,
             )
         ),
         frozenset,
