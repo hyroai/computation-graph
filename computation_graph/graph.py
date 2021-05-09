@@ -103,9 +103,12 @@ def get_leaves(edges: base_types.GraphType) -> FrozenSet[base_types.ComputationN
     return gamla.pipe(
         edges,
         get_all_nodes,
-        gamla.filter(
-            lambda node: not any(
-                edge.source == node or node in edge.args for edge in edges
+        gamla.remove(
+            gamla.pipe(
+                edges,
+                gamla.mapcat(lambda edge: (edge.source, *edge.args)),
+                frozenset,
+                gamla.contains,
             )
         ),
         frozenset,
@@ -113,23 +116,13 @@ def get_leaves(edges: base_types.GraphType) -> FrozenSet[base_types.ComputationN
 
 
 def infer_graph_sink(edges: base_types.GraphType) -> base_types.ComputationNode:
-    leafs = get_leaves(edges)
-    assert len(leafs) == 1, f"computation graph has more than one sink: {leafs}"
-    return gamla.head(leafs)
+    leaves = get_leaves(edges)
+    assert len(leaves) == 1, f"computation graph has more than one sink: {leaves}"
+    return gamla.head(leaves)
 
 
-@gamla.curry
-def get_incoming_edges_for_node(
-    edges: base_types.GraphType, node: base_types.ComputationNode
-) -> FrozenSet[base_types.ComputationEdge]:
-    return frozenset(filter(lambda edge: edge.destination == node, edges))
-
-
-def get_outgoing_edges_for_node(
-    edges: base_types.GraphType, node: base_types.ComputationNode
-) -> FrozenSet[base_types.ComputationEdge]:
-    return gamla.pipe(
-        edges,
-        gamla.filter(lambda edge: node == edge.source or node in edge.args),
-        frozenset,
-    )
+get_incoming_edges_for_node = gamla.compose_left(
+    gamla.groupby(lambda edge: edge.destination),
+    gamla.valmap(frozenset),
+    gamla.dict_to_getter_with_default(frozenset()),
+)
