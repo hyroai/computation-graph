@@ -458,6 +458,7 @@ def to_callable_with_side_effect(
     edges: base_types.GraphType,
     handled_exceptions: FrozenSet[Type[Exception]],
 ) -> Callable:
+    edges = tuple(gamla.unique(edges))
     return gamla.compose_left(
         _make_outer_computation_input,
         gamla.pair_with(
