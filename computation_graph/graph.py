@@ -121,8 +121,8 @@ def infer_graph_sink(edges: base_types.GraphType) -> base_types.ComputationNode:
     return gamla.head(leaves)
 
 
-@gamla.curry
-def get_incoming_edges_for_node(
-    edges: base_types.GraphType, node: base_types.ComputationNode
-) -> FrozenSet[base_types.ComputationEdge]:
-    return frozenset(filter(lambda edge: edge.destination == node, edges))
+get_incoming_edges_for_node = gamla.compose_left(
+    gamla.groupby(lambda edge: edge.destination),
+    gamla.valmap(frozenset),
+    gamla.dict_to_getter_with_default(frozenset()),
+)
