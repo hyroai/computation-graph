@@ -123,13 +123,3 @@ def get_incoming_edges_for_node(
     edges: base_types.GraphType, node: base_types.ComputationNode
 ) -> FrozenSet[base_types.ComputationEdge]:
     return frozenset(filter(lambda edge: edge.destination == node, edges))
-
-
-def get_outgoing_edges_for_node(
-    edges: base_types.GraphType, node: base_types.ComputationNode
-) -> FrozenSet[base_types.ComputationEdge]:
-    return gamla.pipe(
-        edges,
-        gamla.filter(lambda edge: node == edge.source or node in edge.args),
-        frozenset,
-    )
