@@ -39,6 +39,13 @@ def _map(f):
     return map_curried
 
 
+def _map_async(f):
+    async def map_async(it):
+        return await asyncio.gather(*tuple(f(x) for x in it))
+
+    return map_async
+
+
 def _filter(f):
     def filter_curried(it):
         return filter(f, it)
@@ -101,10 +108,21 @@ def _groupby_many(grouper):
     return groupby_many
 
 
-def _compose_left(*functions):
-    def compose_left(x):
-        for f in functions:
+def _compose(*functions):
+    def compose(x):
+        for f in reversed(functions):
             x = f(x)
+        return x
+
+    return compose
+
+
+def _compose_left(*functions):
+    def compose_left(*args, **kwargs):
+        for f in functions:
+            x = f(*args, **kwargs)
+            args = (x,)
+            kwargs = {}
         return x
 
     return compose_left
@@ -421,7 +439,14 @@ def _after(f):
     return after
 
 
-_juxtduct = gamla.compose_left(gamla.juxt, _after(_star(itertools.product)))
+def _juxt(*functions):
+    def juxt(*args, **kwargs):
+        return tuple(f(*args, **kwargs) for f in functions)
+
+    return juxt
+
+
+_juxtduct = _compose_left(_juxt, _after(_star(itertools.product)))
 _mapdict = _compose_left(_map, _after(dict))
 _mapduct = _compose_left(_map, _after(_star(itertools.product)))
 _maptuple = _compose_left(_map, _after(tuple))
@@ -435,7 +460,7 @@ _decisions_from_value_choices = _compose_left(
             _map(_compose_left(gamla.head, gamla.second)),
             _reduce(lambda x, y: _merge_decision([x, y]), gamla.frozendict()),
         ),
-        _mapdict(gamla.juxt(gamla.second, _choice_to_value)),
+        _mapdict(_juxt(gamla.second, _choice_to_value)),
     ),
     _merge,
 )
@@ -500,46 +525,59 @@ def _apply(node: base_types.ComputationNode, node_input: base_types.ComputationI
     )
 
 
-@gamla.curry
-def _run_keeping_choices(
-    run_node_for_input: Callable[
-        [base_types.ComputationNode, base_types.ComputationInput],
-        base_types.ComputationResult,
-    ],
-    node_to_external_input: Callable[
-        [base_types.ComputationNode], base_types.ComputationInput,
-    ],
-):
-    return gamla.juxt(
-        gamla.compose_many_to_one(
-            [
-                gamla.head,  # node
-                gamla.compose_many_to_one(  # computation input
-                    [
-                        _compose_left(gamla.head, node_to_external_input),
-                        _compose_left(gamla.head, gamla.attrgetter("signature")),
-                        gamla.second,  # edges choice
-                        _compose_left(  # dependencies
-                            gamla.nth(2),  # values for edges choice
-                            _maptuple(_maptuple(_choice_to_value)),
+def _run_keeping_choices(is_async: bool):
+    def run_keeping_choices(node_to_external_input):
+        if is_async:
+
+            async def run_keeping_choices(params):
+                node, edges_choice, values_for_edges_choice = params
+                return (
+                    _wrap_in_result_if_needed(
+                        await gamla.to_awaitable(
+                            _apply(
+                                node,
+                                _get_computation_input(
+                                    node_to_external_input(node),
+                                    node.signature,
+                                    edges_choice,
+                                    _maptuple(_maptuple(_choice_to_value))(
+                                        values_for_edges_choice
+                                    ),
+                                ),
+                            )
+                        )
+                    ),
+                    _decisions_from_value_choices(values_for_edges_choice),
+                )
+
+            return run_keeping_choices
+
+        def run_keeping_choices_sync(params):
+            node, edges_choice, values_for_edges_choice = params
+            return (
+                _wrap_in_result_if_needed(
+                    _apply(
+                        node,
+                        _get_computation_input(
+                            node_to_external_input(node),
+                            node.signature,
+                            edges_choice,
+                            _maptuple(_maptuple(_choice_to_value))(
+                                values_for_edges_choice
+                            ),
                         ),
-                    ],
-                    _get_computation_input,
+                    )
                 ),
-            ],
-            run_node_for_input,
-        ),
-        _compose_left(gamla.nth(2), _decisions_from_value_choices),
-    )
+                _decisions_from_value_choices(values_for_edges_choice),
+            )
+
+        return run_keeping_choices_sync
+
+    return run_keeping_choices
 
 
 def _process_layer_in_parallel(f):
-    return gamla.compose_left(
-        lambda state, layer: ((state,), layer),
-        _star(itertools.product),
-        gamla.map(f),
-        _merge,
-    )
+    return gamla.compose_left(gamla.pack, gamla.explode(1), gamla.map(f), _merge)
 
 
 def _dag_layer_reduce(f: Callable):
@@ -564,32 +602,53 @@ def _edge_to_value_options(accumulated_outputs):
     )
 
 
-@gamla.curry
-def _process_node(is_async, get_edge_options, f):
-    return gamla.compose_many_to_one(
-        [
-            gamla.head,  # accumulated results
-            _compose_left(gamla.second, gamla.wrap_tuple),  # node
-            (_compose_left_async if is_async else _compose_left)(  # new results
-                _juxtduct(
-                    _compose_left(gamla.second, gamla.wrap_tuple),
-                    _compose_left(gamla.second, get_edge_options),
-                    _compose_left(gamla.head, _edge_to_value_options, gamla.wrap_tuple),
-                ),
-                _mapcat(
-                    _juxtduct(
-                        _compose_left(gamla.head, gamla.wrap_tuple),
-                        _compose_left(gamla.second, gamla.wrap_tuple),
-                        _star(lambda _, y, z: z(y)),
-                    )
-                ),
-                gamla.map(f),
-                _filter(gamla.identity),
-                dict,
-            ),
-        ],
-        gamla.assoc_in,
-    )
+_bla = _compose_left(
+    gamla.explode(1),
+    _mapcat(
+        _juxtduct(
+            _compose_left(gamla.head, gamla.wrap_tuple),
+            _compose_left(gamla.second, gamla.wrap_tuple),
+            _star(lambda _, y, z: z(y)),
+        )
+    ),
+)
+
+
+def _process_node(is_async, get_edge_options):
+    def process_node(f):
+        if is_async:
+
+            async def process_node(params):
+                accumulated_results, node = params
+                params = (
+                    node,
+                    get_edge_options(node),
+                    _edge_to_value_options(accumulated_results),
+                )
+                accumulated_results[node] = await _compose_left_async(
+                    _bla, _map_async(f), _filter(gamla.identity), dict
+                )(params)
+
+                return accumulated_results
+
+            return process_node
+
+        def process_node_sync(params):
+            accumulated_results, node = params
+            params = (
+                node,
+                get_edge_options(node),
+                _edge_to_value_options(accumulated_results),
+            )
+            accumulated_results[node] = _compose_left(
+                _bla, _map(f), _filter(gamla.identity), dict
+            )(params)
+
+            return accumulated_results
+
+        return process_node_sync
+
+    return process_node
 
 
 _is_graph_async = _compose_left(
@@ -605,7 +664,7 @@ def _make_runner(
 ):
     return gamla.compose_left(
         # Higher order pipeline that constructs a graph runner.
-        gamla.compose(
+        _compose(
             _dag_layer_reduce,
             _process_layer_in_parallel,
             _process_node(is_async, _incoming_edge_options(edges)),
@@ -613,9 +672,7 @@ def _make_runner(
                 (*handled_exceptions, _NotCoherent),
                 _compose_left(type, _log_handled_exception, gamla.just(None)),
             ),
-            _run_keeping_choices(
-                gamla.compose_left(async_decoration(_apply), _wrap_in_result_if_needed)
-            ),
+            _run_keeping_choices(is_async),
             gamla.before(edges_to_node_id),
             _inject_state,
         ),

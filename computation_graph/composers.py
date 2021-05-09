@@ -33,7 +33,7 @@ def _get_unbound_signature_for_single_node(
     node: base_types.ComputationNode, edges: base_types.GraphType
 ) -> base_types.NodeSignature:
     """Computes the new signature of unbound variables after considering internal edges."""
-    incoming_edges = graph.get_incoming_edges_for_node(edges, node)
+    incoming_edges = graph.get_incoming_edges_for_node(edges)(node)
 
     bound_kwargs: Tuple[Text, ...] = gamla.pipe(
         incoming_edges, gamla.map(gamla.attrgetter("key")), gamla.filter(gamla.identity)
