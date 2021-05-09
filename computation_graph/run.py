@@ -344,11 +344,25 @@ class ComputationFailed(Exception):
     pass
 
 
-_merge_decision = _merge_with(
-    _compose_left(
-        gamla.unique, tuple, _check(gamla.len_equals(1), _NotCoherent), gamla.head
-    )
-)
+def _merge_with_reducer(reducer):
+    def merge_with_reducer(*dictionaries):
+        new_d = {}
+        for d in dictionaries:
+            for k, v in d.items():
+                if k in new_d:
+                    new_d[k] = reducer(new_d[k], v)
+                else:
+                    new_d[k] = v
+        return new_d
+
+    return merge_with_reducer
+
+
+def _check_equal_and_take_one(x, y):
+    if x != y:
+        raise _NotCoherent
+    return x
+
 
 NodeToResults = Callable[[base_types.ComputationNode], _ResultToDecisionsType]
 
@@ -458,7 +472,7 @@ _decisions_from_value_choices = _compose_left(
     gamla.bifurcate(
         _compose_left(
             _map(_compose_left(gamla.head, gamla.second)),
-            _reduce(lambda x, y: _merge_decision([x, y]), gamla.frozendict()),
+            _reduce(_merge_with_reducer(_check_equal_and_take_one), gamla.frozendict()),
         ),
         _mapdict(_juxt(gamla.second, _choice_to_value)),
     ),

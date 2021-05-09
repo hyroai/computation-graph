@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any, Callable, Optional, Text, Tuple, Union
+from typing import Any, Callable, Optional, Text, Union
 
 import gamla
 
@@ -30,22 +30,25 @@ def _get_edges_from_node_or_graph(
 
 @gamla.curry
 def _get_unbound_signature_for_single_node(
-    node: base_types.ComputationNode, edges: base_types.GraphType
+    node_to_incoming_edges, node: base_types.ComputationNode
 ) -> base_types.NodeSignature:
     """Computes the new signature of unbound variables after considering internal edges."""
-    incoming_edges = graph.get_incoming_edges_for_node(edges)(node)
+    incoming_edges = node_to_incoming_edges(node)
 
-    bound_kwargs: Tuple[Text, ...] = gamla.pipe(
-        incoming_edges, gamla.map(gamla.attrgetter("key")), gamla.filter(gamla.identity)
+    keep_not_in_bound_kwargs = gamla.pipe(
+        incoming_edges,
+        lambda x: map(gamla.attrgetter("key"), x),
+        gamla.filter(gamla.identity),
+        frozenset,
+        gamla.contains,
+        gamla.remove,
     )
 
     return base_types.NodeSignature(
         is_args=node.signature.is_args
         and not any(edge.args for edge in incoming_edges),
-        kwargs=tuple(filter(lambda x: x not in bound_kwargs, node.signature.kwargs)),
-        optional_kwargs=tuple(
-            filter(lambda x: x not in bound_kwargs, node.signature.optional_kwargs)
-        ),
+        kwargs=tuple(keep_not_in_bound_kwargs(node.signature.kwargs)),
+        optional_kwargs=tuple(keep_not_in_bound_kwargs(node.signature.optional_kwargs)),
     )
 
 
@@ -193,7 +196,9 @@ def _infer_composition_edges(
             gamla.unique,
             gamla.filter(
                 gamla.compose_left(
-                    _get_unbound_signature_for_single_node(edges=destination),
+                    _get_unbound_signature_for_single_node(
+                        graph.get_incoming_edges_for_node(destination)
+                    ),
                     lambda signature: key in signature.kwargs,
                 )
             ),
