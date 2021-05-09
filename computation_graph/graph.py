@@ -103,9 +103,12 @@ def get_leaves(edges: base_types.GraphType) -> FrozenSet[base_types.ComputationN
     return gamla.pipe(
         edges,
         get_all_nodes,
-        gamla.filter(
-            lambda node: not any(
-                edge.source == node or node in edge.args for edge in edges
+        gamla.remove(
+            gamla.pipe(
+                edges,
+                gamla.mapcat(lambda edge: (edge.source, *edge.args)),
+                frozenset,
+                gamla.contains,
             )
         ),
         frozenset,
@@ -123,13 +126,3 @@ def get_incoming_edges_for_node(
     edges: base_types.GraphType, node: base_types.ComputationNode
 ) -> FrozenSet[base_types.ComputationEdge]:
     return frozenset(filter(lambda edge: edge.destination == node, edges))
-
-
-def get_outgoing_edges_for_node(
-    edges: base_types.GraphType, node: base_types.ComputationNode
-) -> FrozenSet[base_types.ComputationEdge]:
-    return gamla.pipe(
-        edges,
-        gamla.filter(lambda edge: node == edge.source or node in edge.args),
-        frozenset,
-    )
