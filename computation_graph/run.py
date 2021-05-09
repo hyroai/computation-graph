@@ -177,19 +177,6 @@ def _star(f):
     return starred
 
 
-def _merge_with(f):
-    def merge_with(dicts):
-        new_d = {}
-        for d in dicts:
-            for k in d:
-                if k not in new_d:
-                    new_d[k] = []
-                new_d[k].append(d[k])
-        return _valmap(f)(new_d)
-
-    return merge_with
-
-
 def _pair_left(f):
     def pair_left(x):
         return f(x), x
@@ -205,9 +192,6 @@ def _reduce(f, initial):
         return state
 
     return reduce
-
-
-_merge = _merge_with(gamla.last)
 
 
 _get_edge_key = gamla.attrgetter("key")
@@ -356,6 +340,9 @@ def _merge_with_reducer(reducer):
         return new_d
 
     return merge_with_reducer
+
+
+_merge = _star(_merge_with_reducer(lambda _, x: x))
 
 
 def _check_equal_and_take_one(x, y):
