@@ -9,9 +9,10 @@ from typing import Any, Callable, Dict, FrozenSet, Set, Text, Tuple, Type
 
 import gamla
 import toposort
+from gamla.optimized import async_functions as opt_async_gamla
+from gamla.optimized import sync as opt_gamla
 
 from computation_graph import base_types, graph
-from computation_graph import optimized_gamla as opt_gamla
 
 _get_edge_key = gamla.attrgetter("key")
 
@@ -68,6 +69,13 @@ _incoming_edge_options = opt_gamla.compose_left(
     ),
 )
 
+_get_args_helper = opt_gamla.compose_left(
+    opt_gamla.keyfilter(gamla.attrgetter("args")),
+    dict.values,
+    gamla.head,
+    opt_gamla.maptuple(gamla.attrgetter("result")),
+)
+
 
 def _get_args(
     edges_to_results: Dict[
@@ -80,13 +88,7 @@ def _get_args(
     if unbound_signature.is_args:
         return unbound_input.args
     if bound_signature.is_args:
-        return opt_gamla.pipe(
-            edges_to_results,
-            opt_gamla.keyfilter(gamla.attrgetter("args")),
-            dict.values,
-            gamla.head,
-            opt_gamla.maptuple(gamla.attrgetter("result")),
-        )
+        return _get_args_helper(edges_to_results)
     return ()
 
 
@@ -183,21 +185,27 @@ def _signature_difference(
     )
 
 
+_get_kwargs_from_edges = opt_gamla.compose_left(
+    opt_gamla.map(_get_edge_key), opt_gamla.remove(gamla.equals(None)), tuple
+)
+
+
+def _get_bound_signature(
+    is_args: bool, incoming_edges: base_types.GraphType
+) -> base_types.NodeSignature:
+    return base_types.NodeSignature(
+        is_args=is_args and any(edge.args for edge in incoming_edges),
+        kwargs=_get_kwargs_from_edges(incoming_edges),
+    )
+
+
 def _get_computation_input(
     unbound_input: base_types.ComputationInput,
     signature: base_types.NodeSignature,
     incoming_edges: base_types.GraphType,
     results: Tuple[Tuple[base_types.ComputationResult, ...], ...],
 ) -> base_types.ComputationInput:
-    bound_signature = base_types.NodeSignature(
-        is_args=signature.is_args and any(edge.args for edge in incoming_edges),
-        kwargs=opt_gamla.pipe(
-            incoming_edges,
-            opt_gamla.map(_get_edge_key),
-            opt_gamla.remove(gamla.equals(None)),
-            tuple,
-        ),
-    )
+    bound_signature = _get_bound_signature(signature.is_args, incoming_edges)
     unbound_signature = _signature_difference(signature, bound_signature)
     if (
         not (unbound_signature.is_args or bound_signature.is_args)
@@ -394,10 +402,8 @@ def _edge_to_value_options(accumulated_outputs):
             _get_edge_sources,
             opt_gamla.mapduct(
                 _node_to_value_choices(
-                    gamla.excepts(
-                        KeyError,
-                        gamla.just(gamla.frozendict()),
-                        accumulated_outputs.__getitem__,
+                    gamla.dict_to_getter_with_default(
+                        gamla.frozendict(), accumulated_outputs
                     )
                 )
             ),
@@ -428,8 +434,8 @@ def _process_node(is_async, get_edge_options):
                     get_edge_options(node),
                     _edge_to_value_options(accumulated_results),
                 )
-                accumulated_results[node] = await opt_gamla.compose_left_async(
-                    _bla, opt_gamla.map_async(f), opt_gamla.filter(gamla.identity), dict
+                accumulated_results[node] = await opt_async_gamla.compose_left_async(
+                    _bla, opt_async_gamla.map(f), opt_gamla.filter(gamla.identity), dict
                 )(params)
 
                 return accumulated_results
@@ -479,6 +485,7 @@ def _make_runner(
             gamla.before(edges_to_node_id),
             _inject_state,
         ),
+        gamla.profileit,  # Enable to get a read on slow functions.
         # At this point we move to a regular pipeline of values.
         async_decoration(gamla.apply(edges)),
         gamla.attrgetter("__getitem__"),
