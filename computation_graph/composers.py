@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import Any, Callable, Optional, Text, Union
 
 import gamla
+from gamla.optimized import sync as opt_gamla
 
 from computation_graph import base_types, graph
 
@@ -37,7 +38,7 @@ def _get_unbound_signature_for_single_node(
 
     keep_not_in_bound_kwargs = gamla.pipe(
         incoming_edges,
-        lambda x: map(gamla.attrgetter("key"), x),
+        opt_gamla.map(gamla.attrgetter("key")),
         gamla.filter(gamla.identity),
         frozenset,
         gamla.contains,
