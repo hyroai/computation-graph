@@ -10,7 +10,8 @@ from typing import Any, Callable, Dict, FrozenSet, Set, Text, Tuple, Type
 import gamla
 import toposort
 
-from computation_graph import base_types, graph, optimized_gamla
+from computation_graph import base_types, graph
+from computation_graph import optimized_gamla as opt_gamla
 
 _get_edge_key = gamla.attrgetter("key")
 
@@ -22,10 +23,8 @@ class _ComputationGraphException(Exception):
 def _transpose_graph(
     graph: Dict[base_types.ComputationNode, Set[base_types.ComputationNode]]
 ) -> Dict[base_types.ComputationNode, Set[base_types.ComputationNode]]:
-    return optimized_gamla.pipe(
-        graph.keys(),
-        optimized_gamla.groupby_many(graph.get),
-        optimized_gamla.valmap(set),
+    return opt_gamla.pipe(
+        graph.keys(), opt_gamla.groupby_many(graph.get), opt_gamla.valmap(set)
     )
 
 
@@ -33,16 +32,14 @@ def _get_edge_sources(edge: base_types.ComputationEdge):
     return edge.args or (edge.source,)
 
 
-_toposort_nodes = optimized_gamla.compose_left(
-    optimized_gamla.groupby_many(_get_edge_sources),
-    optimized_gamla.valmap(
-        optimized_gamla.compose_left(
-            optimized_gamla.map(gamla.attrgetter("destination")), set
-        )
+_toposort_nodes = opt_gamla.compose_left(
+    opt_gamla.groupby_many(_get_edge_sources),
+    opt_gamla.valmap(
+        opt_gamla.compose_left(opt_gamla.map(gamla.attrgetter("destination")), set)
     ),
     _transpose_graph,
     toposort.toposort,
-    optimized_gamla.map(frozenset),
+    opt_gamla.map(frozenset),
     tuple,
 )
 
@@ -58,15 +55,15 @@ def _make_outer_computation_input(*args, **kwargs) -> base_types.ComputationInpu
     return base_types.ComputationInput(args=args, kwargs=kwargs)
 
 
-_incoming_edge_options = optimized_gamla.compose_left(
+_incoming_edge_options = opt_gamla.compose_left(
     graph.get_incoming_edges_for_node,
     gamla.after(
-        optimized_gamla.compose_left(
-            optimized_gamla.groupby(_get_edge_key),
-            optimized_gamla.valmap(gamla.sort_by(gamla.attrgetter("priority"))),
+        opt_gamla.compose_left(
+            opt_gamla.groupby(_get_edge_key),
+            opt_gamla.valmap(gamla.sort_by(gamla.attrgetter("priority"))),
             dict.values,
-            optimized_gamla.star(itertools.product),
-            optimized_gamla.map(tuple),
+            opt_gamla.star(itertools.product),
+            opt_gamla.map(tuple),
         )
     ),
 )
@@ -83,12 +80,12 @@ def _get_args(
     if unbound_signature.is_args:
         return unbound_input.args
     if bound_signature.is_args:
-        return optimized_gamla.pipe(
+        return opt_gamla.pipe(
             edges_to_results,
-            optimized_gamla.keyfilter(gamla.attrgetter("args")),
+            opt_gamla.keyfilter(gamla.attrgetter("args")),
             dict.values,
             gamla.head,
-            optimized_gamla.maptuple(gamla.attrgetter("result")),
+            opt_gamla.maptuple(gamla.attrgetter("result")),
         )
     return ()
 
@@ -98,23 +95,21 @@ def _get_unary_computation_input(
     value: base_types.ComputationResult,
     unbound_signature: base_types.NodeSignature,
 ) -> Dict[Text, Any]:
-    return optimized_gamla.pipe(
+    return opt_gamla.pipe(
         unbound_signature.kwargs,
-        optimized_gamla.remove(
-            optimized_gamla.anyjuxt(
+        opt_gamla.remove(
+            opt_gamla.anyjuxt(
                 gamla.contains(unbound_signature.optional_kwargs), gamla.equals("state")
             )
         ),
         tuple,
-        optimized_gamla.check(
-            optimized_gamla.anyjuxt(gamla.len_equals(1), gamla.len_equals(0)),
+        opt_gamla.check(
+            opt_gamla.anyjuxt(gamla.len_equals(1), gamla.len_equals(0)),
             _ComputationGraphException(
                 "got a single input function with more than 1 unbound arguments. cannot bind function"
             ),
         ),
-        optimized_gamla.ternary(
-            gamla.len_equals(1), gamla.identity, gamla.just(kwargs)
-        ),
+        opt_gamla.ternary(gamla.len_equals(1), gamla.identity, gamla.just(kwargs)),
         gamla.head,
         lambda first_kwarg: {first_kwarg: value.result},
     )
@@ -132,12 +127,12 @@ def _get_outer_kwargs(
     return d
 
 
-_get_inner_kwargs = optimized_gamla.compose_left(
-    optimized_gamla.keyfilter(_get_edge_key),
+_get_inner_kwargs = opt_gamla.compose_left(
+    opt_gamla.keyfilter(_get_edge_key),
     dict.items,
-    optimized_gamla.groupby(optimized_gamla.compose_left(gamla.head, _get_edge_key)),
-    optimized_gamla.valmap(
-        optimized_gamla.compose_left(
+    opt_gamla.groupby(opt_gamla.compose_left(gamla.head, _get_edge_key)),
+    opt_gamla.valmap(
+        opt_gamla.compose_left(
             gamla.head, gamla.second, gamla.head, gamla.attrgetter("result")
         )
     ),
@@ -168,12 +163,10 @@ NodeToResults = Callable[[base_types.ComputationNode], _ResultToDecisionsType]
 
 
 def _node_to_value_choices(node_to_results: NodeToResults):
-    return optimized_gamla.compose_left(
-        optimized_gamla.pair_left(
-            optimized_gamla.compose_left(node_to_results, dict.items)
-        ),
-        optimized_gamla.packstack(gamla.identity, itertools.repeat),
-        optimized_gamla.star(zip),
+    return opt_gamla.compose_left(
+        opt_gamla.pair_left(opt_gamla.compose_left(node_to_results, dict.items)),
+        opt_gamla.packstack(gamla.identity, itertools.repeat),
+        opt_gamla.star(zip),
     )
 
 
@@ -198,10 +191,10 @@ def _get_computation_input(
 ) -> base_types.ComputationInput:
     bound_signature = base_types.NodeSignature(
         is_args=signature.is_args and any(edge.args for edge in incoming_edges),
-        kwargs=optimized_gamla.pipe(
+        kwargs=opt_gamla.pipe(
             incoming_edges,
-            optimized_gamla.map(_get_edge_key),
-            optimized_gamla.remove(gamla.equals(None)),
+            opt_gamla.map(_get_edge_key),
+            opt_gamla.remove(gamla.equals(None)),
             tuple,
         ),
     )
@@ -210,7 +203,7 @@ def _get_computation_input(
         not (unbound_signature.is_args or bound_signature.is_args)
         and sum(
             map(
-                optimized_gamla.compose_left(_get_edge_key, gamla.equals(None)),
+                opt_gamla.compose_left(_get_edge_key, gamla.equals(None)),
                 incoming_edges,
             )
         )
@@ -256,21 +249,21 @@ def _inject_state(unbound_input: base_types.ComputationInput):
     return inject_state
 
 
-_choice_to_value = optimized_gamla.compose_left(gamla.head, gamla.head)
+_choice_to_value = opt_gamla.compose_left(gamla.head, gamla.head)
 
-_decisions_from_value_choices = optimized_gamla.compose_left(
+_decisions_from_value_choices = opt_gamla.compose_left(
     gamla.concat,
     gamla.bifurcate(
-        optimized_gamla.compose_left(
-            optimized_gamla.map(optimized_gamla.compose_left(gamla.head, gamla.second)),
-            optimized_gamla.reduce(
-                optimized_gamla.merge_with_reducer(_check_equal_and_take_one),
+        opt_gamla.compose_left(
+            opt_gamla.map(opt_gamla.compose_left(gamla.head, gamla.second)),
+            opt_gamla.reduce(
+                opt_gamla.merge_with_reducer(_check_equal_and_take_one),
                 gamla.frozendict(),
             ),
         ),
-        optimized_gamla.mapdict(optimized_gamla.juxt(gamla.second, _choice_to_value)),
+        opt_gamla.mapdict(opt_gamla.juxt(gamla.second, _choice_to_value)),
     ),
-    optimized_gamla.merge,
+    opt_gamla.merge,
 )
 
 
@@ -280,10 +273,10 @@ def _construct_computation_state(
     first_result = gamla.head(results)
     return {
         **{sink_node: first_result.state},
-        **optimized_gamla.pipe(
+        **opt_gamla.pipe(
             results,
             gamla.itemgetter(first_result),
-            optimized_gamla.valmap(gamla.attrgetter("state")),
+            opt_gamla.valmap(gamla.attrgetter("state")),
         ),
     }
 
@@ -300,23 +293,23 @@ def _merge_with_previous_state(
 
 def _construct_computation_result(edges: base_types.GraphType, edges_to_node_id):
     def construct_computation_result(result_to_dependencies: _ResultToDependencies):
-        return optimized_gamla.pipe(
+        return opt_gamla.pipe(
             edges,
             graph.infer_graph_sink,
-            optimized_gamla.pair_left(
+            opt_gamla.pair_left(
                 gamla.translate_exception(
-                    optimized_gamla.compose_left(result_to_dependencies, gamla.head),
+                    opt_gamla.compose_left(result_to_dependencies, gamla.head),
                     (StopIteration, KeyError),
                     ComputationFailed,
                 )
             ),
-            optimized_gamla.check(gamla.identity, ComputationFailed),
-            optimized_gamla.packstack(
+            opt_gamla.check(gamla.identity, ComputationFailed),
+            opt_gamla.packstack(
                 gamla.attrgetter("result"),
-                optimized_gamla.compose_left(
-                    optimized_gamla.pair_left(result_to_dependencies),
-                    optimized_gamla.star(_construct_computation_state),
-                    optimized_gamla.keymap(edges_to_node_id),
+                opt_gamla.compose_left(
+                    opt_gamla.pair_left(result_to_dependencies),
+                    opt_gamla.star(_construct_computation_state),
+                    opt_gamla.keymap(edges_to_node_id),
                 ),
             ),
         )
@@ -348,8 +341,8 @@ def _run_keeping_choices(is_async: bool):
                                     node_to_external_input(node),
                                     node.signature,
                                     edges_choice,
-                                    optimized_gamla.maptuple(
-                                        optimized_gamla.maptuple(_choice_to_value)
+                                    opt_gamla.maptuple(
+                                        opt_gamla.maptuple(_choice_to_value)
                                     )(values_for_edges_choice),
                                 ),
                             )
@@ -370,9 +363,9 @@ def _run_keeping_choices(is_async: bool):
                             node_to_external_input(node),
                             node.signature,
                             edges_choice,
-                            optimized_gamla.maptuple(
-                                optimized_gamla.maptuple(_choice_to_value)
-                            )(values_for_edges_choice),
+                            opt_gamla.maptuple(opt_gamla.maptuple(_choice_to_value))(
+                                values_for_edges_choice
+                            ),
                         ),
                     )
                 ),
@@ -386,7 +379,7 @@ def _run_keeping_choices(is_async: bool):
 
 def _process_layer_in_parallel(f):
     return gamla.compose_left(
-        gamla.pack, gamla.explode(1), gamla.map(f), optimized_gamla.merge
+        gamla.pack, gamla.explode(1), gamla.map(f), opt_gamla.merge
     )
 
 
@@ -396,10 +389,10 @@ def _dag_layer_reduce(f: Callable):
 
 
 def _edge_to_value_options(accumulated_outputs):
-    return optimized_gamla.mapduct(
-        optimized_gamla.compose_left(
+    return opt_gamla.mapduct(
+        opt_gamla.compose_left(
             _get_edge_sources,
-            optimized_gamla.mapduct(
+            opt_gamla.mapduct(
                 _node_to_value_choices(
                     gamla.excepts(
                         KeyError,
@@ -412,13 +405,13 @@ def _edge_to_value_options(accumulated_outputs):
     )
 
 
-_bla = optimized_gamla.compose_left(
+_bla = opt_gamla.compose_left(
     gamla.explode(1),
-    optimized_gamla.mapcat(
-        optimized_gamla.juxtduct(
-            optimized_gamla.compose_left(gamla.head, gamla.wrap_tuple),
-            optimized_gamla.compose_left(gamla.second, gamla.wrap_tuple),
-            optimized_gamla.star(lambda _, y, z: z(y)),
+    opt_gamla.mapcat(
+        opt_gamla.juxtduct(
+            opt_gamla.compose_left(gamla.head, gamla.wrap_tuple),
+            opt_gamla.compose_left(gamla.second, gamla.wrap_tuple),
+            opt_gamla.star(lambda _, y, z: z(y)),
         )
     ),
 )
@@ -435,11 +428,8 @@ def _process_node(is_async, get_edge_options):
                     get_edge_options(node),
                     _edge_to_value_options(accumulated_results),
                 )
-                accumulated_results[node] = await optimized_gamla.compose_left_async(
-                    _bla,
-                    optimized_gamla.map_async(f),
-                    optimized_gamla.filter(gamla.identity),
-                    dict,
+                accumulated_results[node] = await opt_gamla.compose_left_async(
+                    _bla, opt_gamla.map_async(f), opt_gamla.filter(gamla.identity), dict
                 )(params)
 
                 return accumulated_results
@@ -453,11 +443,8 @@ def _process_node(is_async, get_edge_options):
                 get_edge_options(node),
                 _edge_to_value_options(accumulated_results),
             )
-            accumulated_results[node] = optimized_gamla.compose_left(
-                _bla,
-                optimized_gamla.map(f),
-                optimized_gamla.filter(gamla.identity),
-                dict,
+            accumulated_results[node] = opt_gamla.compose_left(
+                _bla, opt_gamla.map(f), opt_gamla.filter(gamla.identity), dict
             )(params)
 
             return accumulated_results
@@ -467,10 +454,10 @@ def _process_node(is_async, get_edge_options):
     return process_node
 
 
-_is_graph_async = optimized_gamla.compose_left(
-    optimized_gamla.mapcat(lambda edge: (edge.source, *edge.args)),
-    optimized_gamla.remove(gamla.equals(None)),
-    optimized_gamla.map(gamla.attrgetter("func")),
+_is_graph_async = opt_gamla.compose_left(
+    opt_gamla.mapcat(lambda edge: (edge.source, *edge.args)),
+    opt_gamla.remove(gamla.equals(None)),
+    opt_gamla.map(gamla.attrgetter("func")),
     gamla.anymap(asyncio.iscoroutinefunction),
 )
 
@@ -480,15 +467,13 @@ def _make_runner(
 ):
     return gamla.compose_left(
         # Higher order pipeline that constructs a graph runner.
-        optimized_gamla.compose(
+        opt_gamla.compose(
             _dag_layer_reduce,
             _process_layer_in_parallel,
             _process_node(is_async, _incoming_edge_options(edges)),
             gamla.excepts(
                 (*handled_exceptions, _NotCoherent),
-                optimized_gamla.compose_left(
-                    type, _log_handled_exception, gamla.just(None)
-                ),
+                opt_gamla.compose_left(type, _log_handled_exception, gamla.just(None)),
             ),
             _run_keeping_choices(is_async),
             gamla.before(edges_to_node_id),
@@ -522,7 +507,7 @@ def to_callable_with_side_effect(
                 graph.edges_to_node_id_map(edges).__getitem__,
             )
         ),
-        optimized_gamla.star(
+        opt_gamla.star(
             lambda result_and_state, computation_input: _merge_with_previous_state(
                 computation_input.state, *result_and_state
             )
