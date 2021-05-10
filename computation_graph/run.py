@@ -434,7 +434,7 @@ def _process_node(is_async, get_edge_options):
                     get_edge_options(node),
                     _edge_to_value_options(accumulated_results),
                 )
-                accumulated_results[node] = await opt_async_gamla.compose_left_async(
+                accumulated_results[node] = await opt_async_gamla.compose_left(
                     _bla, opt_async_gamla.map(f), opt_gamla.filter(gamla.identity), dict
                 )(params)
 
