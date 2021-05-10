@@ -485,7 +485,7 @@ def _make_runner(
             gamla.before(edges_to_node_id),
             _inject_state,
         ),
-        gamla.profileit,  # Enable to get a read on slow functions.
+        # gamla.profileit,  # Enable to get a read on slow functions.
         # At this point we move to a regular pipeline of values.
         async_decoration(gamla.apply(edges)),
         gamla.attrgetter("__getitem__"),
