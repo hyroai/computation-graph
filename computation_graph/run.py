@@ -311,15 +311,13 @@ def _construct_computation_result(edges: base_types.GraphType, edges_to_node_id)
                 )
             ),
             optimized_gamla.check(gamla.identity, ComputationFailed),
-            gamla.stack(
-                (
-                    gamla.attrgetter("result"),
-                    optimized_gamla.compose_left(
-                        optimized_gamla.pair_left(result_to_dependencies),
-                        optimized_gamla.star(_construct_computation_state),
-                        optimized_gamla.keymap(edges_to_node_id),
-                    ),
-                )
+            optimized_gamla.packstack(
+                gamla.attrgetter("result"),
+                optimized_gamla.compose_left(
+                    optimized_gamla.pair_left(result_to_dependencies),
+                    optimized_gamla.star(_construct_computation_state),
+                    optimized_gamla.keymap(edges_to_node_id),
+                ),
             ),
         )
 
