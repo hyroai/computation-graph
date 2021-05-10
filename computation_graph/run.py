@@ -480,7 +480,9 @@ def to_callable_with_side_effect(
     )
 
 
+# Use the second line if you want to see the winning path in the computation graph (a little slower).
 to_callable = gamla.curry(to_callable_with_side_effect)(gamla.just(gamla.just(None)))
+# to_callable = gamla.curry(to_callable_with_side_effect)(debug.serialize_computation_trace('utterance_computation.dot'))
 
 
 def _log_handled_exception(exception_type: Type[Exception]):
