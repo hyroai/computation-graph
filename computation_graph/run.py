@@ -13,6 +13,13 @@ import toposort
 from computation_graph import base_types, graph
 
 
+def _packstack(*functions):
+    def packstack(values):
+        return tuple(f(x) for f, x in zip(functions, values))
+
+    return packstack
+
+
 def _keyfilter(predicate):
     def keyfilter(d):
         new_d = {}
@@ -357,7 +364,7 @@ NodeToResults = Callable[[base_types.ComputationNode], _ResultToDecisionsType]
 def _node_to_value_choices(node_to_results: NodeToResults):
     return _compose_left(
         _pair_left(_compose_left(node_to_results, dict.items)),
-        gamla.stack([gamla.identity, itertools.repeat]),
+        _packstack(gamla.identity, itertools.repeat),
         _star(zip),
     )
 
