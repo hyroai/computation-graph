@@ -1,15 +1,30 @@
 import logging
 import pprint
-from typing import Callable
+from typing import Callable, Iterable, Tuple
 
 import gamla
 
 from computation_graph import base_types, graph
 from computation_graph.debug import trace_utils
 
+_NodeTree = Tuple[base_types.ComputationNode, Tuple["_NodeTree", ...]]  # type: ignore
+_NodeAndResultTree = Tuple[  # type: ignore
+    base_types.ComputationNode,
+    base_types.ComputationResult,
+    Tuple["_NodeAndResultTree", ...],  # type: ignore
+]
+
 
 @gamla.curry
-def _process_node(node_to_result, source_and_destination_to_edges, node, children):
+def _process_node(
+    node_to_result: Callable[[_NodeTree], base_types.ComputationResult],
+    source_and_destination_to_edges: Callable[
+        [Tuple[base_types.ComputationNode, base_types.ComputationNode]],
+        Iterable[base_types.ComputationEdge],
+    ],
+    node: _NodeTree,
+    children: Iterable[_NodeAndResultTree],
+) -> _NodeAndResultTree:
     return (
         node[0],
         node_to_result(node),
@@ -19,7 +34,7 @@ def _process_node(node_to_result, source_and_destination_to_edges, node, childre
                 gamla.juxt(
                     gamla.compose_left(
                         gamla.head,
-                        gamla.pair_right(gamla.just(node)),
+                        gamla.pair_right(gamla.just(node[0])),
                         source_and_destination_to_edges,
                         # In theory there can be >1 connections between two nodes.
                         gamla.map(base_types.edge_key),
@@ -37,7 +52,7 @@ _should_render = gamla.compose_left(str, gamla.len_smaller(1000))
 
 
 @gamla.curry
-def _skip_uninsteresting_nodes(node_to_result, node, children):
+def _skip_uninsteresting_nodes(node_to_result, node, children) -> _NodeTree:
     """To make the debug log more readable, we try to reduce uninteresting steps by some heuristics."""
     result = node_to_result(node)
     children = tuple(children)
@@ -55,7 +70,7 @@ _index_by_destination = gamla.compose_left(
 )
 
 
-def _edge_to_node_pairs(edge):
+def _edge_to_node_pairs(edge: base_types.ComputationEdge):
     if edge.source:
         return [(edge.source, edge.destination)]
     return gamla.pipe((edge.args, edge.destination), gamla.explode(0))
