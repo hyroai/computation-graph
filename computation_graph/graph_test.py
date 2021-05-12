@@ -183,9 +183,7 @@ def test_multiple_inputs():
         graph.make_edge(source=node1, destination=node3, key="arg1"),
         graph.make_edge(source=node2, destination=node3, key="arg2"),
     )
-
     result = run.to_callable(edges, frozenset([GraphTestException]))(arg1=_ROOT_VALUE)
-
     assert result.result == "node3(arg1=node1(root), arg2=node2(node1(root)))"
 
 

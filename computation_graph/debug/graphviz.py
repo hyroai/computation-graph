@@ -92,7 +92,7 @@ union_graphviz: Callable[[Iterable[pgv.AGraph]], pgv.AGraph] = gamla.compose_lef
 
 
 def _save_as_png(filename: Text) -> Callable[[pgv.AGraph], pgv.AGraph]:
-    return gamla.side_effect(lambda pgv_graph: pgv_graph.draw(filename, prog="dot"))
+    return gamla.side_effect(lambda pgv_graph: pgv_graph.write(filename))
 
 
 def computation_trace_to_graphviz(
@@ -112,7 +112,7 @@ def computation_trace_to_graphviz(
 
 
 visualize_graph = gamla.compose_left(
-    computation_graph_to_graphviz, _save_as_png("topology.png")
+    computation_graph_to_graphviz, _save_as_png("bot_computation_graph.dot")
 )
 
 
