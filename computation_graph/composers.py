@@ -38,7 +38,7 @@ def _get_unbound_signature_for_single_node(
 
     keep_not_in_bound_kwargs = gamla.pipe(
         incoming_edges,
-        opt_gamla.map(gamla.attrgetter("key")),
+        opt_gamla.map(base_types.edge_key),
         gamla.filter(gamla.identity),
         frozenset,
         gamla.contains,

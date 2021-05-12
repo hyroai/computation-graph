@@ -3,7 +3,8 @@ import pathlib
 
 import pygraphviz as pgv
 
-from computation_graph import composers, debug, run
+from computation_graph import composers, run
+from computation_graph.debug import graphviz
 
 
 def test_computation_trace(tmp_path: pathlib.Path):
@@ -21,7 +22,7 @@ def test_computation_trace(tmp_path: pathlib.Path):
 
     inner_edges = composers.make_compose(node1, node2)
     cg = run.to_callable_with_side_effect(
-        debug.serialize_computation_trace(filename),
+        graphviz.computation_trace(filename),
         composers.make_first(unactionable_node, inner_edges, node1),
         frozenset([NotImplementedError]),
     )

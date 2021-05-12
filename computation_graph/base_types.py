@@ -3,6 +3,8 @@ from __future__ import annotations
 import dataclasses
 from typing import Any, Callable, Dict, Optional, Text, Tuple
 
+import gamla
+
 
 @dataclasses.dataclass(frozen=True)
 class ComputationResult:
@@ -61,3 +63,7 @@ class NodeSignature:
     is_args: bool = False
     kwargs: Tuple[Text, ...] = ()
     optional_kwargs: Tuple[Text, ...] = ()
+
+
+edge_destination = gamla.attrgetter("destination")
+edge_key = gamla.attrgetter("key")

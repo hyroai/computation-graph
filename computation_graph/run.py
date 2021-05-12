@@ -14,8 +14,6 @@ from gamla.optimized import sync as opt_gamla
 
 from computation_graph import base_types, graph
 
-_get_edge_key = gamla.attrgetter("key")
-
 
 class _ComputationGraphException(Exception):
     pass
@@ -36,7 +34,7 @@ def _get_edge_sources(edge: base_types.ComputationEdge):
 _toposort_nodes = opt_gamla.compose_left(
     opt_gamla.groupby_many(_get_edge_sources),
     opt_gamla.valmap(
-        opt_gamla.compose_left(opt_gamla.map(gamla.attrgetter("destination")), set)
+        opt_gamla.compose_left(opt_gamla.map(base_types.edge_destination), set)
     ),
     _transpose_graph,
     toposort.toposort,
@@ -60,7 +58,7 @@ _incoming_edge_options = opt_gamla.compose_left(
     graph.get_incoming_edges_for_node,
     gamla.after(
         opt_gamla.compose_left(
-            opt_gamla.groupby(_get_edge_key),
+            opt_gamla.groupby(base_types.edge_key),
             opt_gamla.valmap(gamla.sort_by(gamla.attrgetter("priority"))),
             dict.values,
             opt_gamla.star(itertools.product),
@@ -130,9 +128,9 @@ def _get_outer_kwargs(
 
 
 _get_inner_kwargs = opt_gamla.compose_left(
-    opt_gamla.keyfilter(_get_edge_key),
+    opt_gamla.keyfilter(base_types.edge_key),
     dict.items,
-    opt_gamla.groupby(opt_gamla.compose_left(gamla.head, _get_edge_key)),
+    opt_gamla.groupby(opt_gamla.compose_left(gamla.head, base_types.edge_key)),
     opt_gamla.valmap(
         opt_gamla.compose_left(
             gamla.head, gamla.second, gamla.head, gamla.attrgetter("result")
@@ -186,7 +184,7 @@ def _signature_difference(
 
 
 _get_kwargs_from_edges = opt_gamla.compose_left(
-    opt_gamla.map(_get_edge_key), opt_gamla.remove(gamla.equals(None)), tuple
+    opt_gamla.map(base_types.edge_key), opt_gamla.remove(gamla.equals(None)), tuple
 )
 
 
@@ -211,7 +209,7 @@ def _get_computation_input(
         not (unbound_signature.is_args or bound_signature.is_args)
         and sum(
             map(
-                opt_gamla.compose_left(_get_edge_key, gamla.equals(None)),
+                opt_gamla.compose_left(base_types.edge_key, gamla.equals(None)),
                 incoming_edges,
             )
         )
