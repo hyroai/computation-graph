@@ -126,7 +126,7 @@ def _infer_sink(
 ) -> base_types.ComputationNode:
     if isinstance(graph_or_node, base_types.ComputationNode):
         return graph_or_node
-    return graph.infer_graph_sink(graph_or_node)
+    return graph.infer_graph_sink_excluding_terminals(graph_or_node)
 
 
 def _add_first_edge(

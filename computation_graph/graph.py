@@ -15,7 +15,7 @@ def _is_reducer_type(node: Callable) -> bool:
     return "state" in inspect.signature(node).parameters
 
 
-def _infer_callable_signature(func: Callable) -> base_types.NodeSignature:
+def infer_callable_signature(func: Callable) -> base_types.NodeSignature:
     signature = base_types.NodeSignature(
         is_args=any(
             "*" + x.name == str(x)
@@ -70,7 +70,7 @@ def make_computation_node(
         name=_infer_callable_name(func),
         func=func,
         is_stateful=_is_reducer_type(func),
-        signature=_infer_callable_signature(func),
+        signature=infer_callable_signature(func),
     )
 
 
@@ -121,8 +121,33 @@ def infer_graph_sink(edges: base_types.GraphType) -> base_types.ComputationNode:
     return gamla.head(leaves)
 
 
+def infer_graph_sink_excluding_terminals(
+    edges: base_types.GraphType,
+) -> base_types.ComputationNode:
+    leaves = gamla.pipe(
+        edges, get_leaves, gamla.remove(gamla.attrgetter("is_terminal"))
+    )
+    assert len(leaves) == 1, f"computation graph has more than one sink: {leaves}"
+    return gamla.head(leaves)
+
+
 get_incoming_edges_for_node = gamla.compose_left(
     gamla.groupby(lambda edge: edge.destination),
     gamla.valmap(frozenset),
     gamla.dict_to_getter_with_default(frozenset()),
+)
+
+
+def make_terminal(name: str, func: Callable):
+    return base_types.ComputationNode(
+        name=name,
+        func=func,
+        signature=infer_callable_signature(func),
+        is_stateful=False,
+        is_terminal=True,
+    )
+
+
+get_terminals = gamla.compose_left(
+    get_all_nodes, gamla.filter(gamla.attrgetter("is_terminal"))
 )

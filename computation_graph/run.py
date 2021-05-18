@@ -304,14 +304,16 @@ def _construct_computation_result(edges: base_types.GraphType, edges_to_node_id)
             graph.infer_graph_sink,
             opt_gamla.pair_left(
                 gamla.translate_exception(
-                    opt_gamla.compose_left(result_to_dependencies, gamla.head),
+                    opt_gamla.compose_left(
+                        result_to_dependencies, dict.items, gamla.head
+                    ),
                     (StopIteration, KeyError),
                     ComputationFailed,
                 )
             ),
             opt_gamla.check(gamla.identity, ComputationFailed),
             opt_gamla.packstack(
-                gamla.attrgetter("result"),
+                gamla.second,  # Take dependencies, not results
                 opt_gamla.compose_left(
                     opt_gamla.pair_left(result_to_dependencies),
                     opt_gamla.star(_construct_computation_state),
@@ -492,11 +494,26 @@ def _make_runner(
     )
 
 
+def _identity(args):
+    return args
+
+
+def ensure_single_sink(edges: base_types.GraphType) -> base_types.GraphType:
+    final_sink = base_types.ComputationNode(
+        "FINAL SINK",
+        _identity,
+        graph.infer_callable_signature(_identity),
+        is_stateful=False,
+    )
+    return edges + (graph.make_edge(graph.get_terminals(edges), final_sink),)
+
+
 def to_callable_with_side_effect(
     side_effect: Callable,
     edges: base_types.GraphType,
     handled_exceptions: FrozenSet[Type[Exception]],
 ) -> Callable:
+    ensure_single_sink(edges)
     edges = tuple(gamla.unique(edges))
     return gamla.compose_left(
         _make_outer_computation_input,
