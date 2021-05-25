@@ -165,4 +165,4 @@ def connect_default_terminal(edges: base_types.GraphType):
 
 
 def default_terminal_equals(result: base_types.ComputationResult, expected_result):
-    return (result.result[DEFAULT_TERMINAL])[0] == expected_result
+    return result.result[DEFAULT_TERMINAL] == expected_result

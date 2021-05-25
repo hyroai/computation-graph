@@ -316,7 +316,9 @@ def _construct_computation_result(edges: base_types.GraphType, edges_to_node_id)
                 gamla.compose_left(
                     gamla.second,  # Take dependencies, not results
                     gamla.keyfilter(gamla.attrgetter("is_terminal")),
-                    gamla.valmap(gamla.attrgetter("result")),
+                    gamla.valmap(
+                        gamla.compose_left(gamla.attrgetter("result"), gamla.head)
+                    ),
                 ),
                 opt_gamla.compose_left(
                     opt_gamla.pair_left(result_to_dependencies),
@@ -498,20 +500,16 @@ def _make_runner(
     )
 
 
-def _identity(args):
+def _FINAL_SINK(args):  # noqa: N802
     return args
 
 
 def add_final_sink(edges: base_types.GraphType) -> base_types.GraphType:
-    final_sink = base_types.ComputationNode(
-        "FINAL SINK",
-        _identity,
-        graph.infer_callable_signature(_identity),
-        is_stateful=False,
-    )
     terminals = graph.get_terminals(edges)
     assert terminals, "Graph does not contain terminals, it should contain at least 1"
-    return edges + (graph.make_edge(terminals, final_sink),)
+    return edges + (
+        graph.make_edge(terminals, graph.make_computation_node(_FINAL_SINK)),
+    )
 
 
 def to_callable_with_side_effect(
