@@ -290,7 +290,9 @@ def test_optional_default_value():
 
 def test_first():
     cg = run.to_callable(
-        graph.connect_default_terminal(composers.make_first(unactionable_node, node2, node1)),
+        graph.connect_default_terminal(
+            composers.make_first(unactionable_node, node2, node1)
+        ),
         frozenset([GraphTestException]),
     )
 
@@ -448,7 +450,9 @@ def test_compose():
 
 def test_compose_with_state():
     cg = run.to_callable(
-        graph.connect_default_terminal(composers.make_compose(reducer_node, node1, node2)),
+        graph.connect_default_terminal(
+            composers.make_compose(reducer_node, node1, node2)
+        ),
         frozenset([GraphTestException]),
     )
 
@@ -493,7 +497,9 @@ def test_curry():
 
     result = run.to_callable(edges, frozenset([GraphTestException]))(arg1=_ROOT_VALUE)
 
-    assert graph.default_terminal_equals(result, "curried_node(arg1=root, arg2=arg2_curried)")
+    assert graph.default_terminal_equals(
+        result, "curried_node(arg1=root, arg2=arg2_curried)"
+    )
 
 
 def test_compose_when_all_arguments_have_a_default():
