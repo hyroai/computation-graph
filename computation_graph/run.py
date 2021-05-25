@@ -509,7 +509,9 @@ def add_final_sink(edges: base_types.GraphType) -> base_types.GraphType:
         graph.infer_callable_signature(_identity),
         is_stateful=False,
     )
-    return edges + (graph.make_edge(graph.get_terminals(edges), final_sink),)
+    terminals = graph.get_terminals(edges)
+    assert terminals, "Graph does not contain terminals, it should contain at least 1"
+    return edges + (graph.make_edge(terminals, final_sink),)
 
 
 def to_callable_with_side_effect(

@@ -151,3 +151,18 @@ def make_terminal(name: str, func: Callable):
 get_terminals = gamla.compose_left(
     get_all_nodes, gamla.filter(gamla.attrgetter("is_terminal")), tuple
 )
+
+
+def _aggregator_for_terminal(*args):
+    return tuple(frozenset(args))
+
+
+DEFAULT_TERMINAL = make_terminal("DEFAULT_TERMINAL", _aggregator_for_terminal)
+
+
+def connect_default_terminal(edges: base_types.GraphType):
+    return edges + (make_edge((infer_graph_sink(edges),), DEFAULT_TERMINAL),)
+
+
+def default_terminal_equals(result: base_types.ComputationResult, expected_result):
+    return (result.result[DEFAULT_TERMINAL])[0] == expected_result
