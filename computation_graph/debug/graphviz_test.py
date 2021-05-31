@@ -42,4 +42,4 @@ def test_computation_trace(tmp_path: pathlib.Path):
     assert not g.get_node(id(unactionable_node)).attr["color"]
     os.chdir(cwd)
 
-    assert graph.default_terminal_equals(result, "node1(node2(arg1))")
+    assert result.result[graph.DEFAULT_TERMINAL] == "node1(node2(arg1))"

@@ -417,13 +417,14 @@ def _edge_to_value_options(accumulated_outputs):
     )
 
 
-_bla = opt_gamla.compose_left(
+_create_node_run_options = opt_gamla.compose_left(
     gamla.explode(1),
     opt_gamla.mapcat(
-        opt_gamla.juxtduct(
-            opt_gamla.compose_left(gamla.head, gamla.wrap_tuple),
-            opt_gamla.compose_left(gamla.second, gamla.wrap_tuple),
-            opt_gamla.star(lambda _, y, z: z(y)),
+        opt_gamla.compose_left(
+            gamla.bifurcate(
+                gamla.head, gamla.second, opt_gamla.star(lambda _, y, z: z(y))
+            ),
+            gamla.explode(2),
         )
     ),
 )
@@ -441,7 +442,10 @@ def _process_node(is_async, get_edge_options):
                     _edge_to_value_options(accumulated_results),
                 )
                 accumulated_results[node] = await opt_async_gamla.compose_left(
-                    _bla, opt_async_gamla.map(f), opt_gamla.filter(gamla.identity), dict
+                    _create_node_run_options,
+                    opt_async_gamla.map(f),
+                    opt_gamla.filter(gamla.identity),
+                    dict,
                 )(params)
 
                 return accumulated_results
@@ -456,7 +460,10 @@ def _process_node(is_async, get_edge_options):
                 _edge_to_value_options(accumulated_results),
             )
             accumulated_results[node] = opt_gamla.compose_left(
-                _bla, opt_gamla.map(f), opt_gamla.filter(gamla.identity), dict
+                _create_node_run_options,
+                opt_gamla.map(f),
+                opt_gamla.filter(gamla.identity),
+                dict,
             )(params)
 
             return accumulated_results
@@ -500,7 +507,7 @@ def _make_runner(
     )
 
 
-def _FINAL_SINK(args):  # noqa: N802
+def _FINAL_SINK(*args):  # noqa: N802
     return args
 
 

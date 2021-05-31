@@ -46,6 +46,8 @@ class ComputationNode:
     is_terminal: bool = False
 
     def __hash__(self):
+        if self.is_terminal:
+            return hash(self.name)
         return id(self.func)
 
     def __repr__(self):
