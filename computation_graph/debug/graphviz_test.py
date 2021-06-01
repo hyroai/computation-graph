@@ -23,7 +23,9 @@ def test_computation_trace(tmp_path: pathlib.Path):
     inner_edges = composers.make_compose(node1, node2)
     cg = run.to_callable_with_side_effect(
         graphviz.computation_trace(filename),
-        graph.connect_default_terminal(composers.make_first(unactionable_node, inner_edges, node1))
+        graph.connect_default_terminal(
+            composers.make_first(unactionable_node, inner_edges, node1)
+        ),
         frozenset([NotImplementedError]),
     )
 
