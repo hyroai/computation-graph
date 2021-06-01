@@ -317,7 +317,10 @@ def _construct_computation_result(edges: base_types.GraphType, edges_to_node_id)
                     gamla.second,  # Take dependencies, not results
                     gamla.keyfilter(gamla.attrgetter("is_terminal")),
                     gamla.valmap(
-                        gamla.compose_left(gamla.attrgetter("result"), gamla.head)
+                        gamla.compose_left(
+                            gamla.attrgetter("result"),
+                            gamla.when(gamla.nonempty, gamla.head),
+                        )
                     ),
                 ),
                 opt_gamla.compose_left(
@@ -513,7 +516,7 @@ def _FINAL_SINK(*args):  # noqa: N802
 
 def add_final_sink(edges: base_types.GraphType) -> base_types.GraphType:
     terminals = graph.get_terminals(edges)
-    assert terminals, "Graph does not contain terminals, it should contain at least 1"
+    assert terminals, "Graph does not contain terminals, it should contain at least 1."
     return edges + (
         graph.make_edge(terminals, graph.make_computation_node(_FINAL_SINK)),
     )
