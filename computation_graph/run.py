@@ -12,7 +12,7 @@ import toposort
 from gamla.optimized import async_functions as opt_async_gamla
 from gamla.optimized import sync as opt_gamla
 
-from computation_graph import base_types, graph
+from computation_graph import base_types, composers, graph
 
 
 class _ComputationGraphException(Exception):
@@ -511,16 +511,14 @@ def _make_runner(
     )
 
 
-def _FINAL_SINK(*args):  # noqa: N802
+def _FINAL_SINK(args):  # noqa: N802
     return args
 
 
 def add_final_sink(edges: base_types.GraphType) -> base_types.GraphType:
     terminals = graph.get_terminals(edges)
     assert terminals, "Graph does not contain terminals, it should contain at least 1."
-    return edges + (
-        graph.make_edge(terminals, graph.make_computation_node(_FINAL_SINK)),
-    )
+    return edges + composers.make_or(terminals, merge_fn=_FINAL_SINK)
 
 
 def to_callable_with_side_effect(
