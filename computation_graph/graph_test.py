@@ -110,7 +110,7 @@ def test_simple():
     )
     result = cg(arg1=_ROOT_VALUE)
     assert isinstance(result, base_types.ComputationResult)
-    assert result.result[graph.DEFAULT_TERMINAL] == f"node2(node1({_ROOT_VALUE}))"
+    assert result.result[graph.DEFAULT_TERMINAL][0] == f"node2(node1({_ROOT_VALUE}))"
 
 
 def test_none_as_input():
@@ -123,7 +123,7 @@ def test_none_as_input():
     result = cg(arg1=None)
 
     assert isinstance(result, base_types.ComputationResult)
-    assert result.result[graph.DEFAULT_TERMINAL] == "node2(node1(None))"
+    assert result.result[graph.DEFAULT_TERMINAL][0] == "node2(node1(None))"
 
 
 async def test_simple_async():
@@ -136,7 +136,7 @@ async def test_simple_async():
     result = await cg(arg1=_ROOT_VALUE)
 
     assert isinstance(result, base_types.ComputationResult)
-    assert result.result[graph.DEFAULT_TERMINAL] == f"node2(node1({_ROOT_VALUE}))"
+    assert result.result[graph.DEFAULT_TERMINAL][0] == f"node2(node1({_ROOT_VALUE}))"
 
 
 def test_kwargs():
@@ -154,7 +154,7 @@ def test_kwargs():
 
     assert isinstance(result, base_types.ComputationResult)
     assert (
-        result.result[graph.DEFAULT_TERMINAL]
+        result.result[graph.DEFAULT_TERMINAL][0]
         == f"node3(arg1=node1({_ROOT_VALUE}), arg2=node2({_ROOT_VALUE}))"
     )
 
@@ -197,7 +197,7 @@ def test_multiple_inputs():
     )
     result = run.to_callable(edges, frozenset([GraphTestException]))(arg1=_ROOT_VALUE)
     assert (
-        result.result[graph.DEFAULT_TERMINAL]
+        result.result[graph.DEFAULT_TERMINAL][0]
         == "node3(arg1=node1(root), arg2=node2(node1(root)))"
     )
 
@@ -227,7 +227,7 @@ def test_external_input_and_state():
     result = cg(arg1=_ROOT_VALUE, side_effects="side_effects", state=result.state)
 
     assert (
-        result.result[graph.DEFAULT_TERMINAL]
+        result.result[graph.DEFAULT_TERMINAL][0]
         == "node_with_side_effect(arg1=node2(node1(root)),side_effects=side_effects, state=3)"
     )
 
@@ -249,7 +249,7 @@ def test_tuple_source_node():
     )
 
     assert (
-        result.result[graph.DEFAULT_TERMINAL]
+        result.result[graph.DEFAULT_TERMINAL][0]
         == f"[node1({_ROOT_VALUE}),node2({_ROOT_VALUE})], side_effects=side_effects"
     )
 
@@ -261,7 +261,7 @@ def test_optional():
 
     result = run.to_callable(edges, frozenset([GraphTestException]))(arg1=_ROOT_VALUE)
 
-    assert result.result[graph.DEFAULT_TERMINAL] is None
+    assert result.result[graph.DEFAULT_TERMINAL][0] is None
 
 
 def test_optional_with_state():
@@ -277,7 +277,7 @@ def test_optional_with_state():
         arg1=_ROOT_VALUE, state=result.state
     )
 
-    assert result.result[graph.DEFAULT_TERMINAL] == "root state=3"
+    assert result.result[graph.DEFAULT_TERMINAL][0] == "root state=3"
 
 
 def test_optional_default_value():
@@ -287,7 +287,7 @@ def test_optional_default_value():
 
     result = run.to_callable(edges, frozenset([GraphTestException]))(arg1=_ROOT_VALUE)
 
-    assert result.result[graph.DEFAULT_TERMINAL] == "optional failed"
+    assert result.result[graph.DEFAULT_TERMINAL][0] == "optional failed"
 
 
 def test_first():
@@ -299,7 +299,7 @@ def test_first():
     )
 
     result = cg(arg1=_ROOT_VALUE)
-    assert result.result[graph.DEFAULT_TERMINAL] == "node2(root)"
+    assert result.result[graph.DEFAULT_TERMINAL][0] == "node2(root)"
 
 
 def test_first_all_unactionable():
@@ -323,7 +323,7 @@ def test_first_with_state():
     result = cg(arg1=_ROOT_VALUE, state=result.state)
     result = cg(arg1=_ROOT_VALUE, state=result.state)
 
-    assert result.result[graph.DEFAULT_TERMINAL] == "root state=3"
+    assert result.result[graph.DEFAULT_TERMINAL][0] == "root state=3"
 
 
 def test_and():
@@ -336,7 +336,7 @@ def test_and():
     result = cg(arg1=_ROOT_VALUE, state=result.state, side_effects="side_effects")
 
     assert (
-        result.result[graph.DEFAULT_TERMINAL]
+        result.result[graph.DEFAULT_TERMINAL][0]
         == "[root state=3,node2(root),node1(root)], side_effects=side_effects"
     )
 
@@ -355,7 +355,7 @@ def test_first_with_and():
     result = run.to_callable(edges, frozenset([GraphTestException]))(arg1=_ROOT_VALUE)
 
     assert (
-        result.result[graph.DEFAULT_TERMINAL]
+        result.result[graph.DEFAULT_TERMINAL][0]
         == "[node1(root),node2(root)], side_effects=side_effects"
     )
 
@@ -388,7 +388,7 @@ def test_or():
     )
 
     assert (
-        result.result[graph.DEFAULT_TERMINAL]
+        result.result[graph.DEFAULT_TERMINAL][0]
         == "[root state=3,node2(root),node1(root)], side_effects=side_effects"
     )
 
@@ -407,7 +407,7 @@ def test_graph_wrapping():
     )
 
     assert (
-        result.result[graph.DEFAULT_TERMINAL]
+        result.result[graph.DEFAULT_TERMINAL][0]
         == "[node1(root),node2(root),node3(arg1=root, arg2=node3value)], side_effects=side_effects"
     )
 
@@ -424,7 +424,7 @@ def test_node_with_optional_param():
     result = run.to_callable(edges, frozenset([GraphTestException]))()
 
     assert (
-        result.result[graph.DEFAULT_TERMINAL]
+        result.result[graph.DEFAULT_TERMINAL][0]
         == "node1(node_with_optional_param(optional_param=5))"
     )
 
@@ -441,7 +441,7 @@ def test_node_with_bound_optional_param():
     result = run.to_callable(edges, frozenset([GraphTestException]))(optional_param=10)
 
     assert (
-        result.result[graph.DEFAULT_TERMINAL]
+        result.result[graph.DEFAULT_TERMINAL][0]
         == "node1(node_with_optional_param(optional_param=10))"
     )
 
@@ -452,7 +452,7 @@ def test_compose():
         frozenset([GraphTestException]),
     )(arg1=_ROOT_VALUE)
 
-    assert result.result[graph.DEFAULT_TERMINAL] == "node1(node2(root))"
+    assert result.result[graph.DEFAULT_TERMINAL][0] == "node1(node2(root))"
 
 
 def test_compose_with_state():
@@ -467,7 +467,7 @@ def test_compose_with_state():
     result = cg(arg1=_ROOT_VALUE, state=result.state)
     result = cg(arg1=_ROOT_VALUE, state=result.state)
 
-    assert result.result[graph.DEFAULT_TERMINAL] == "node1(node2(root)) state=3"
+    assert result.result[graph.DEFAULT_TERMINAL][0] == "node1(node2(root)) state=3"
 
 
 def test_compose_with_partial():
@@ -483,7 +483,7 @@ def test_compose_with_partial():
     result = cg(arg1=_ROOT_VALUE)
 
     assert (
-        result.result[graph.DEFAULT_TERMINAL]
+        result.result[graph.DEFAULT_TERMINAL][0]
         == f"node3(arg1=node1(node2({_ROOT_VALUE})), arg2=arg2_partial)"
     )
 
@@ -496,7 +496,8 @@ def test_partial():
     result = run.to_callable(edges, frozenset([GraphTestException]))(arg1=_ROOT_VALUE)
 
     assert (
-        result.result[graph.DEFAULT_TERMINAL] == "node3(arg1=root, arg2=arg2_partial)"
+        result.result[graph.DEFAULT_TERMINAL][0]
+        == "node3(arg1=root, arg2=arg2_partial)"
     )
 
 
@@ -508,7 +509,7 @@ def test_curry():
     result = run.to_callable(edges, frozenset([GraphTestException]))(arg1=_ROOT_VALUE)
 
     assert (
-        result.result[graph.DEFAULT_TERMINAL]
+        result.result[graph.DEFAULT_TERMINAL][0]
         == "curried_node(arg1=root, arg2=arg2_curried)"
     )
 
@@ -521,7 +522,7 @@ def test_compose_when_all_arguments_have_a_default():
     result = run.to_callable(edges, frozenset([GraphTestException]))(arg1=_ROOT_VALUE)
 
     assert (
-        result.result[graph.DEFAULT_TERMINAL]
+        result.result[graph.DEFAULT_TERMINAL][0]
         == "node_with_optional_param(optional_param=node1(root))"
     )
 
@@ -535,7 +536,7 @@ def test_optional_with_sometimes_unactionable_reducer():
     result = cg(arg1="fail", state=result.state)
     result = cg(arg1=_ROOT_VALUE, state=result.state)
 
-    assert result.result[graph.DEFAULT_TERMINAL] == "root state=2"
+    assert result.result[graph.DEFAULT_TERMINAL][0] == "root state=2"
 
 
 def test_unary_graph_composition():
@@ -545,7 +546,7 @@ def test_unary_graph_composition():
         y=_ROOT_VALUE, z=10
     )
 
-    assert result.result[graph.DEFAULT_TERMINAL] == "node1(node4(root, z=10))"
+    assert result.result[graph.DEFAULT_TERMINAL][0] == "node1(node4(root, z=10))"
 
 
 def test_curry_with_state():
@@ -558,7 +559,7 @@ def test_curry_with_state():
     result = cg(arg1=_ROOT_VALUE, arg2="arg2", state=result.state)
 
     assert (
-        result.result[graph.DEFAULT_TERMINAL]
+        result.result[graph.DEFAULT_TERMINAL][0]
         == "curried_stateful_node(arg1=root, arg2=arg2, state=3)"
     )
 
@@ -594,7 +595,7 @@ def test_compose_compose():
 
     assert len(edges) == 6
     assert (
-        result.result[graph.DEFAULT_TERMINAL]
+        result.result[graph.DEFAULT_TERMINAL][0]
         == "curried_node(arg1=node1(node3(arg1=node2(arg1), arg2=node4(y, z=z))), arg2=node4(y, z=z))"
     )
 
@@ -608,7 +609,9 @@ def test_compose_after_first():
     result = run.to_callable(edges, frozenset([GraphTestException]))(
         arg1="arg1", arg2="arg2"
     )
-    assert result.result[graph.DEFAULT_TERMINAL] == "node1(node3(arg1=arg1, arg2=arg2))"
+    assert (
+        result.result[graph.DEFAULT_TERMINAL][0] == "node1(node3(arg1=arg1, arg2=arg2))"
+    )
 
 
 def test_first_after_compose():
@@ -622,7 +625,7 @@ def test_first_after_compose():
     )
 
     result = cg(arg1="arg1")
-    assert result.result[graph.DEFAULT_TERMINAL] == "node1(node2(arg1))"
+    assert result.result[graph.DEFAULT_TERMINAL][0] == "node1(node2(arg1))"
 
 
 def test_first_first():
@@ -637,7 +640,7 @@ def test_first_first():
 
     result = cg(arg1=_ROOT_VALUE)
 
-    assert result.result[graph.DEFAULT_TERMINAL] == f"node1({_ROOT_VALUE})"
+    assert result.result[graph.DEFAULT_TERMINAL][0] == f"node1({_ROOT_VALUE})"
 
 
 def test_compose_with_node_already_in_graph():
@@ -652,7 +655,7 @@ def test_compose_with_node_already_in_graph():
     )
 
     assert (
-        result.result[graph.DEFAULT_TERMINAL]
+        result.result[graph.DEFAULT_TERMINAL][0]
         == "[node2(node3(arg1=node1(root), arg2=arg2)),node1(root)], side_effects=side_effects"
     )
 
@@ -661,7 +664,7 @@ def test_first_with_subgraph_that_raises():
     inner = composers.make_compose(node2, unactionable_node)
     edges = graph.connect_default_terminal(composers.make_first(inner, node1))
     result = run.to_callable(edges, frozenset([GraphTestException]))(arg1=_ROOT_VALUE)
-    assert result.result[graph.DEFAULT_TERMINAL] == "node1(root)"
+    assert result.result[graph.DEFAULT_TERMINAL][0] == "node1(root)"
 
 
 def test_or_with_sink_that_raises():
@@ -672,7 +675,7 @@ def test_or_with_sink_that_raises():
     )
     result = run.to_callable(edges, frozenset([GraphTestException]))(arg1=_ROOT_VALUE)
 
-    assert result.result[graph.DEFAULT_TERMINAL] == "[node1(root)]"
+    assert result.result[graph.DEFAULT_TERMINAL][0] == "[node1(root)]"
 
 
 def test_two_terminals():
@@ -682,8 +685,8 @@ def test_two_terminals():
     edges += (graph.make_edge(source=node1, destination=terminal2),)
 
     result = run.to_callable(edges, frozenset([GraphTestException]))(arg1=_ROOT_VALUE)
-    assert result.result[graph.DEFAULT_TERMINAL] == "node2(node1(root))"
-    assert result.result[terminal2] == "node1(root)"
+    assert result.result[graph.DEFAULT_TERMINAL][0] == "node2(node1(root))"
+    assert result.result[terminal2][0] == "node1(root)"
 
 
 def test_two_paths_succeed():
@@ -692,5 +695,5 @@ def test_two_paths_succeed():
     edges += (graph.make_edge(source=node1, destination=terminal2),)
     result = run.to_callable(edges, frozenset([GraphTestException]))(arg1=_ROOT_VALUE)
 
-    assert result.result[graph.DEFAULT_TERMINAL] == "node2(root)"
-    assert result.result[terminal2] == "node1(root)"
+    assert result.result[graph.DEFAULT_TERMINAL][0] == "node2(root)"
+    assert result.result[terminal2][0] == "node1(root)"
