@@ -202,12 +202,12 @@ def test_multiple_inputs():
     )
 
 
-def test_exception():
-    with pytest.raises(run.ComputationFailed):
-        edges = graph.connect_default_terminal(
-            (graph.make_edge(source=node1, destination=unactionable_node, key="arg1"),)
-        )
-        run.to_callable(edges, frozenset([GraphTestException]))(arg1=_ROOT_VALUE)
+def test_empty_result():
+    edges = graph.connect_default_terminal(
+        (graph.make_edge(source=node1, destination=unactionable_node, key="arg1"),)
+    )
+    result = run.to_callable(edges, frozenset([GraphTestException]))(arg1=_ROOT_VALUE)
+    assert not result.result
 
 
 def test_external_input_and_state():
@@ -303,12 +303,12 @@ def test_first():
 
 
 def test_first_all_unactionable():
-    with pytest.raises(run.ComputationFailed):
-        cg = run.to_callable(
-            graph.connect_default_terminal(composers.make_first(unactionable_node)),
-            frozenset([GraphTestException]),
-        )
-        cg(arg1=_ROOT_VALUE)
+    cg = run.to_callable(
+        graph.connect_default_terminal(composers.make_first(unactionable_node)),
+        frozenset([GraphTestException]),
+    )
+    result = cg(arg1=_ROOT_VALUE)
+    assert not result.result
 
 
 def test_first_with_state():
@@ -361,13 +361,13 @@ def test_first_with_and():
 
 
 def test_and_with_unactionable():
-    with pytest.raises(run.ComputationFailed):
-        edges = graph.connect_default_terminal(
-            composers.make_and(
-                funcs=(reducer_node, node2, node1, unactionable_node), merge_fn=merger
-            )
+    edges = graph.connect_default_terminal(
+        composers.make_and(
+            funcs=(reducer_node, node2, node1, unactionable_node), merge_fn=merger
         )
-        run.to_callable(edges, frozenset([GraphTestException]))(arg1=_ROOT_VALUE)
+    )
+    result = run.to_callable(edges, frozenset([GraphTestException]))(arg1=_ROOT_VALUE)
+    assert not result.result
 
 
 def test_or():

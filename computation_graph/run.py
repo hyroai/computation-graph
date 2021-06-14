@@ -303,26 +303,14 @@ def _construct_computation_result(edges: base_types.GraphType, edges_to_node_id)
             edges,
             graph.infer_graph_sink,
             opt_gamla.pair_left(
-                gamla.translate_exception(
-                    opt_gamla.compose_left(
-                        result_to_dependencies, dict.items, gamla.head
-                    ),
-                    (StopIteration, KeyError),
-                    ComputationFailed,
-                )
+                opt_gamla.compose_left(result_to_dependencies, dict.items, gamla.head)
             ),
             opt_gamla.check(gamla.identity, ComputationFailed),
             opt_gamla.packstack(
                 gamla.compose_left(
                     gamla.second,  # Take dependencies, not results
                     gamla.keyfilter(gamla.attrgetter("is_terminal")),
-                    gamla.valmap(
-                        gamla.attrgetter("result")
-                        # gamla.compose_left(
-                        #     gamla.attrgetter("result"),
-                        #     gamla.when(gamla.nonempty, gamla.head),
-                        # )
-                    ),
+                    gamla.valmap(gamla.attrgetter("result")),
                 ),
                 opt_gamla.compose_left(
                     opt_gamla.pair_left(result_to_dependencies),
@@ -551,7 +539,6 @@ def to_callable_with_side_effect(
 
 # Use the second line if you want to see the winning path in the computation graph (a little slower).
 to_callable = gamla.curry(to_callable_with_side_effect)(gamla.just(gamla.just(None)))
-# to_callable = gamla.curry(to_callable_with_side_effect)(debug.serialize_computation_trace('utterance_computation.dot'))
 # to_callable = gamla.curry(to_callable_with_side_effect)(graphviz.computation_trace('utterance_computation.dot'))
 
 
