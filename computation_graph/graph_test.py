@@ -679,7 +679,7 @@ def test_or_with_sink_that_raises():
 
 
 def test_two_terminals():
-    """ graph = node1 --> node2 --> DEFAULT_TERMINAL, node1 --> TERMINAL2"""
+    """graph = node1 --> node2 --> DEFAULT_TERMINAL, node1 --> TERMINAL2"""
     edges = graph.connect_default_terminal(composers.make_compose(node2, node1))
     terminal2 = graph.make_terminal("TERMINAL2", gamla.wrap_tuple)
     edges += (graph.make_edge(source=node1, destination=terminal2),)
