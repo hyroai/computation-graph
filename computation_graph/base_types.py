@@ -43,8 +43,11 @@ class ComputationNode:
     func: Callable
     signature: NodeSignature
     is_stateful: bool
+    is_terminal: bool
 
     def __hash__(self):
+        if self.is_terminal:
+            return hash(self.name)
         return id(self.func)
 
     def __repr__(self):

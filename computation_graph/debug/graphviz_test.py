@@ -3,7 +3,7 @@ import pathlib
 
 import pygraphviz as pgv
 
-from computation_graph import composers, run
+from computation_graph import composers, graph, run
 from computation_graph.debug import graphviz
 
 
@@ -23,7 +23,9 @@ def test_computation_trace(tmp_path: pathlib.Path):
     inner_edges = composers.make_compose(node1, node2)
     cg = run.to_callable_with_side_effect(
         graphviz.computation_trace(filename),
-        composers.make_first(unactionable_node, inner_edges, node1),
+        graph.connect_default_terminal(
+            composers.make_first(unactionable_node, inner_edges, node1)
+        ),
         frozenset([NotImplementedError]),
     )
 
@@ -42,4 +44,4 @@ def test_computation_trace(tmp_path: pathlib.Path):
     assert not g.get_node(id(unactionable_node)).attr["color"]
     os.chdir(cwd)
 
-    assert result.result == "node1(node2(arg1))"
+    assert result.result[graph.DEFAULT_TERMINAL][0] == "node1(node2(arg1))"

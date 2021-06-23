@@ -12,7 +12,7 @@ import toposort
 from gamla.optimized import async_functions as opt_async_gamla
 from gamla.optimized import sync as opt_gamla
 
-from computation_graph import base_types, graph
+from computation_graph import base_types, composers, graph
 
 
 class _ComputationGraphException(Exception):
@@ -147,10 +147,6 @@ _ResultToDependencies = Callable[[base_types.ComputationNode], _ResultToDecision
 class _NotCoherent(Exception):
     """This exception signals that for a specific set of incoming
     node edges not all paths agree on the ComputationResult"""
-
-
-class ComputationFailed(Exception):
-    pass
 
 
 def _check_equal_and_take_one(x, y):
@@ -303,15 +299,14 @@ def _construct_computation_result(edges: base_types.GraphType, edges_to_node_id)
             edges,
             graph.infer_graph_sink,
             opt_gamla.pair_left(
-                gamla.translate_exception(
-                    opt_gamla.compose_left(result_to_dependencies, gamla.head),
-                    (StopIteration, KeyError),
-                    ComputationFailed,
-                )
+                opt_gamla.compose_left(result_to_dependencies, dict.items, gamla.head)
             ),
-            opt_gamla.check(gamla.identity, ComputationFailed),
             opt_gamla.packstack(
-                gamla.attrgetter("result"),
+                gamla.compose_left(
+                    gamla.second,  # Take dependencies, not results
+                    gamla.keyfilter(gamla.attrgetter("is_terminal")),
+                    gamla.valmap(gamla.attrgetter("result")),
+                ),
                 opt_gamla.compose_left(
                     opt_gamla.pair_left(result_to_dependencies),
                     opt_gamla.star(_construct_computation_state),
@@ -409,13 +404,14 @@ def _edge_to_value_options(accumulated_outputs):
     )
 
 
-_bla = opt_gamla.compose_left(
+_create_node_run_options = opt_gamla.compose_left(
     gamla.explode(1),
     opt_gamla.mapcat(
-        opt_gamla.juxtduct(
-            opt_gamla.compose_left(gamla.head, gamla.wrap_tuple),
-            opt_gamla.compose_left(gamla.second, gamla.wrap_tuple),
-            opt_gamla.star(lambda _, y, z: z(y)),
+        opt_gamla.compose_left(
+            gamla.bifurcate(
+                gamla.head, gamla.second, opt_gamla.star(lambda _, y, z: z(y))
+            ),
+            gamla.explode(2),
         )
     ),
 )
@@ -433,7 +429,10 @@ def _process_node(is_async, get_edge_options):
                     _edge_to_value_options(accumulated_results),
                 )
                 accumulated_results[node] = await opt_async_gamla.compose_left(
-                    _bla, opt_async_gamla.map(f), opt_gamla.filter(gamla.identity), dict
+                    _create_node_run_options,
+                    opt_async_gamla.map(f),
+                    opt_gamla.filter(gamla.identity),
+                    dict,
                 )(params)
 
                 return accumulated_results
@@ -448,7 +447,10 @@ def _process_node(is_async, get_edge_options):
                 _edge_to_value_options(accumulated_results),
             )
             accumulated_results[node] = opt_gamla.compose_left(
-                _bla, opt_gamla.map(f), opt_gamla.filter(gamla.identity), dict
+                _create_node_run_options,
+                opt_gamla.map(f),
+                opt_gamla.filter(gamla.identity),
+                dict,
             )(params)
 
             return accumulated_results
@@ -492,12 +494,22 @@ def _make_runner(
     )
 
 
+def _final_sink(args):  # noqa: N802
+    return args
+
+
+def add_final_sink(edges: base_types.GraphType) -> base_types.GraphType:
+    terminals = graph.get_terminals(edges)
+    assert terminals, "Graph does not contain terminals, it should contain at least 1."
+    return edges + composers.make_or(terminals, merge_fn=_final_sink)
+
+
 def to_callable_with_side_effect(
     side_effect: Callable,
     edges: base_types.GraphType,
     handled_exceptions: FrozenSet[Type[Exception]],
 ) -> Callable:
-    edges = tuple(gamla.unique(edges))
+    edges = gamla.pipe(edges, add_final_sink, gamla.unique, tuple)
     return gamla.compose_left(
         _make_outer_computation_input,
         gamla.pair_with(
@@ -522,7 +534,7 @@ def to_callable_with_side_effect(
 
 # Use the second line if you want to see the winning path in the computation graph (a little slower).
 to_callable = gamla.curry(to_callable_with_side_effect)(gamla.just(gamla.just(None)))
-# to_callable = gamla.curry(to_callable_with_side_effect)(debug.serialize_computation_trace('utterance_computation.dot'))
+# to_callable = gamla.curry(to_callable_with_side_effect)(graphviz.computation_trace('utterance_computation.dot'))
 
 
 def _log_handled_exception(exception_type: Type[Exception]):
