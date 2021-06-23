@@ -149,10 +149,6 @@ class _NotCoherent(Exception):
     node edges not all paths agree on the ComputationResult"""
 
 
-class ComputationFailed(Exception):
-    pass
-
-
 def _check_equal_and_take_one(x, y):
     if x == y:
         return x
@@ -305,7 +301,6 @@ def _construct_computation_result(edges: base_types.GraphType, edges_to_node_id)
             opt_gamla.pair_left(
                 opt_gamla.compose_left(result_to_dependencies, dict.items, gamla.head)
             ),
-            opt_gamla.check(gamla.identity, ComputationFailed),
             opt_gamla.packstack(
                 gamla.compose_left(
                     gamla.second,  # Take dependencies, not results
@@ -499,14 +494,14 @@ def _make_runner(
     )
 
 
-def _FINAL_SINK(args):  # noqa: N802
+def _final_sink(args):  # noqa: N802
     return args
 
 
 def add_final_sink(edges: base_types.GraphType) -> base_types.GraphType:
     terminals = graph.get_terminals(edges)
     assert terminals, "Graph does not contain terminals, it should contain at least 1."
-    return edges + composers.make_or(terminals, merge_fn=_FINAL_SINK)
+    return edges + composers.make_or(terminals, merge_fn=_final_sink)
 
 
 def to_callable_with_side_effect(

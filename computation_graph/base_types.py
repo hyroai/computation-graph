@@ -43,7 +43,7 @@ class ComputationNode:
     func: Callable
     signature: NodeSignature
     is_stateful: bool
-    is_terminal: bool = False
+    is_terminal: bool
 
     def __hash__(self):
         if self.is_terminal:

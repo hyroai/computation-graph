@@ -71,6 +71,7 @@ def make_computation_node(
         func=func,
         is_stateful=_is_reducer_type(func),
         signature=infer_callable_signature(func),
+        is_terminal=False,
     )
 
 
@@ -153,12 +154,12 @@ get_terminals = gamla.compose_left(
 )
 
 
-def _aggregator_for_terminal(*args):
-    return tuple(frozenset(args))
+def _aggregator_for_terminal(*args) -> base_types.GraphType:
+    return tuple(args)
 
 
 DEFAULT_TERMINAL = make_terminal("DEFAULT_TERMINAL", _aggregator_for_terminal)
 
 
-def connect_default_terminal(edges: base_types.GraphType):
+def connect_default_terminal(edges: base_types.GraphType) -> base_types.GraphType:
     return edges + (make_edge((infer_graph_sink(edges),), DEFAULT_TERMINAL),)
