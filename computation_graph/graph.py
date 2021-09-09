@@ -1,5 +1,6 @@
 import functools
 import inspect
+from types import MappingProxyType
 from typing import Callable, FrozenSet, Optional, Text, Tuple, Union
 
 import gamla
@@ -15,28 +16,48 @@ def _is_reducer_type(node: Callable) -> bool:
     return "state" in inspect.signature(node).parameters
 
 
-def infer_callable_signature(func: Callable) -> base_types.NodeSignature:
+def _is_star(parameter) -> bool:
+    return "*" + parameter.name == str(parameter)
+
+
+def _is_double_star(parameter) -> bool:
+    return "**" + parameter.name == str(parameter)
+
+
+def _is_default(parameter):
+    return parameter.default != parameter.empty
+
+
+_parameter_name = gamla.attrgetter("name")
+
+
+@gamla.before(
+    gamla.compose_left(
+        inspect.signature,
+        gamla.attrgetter("parameters"),
+        MappingProxyType.values,
+        tuple,
+    )
+)
+def _infer_callable_signature(function_parameters: Tuple) -> base_types.NodeSignature:
     signature = base_types.NodeSignature(
-        is_args=any(
-            "*" + x.name == str(x)
-            for x in tuple(inspect.signature(func).parameters.values())
+        is_args=gamla.anymap(_is_star)(function_parameters),
+        kwargs=gamla.pipe(
+            function_parameters,
+            gamla.remove(_is_star),
+            gamla.map(_parameter_name),
+            tuple,
         ),
-        kwargs=tuple(
-            x.name
-            for x in tuple(inspect.signature(func).parameters.values())
-            if "*" + x.name != str(x)
-        ),
-        optional_kwargs=tuple(
-            x.name
-            for x in tuple(inspect.signature(func).parameters.values())
-            if "*" + x.name != str(x) and x.default != x.empty
+        optional_kwargs=gamla.pipe(
+            function_parameters,
+            gamla.filter(gamla.alljuxt(gamla.complement(_is_star), _is_default)),
+            gamla.map(_parameter_name),
+            tuple,
         ),
     )
 
-    assert not any(
-        "**" + x.name == str(x)
-        for x in tuple(inspect.signature(func).parameters.values())
-    ), f"Cannot infer signature for {func}, signature includes **kwargs"
+    if gamla.anymap(_is_double_star)(function_parameters):
+        return base_types.NodeSignature(True, (), (), True)
 
     return signature
 
@@ -58,10 +79,10 @@ edges_to_node_id_map = gamla.compose_left(
     gamla.mapcat(get_edge_nodes), gamla.unique, enumerate, gamla.map(reversed), dict
 )
 
+_CallableOrNode = Union[Callable, base_types.ComputationNode]
 
-def make_computation_node(
-    func: Union[base_types.ComputationNode, Callable]
-) -> base_types.ComputationNode:
+
+def make_computation_node(func: _CallableOrNode) -> base_types.ComputationNode:
     assert func is not base_types.ComputationNode
     if isinstance(func, base_types.ComputationNode):
         return func
@@ -70,37 +91,41 @@ def make_computation_node(
         name=_infer_callable_name(func),
         func=func,
         is_stateful=_is_reducer_type(func),
-        signature=infer_callable_signature(func),
+        signature=_infer_callable_signature(func),
         is_terminal=False,
     )
 
 
 def make_edge(
-    source: Union[
-        Callable,
-        Tuple[Union[Callable, base_types.ComputationNode], ...],
-        base_types.ComputationNode,
-    ],
-    destination: Union[Callable, base_types.ComputationNode],
+    source: Union[_CallableOrNode, Tuple[_CallableOrNode, ...]],
+    destination: _CallableOrNode,
     key: Optional[Text] = None,
     priority: int = 0,
 ) -> base_types.ComputationEdge:
+    destination_as_node = make_computation_node(destination)
+    if destination_as_node.signature.is_kwargs:
+        assert not isinstance(source, tuple)
+        return base_types.ComputationEdge(
+            args=gamla.wrap_tuple(make_computation_node(source)),
+            destination=destination_as_node,
+            priority=priority,
+        )
     if isinstance(source, tuple):
         return base_types.ComputationEdge(
             args=tuple(map(make_computation_node, source)),
-            destination=make_computation_node(destination),
+            destination=destination_as_node,
             priority=priority,
         )
 
     return base_types.ComputationEdge(
         source=make_computation_node(source),
-        destination=make_computation_node(destination),
+        destination=destination_as_node,
         key=key,
         priority=priority,
     )
 
 
-def get_leaves(edges: base_types.GraphType) -> FrozenSet[base_types.ComputationNode]:
+def _get_leaves(edges: base_types.GraphType) -> FrozenSet[base_types.ComputationNode]:
     return gamla.pipe(
         edges,
         get_all_nodes,
@@ -117,7 +142,7 @@ def get_leaves(edges: base_types.GraphType) -> FrozenSet[base_types.ComputationN
 
 
 def infer_graph_sink(edges: base_types.GraphType) -> base_types.ComputationNode:
-    leaves = get_leaves(edges)
+    leaves = _get_leaves(edges)
     assert len(leaves) == 1, f"computation graph has more than one sink: {leaves}"
     return gamla.head(leaves)
 
@@ -126,7 +151,7 @@ def infer_graph_sink_excluding_terminals(
     edges: base_types.GraphType,
 ) -> base_types.ComputationNode:
     leaves = gamla.pipe(
-        edges, get_leaves, gamla.remove(gamla.attrgetter("is_terminal")), tuple
+        edges, _get_leaves, gamla.remove(gamla.attrgetter("is_terminal")), tuple
     )
     assert len(leaves) == 1, f"computation graph has more than one sink: {leaves}"
     return gamla.head(leaves)
@@ -143,7 +168,7 @@ def make_terminal(name: str, func: Callable):
     return base_types.ComputationNode(
         name=name,
         func=func,
-        signature=infer_callable_signature(func),
+        signature=_infer_callable_signature(func),
         is_stateful=False,
         is_terminal=True,
     )

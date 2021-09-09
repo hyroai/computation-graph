@@ -13,7 +13,7 @@ pytestmark = pytest.mark.asyncio
 _ROOT_VALUE = "root"
 
 
-class GraphTestException(Exception):
+class _GraphTestError(Exception):
     pass
 
 
@@ -64,7 +64,7 @@ def curried_stateful_node(arg1, arg2, state):
 
 
 def unactionable_node(arg1):
-    raise GraphTestException
+    raise _GraphTestError
 
 
 def merger(args, side_effects):
@@ -73,7 +73,7 @@ def merger(args, side_effects):
 
 def merger_that_raises_when_empty(args):
     if not args:
-        raise GraphTestException
+        raise _GraphTestError
     return "[" + ",".join(args) + "]"
 
 
@@ -91,7 +91,7 @@ def reducer_node(arg1, state):
 
 def sometimes_unactionable_reducer_node(arg1, state):
     if arg1 == "fail":
-        raise GraphTestException
+        raise _GraphTestError
 
     if state is None:
         state = 0
@@ -106,7 +106,7 @@ def test_simple():
         graph.connect_default_terminal(
             (graph.make_edge(source=node1, destination=node2, key="arg1"),)
         ),
-        frozenset([GraphTestException]),
+        frozenset([_GraphTestError]),
     )
     result = cg(arg1=_ROOT_VALUE)
     assert isinstance(result, base_types.ComputationResult)
@@ -118,7 +118,7 @@ def test_none_as_input():
         graph.connect_default_terminal(
             (graph.make_edge(source=node1, destination=node2, key="arg1"),)
         ),
-        frozenset([GraphTestException]),
+        frozenset([_GraphTestError]),
     )
     result = cg(arg1=None)
 
@@ -131,7 +131,7 @@ async def test_simple_async():
         graph.connect_default_terminal(
             (graph.make_edge(source=node1_async, destination=node2, key="arg1"),)
         ),
-        frozenset([GraphTestException]),
+        frozenset([_GraphTestError]),
     )
     result = await cg(arg1=_ROOT_VALUE)
 
@@ -147,7 +147,7 @@ def test_kwargs():
                 graph.make_edge(source=node2, destination=node3, key="arg2"),
             )
         ),
-        frozenset([GraphTestException]),
+        frozenset([_GraphTestError]),
     )
 
     result = cg(arg1=_ROOT_VALUE)
@@ -159,11 +159,6 @@ def test_kwargs():
     )
 
 
-def test_do_not_allow_kwargs():
-    with pytest.raises(AssertionError):
-        composers.make_first(lambda **kwargs: 0)
-
-
 def test_state():
     edges = graph.connect_default_terminal(
         (
@@ -172,7 +167,7 @@ def test_state():
         )
     )
 
-    cg = run.to_callable(edges, frozenset([GraphTestException]))
+    cg = run.to_callable(edges, frozenset([_GraphTestError]))
 
     result = cg(arg1=_ROOT_VALUE)
     result = cg(arg1=_ROOT_VALUE, state=result.state)
@@ -195,7 +190,7 @@ def test_multiple_inputs():
             graph.make_edge(source=node2, destination=node3, key="arg2"),
         )
     )
-    result = run.to_callable(edges, frozenset([GraphTestException]))(arg1=_ROOT_VALUE)
+    result = run.to_callable(edges, frozenset([_GraphTestError]))(arg1=_ROOT_VALUE)
     assert (
         result.result[graph.DEFAULT_TERMINAL][0]
         == "node3(arg1=node1(root), arg2=node2(node1(root)))"
@@ -206,7 +201,7 @@ def test_empty_result():
     edges = graph.connect_default_terminal(
         (graph.make_edge(source=node1, destination=unactionable_node, key="arg1"),)
     )
-    result = run.to_callable(edges, frozenset([GraphTestException]))(arg1=_ROOT_VALUE)
+    result = run.to_callable(edges, frozenset([_GraphTestError]))(arg1=_ROOT_VALUE)
     assert not result.result
 
 
@@ -220,7 +215,7 @@ def test_external_input_and_state():
         )
     )
 
-    cg = run.to_callable(edges, frozenset([GraphTestException]))
+    cg = run.to_callable(edges, frozenset([_GraphTestError]))
 
     result = cg(arg1=_ROOT_VALUE, side_effects="side_effects")
     result = cg(arg1=_ROOT_VALUE, side_effects="side_effects", state=result.state)
@@ -244,7 +239,7 @@ def test_tuple_source_node():
         )
     )
 
-    result = run.to_callable(edges, frozenset([GraphTestException]))(
+    result = run.to_callable(edges, frozenset([_GraphTestError]))(
         arg1=_ROOT_VALUE, side_effects="side_effects"
     )
 
@@ -259,7 +254,7 @@ def test_optional():
         composers.make_optional(unactionable_node, default_value=None)
     )
 
-    result = run.to_callable(edges, frozenset([GraphTestException]))(arg1=_ROOT_VALUE)
+    result = run.to_callable(edges, frozenset([_GraphTestError]))(arg1=_ROOT_VALUE)
 
     assert result.result[graph.DEFAULT_TERMINAL][0] is None
 
@@ -269,11 +264,11 @@ def test_optional_with_state():
         composers.make_optional(reducer_node, default_value=None)
     )
 
-    result = run.to_callable(edges, frozenset([GraphTestException]))(arg1=_ROOT_VALUE)
-    result = run.to_callable(edges, frozenset([GraphTestException]))(
+    result = run.to_callable(edges, frozenset([_GraphTestError]))(arg1=_ROOT_VALUE)
+    result = run.to_callable(edges, frozenset([_GraphTestError]))(
         arg1=_ROOT_VALUE, state=result.state
     )
-    result = run.to_callable(edges, frozenset([GraphTestException]))(
+    result = run.to_callable(edges, frozenset([_GraphTestError]))(
         arg1=_ROOT_VALUE, state=result.state
     )
 
@@ -285,7 +280,7 @@ def test_optional_default_value():
         composers.make_optional(unactionable_node, default_value="optional failed")
     )
 
-    result = run.to_callable(edges, frozenset([GraphTestException]))(arg1=_ROOT_VALUE)
+    result = run.to_callable(edges, frozenset([_GraphTestError]))(arg1=_ROOT_VALUE)
 
     assert result.result[graph.DEFAULT_TERMINAL][0] == "optional failed"
 
@@ -295,7 +290,7 @@ def test_first():
         graph.connect_default_terminal(
             composers.make_first(unactionable_node, node2, node1)
         ),
-        frozenset([GraphTestException]),
+        frozenset([_GraphTestError]),
     )
 
     result = cg(arg1=_ROOT_VALUE)
@@ -305,7 +300,7 @@ def test_first():
 def test_first_all_unactionable():
     cg = run.to_callable(
         graph.connect_default_terminal(composers.make_first(unactionable_node)),
-        frozenset([GraphTestException]),
+        frozenset([_GraphTestError]),
     )
     result = cg(arg1=_ROOT_VALUE)
     assert not result.result
@@ -316,7 +311,7 @@ def test_first_with_state():
         graph.connect_default_terminal(
             composers.make_first(unactionable_node, reducer_node, node1)
         ),
-        frozenset([GraphTestException]),
+        frozenset([_GraphTestError]),
     )
 
     result = cg(arg1=_ROOT_VALUE)
@@ -330,7 +325,7 @@ def test_and():
     edges = graph.connect_default_terminal(
         composers.make_and(funcs=(reducer_node, node2, node1), merge_fn=merger)
     )
-    cg = run.to_callable(edges, frozenset([GraphTestException]))
+    cg = run.to_callable(edges, frozenset([_GraphTestError]))
     result = cg(arg1=_ROOT_VALUE, side_effects="side_effects")
     result = cg(arg1=_ROOT_VALUE, state=result.state, side_effects="side_effects")
     result = cg(arg1=_ROOT_VALUE, state=result.state, side_effects="side_effects")
@@ -352,7 +347,7 @@ def test_first_with_and():
         )
     )
 
-    result = run.to_callable(edges, frozenset([GraphTestException]))(arg1=_ROOT_VALUE)
+    result = run.to_callable(edges, frozenset([_GraphTestError]))(arg1=_ROOT_VALUE)
 
     assert (
         result.result[graph.DEFAULT_TERMINAL][0]
@@ -366,7 +361,7 @@ def test_and_with_unactionable():
             funcs=(reducer_node, node2, node1, unactionable_node), merge_fn=merger
         )
     )
-    result = run.to_callable(edges, frozenset([GraphTestException]))(arg1=_ROOT_VALUE)
+    result = run.to_callable(edges, frozenset([_GraphTestError]))(arg1=_ROOT_VALUE)
     assert not result.result
 
 
@@ -377,13 +372,13 @@ def test_or():
         )
     )
 
-    result = run.to_callable(edges, frozenset([GraphTestException]))(
+    result = run.to_callable(edges, frozenset([_GraphTestError]))(
         arg1=_ROOT_VALUE, side_effects="side_effects"
     )
-    result = run.to_callable(edges, frozenset([GraphTestException]))(
+    result = run.to_callable(edges, frozenset([_GraphTestError]))(
         arg1=_ROOT_VALUE, state=result.state, side_effects="side_effects"
     )
-    result = run.to_callable(edges, frozenset([GraphTestException]))(
+    result = run.to_callable(edges, frozenset([_GraphTestError]))(
         arg1=_ROOT_VALUE, state=result.state, side_effects="side_effects"
     )
 
@@ -402,7 +397,7 @@ def test_graph_wrapping():
         )
     )
 
-    result = run.to_callable(edges, frozenset([GraphTestException]))(
+    result = run.to_callable(edges, frozenset([_GraphTestError]))(
         arg1=_ROOT_VALUE, arg2="node3value", side_effects="side_effects"
     )
 
@@ -421,7 +416,7 @@ def test_node_with_optional_param():
         )
     )
 
-    result = run.to_callable(edges, frozenset([GraphTestException]))()
+    result = run.to_callable(edges, frozenset([_GraphTestError]))()
 
     assert (
         result.result[graph.DEFAULT_TERMINAL][0]
@@ -438,7 +433,7 @@ def test_node_with_bound_optional_param():
         )
     )
 
-    result = run.to_callable(edges, frozenset([GraphTestException]))(optional_param=10)
+    result = run.to_callable(edges, frozenset([_GraphTestError]))(optional_param=10)
 
     assert (
         result.result[graph.DEFAULT_TERMINAL][0]
@@ -449,7 +444,7 @@ def test_node_with_bound_optional_param():
 def test_compose():
     result = run.to_callable(
         graph.connect_default_terminal(composers.make_compose(node1, node2)),
-        frozenset([GraphTestException]),
+        frozenset([_GraphTestError]),
     )(arg1=_ROOT_VALUE)
 
     assert result.result[graph.DEFAULT_TERMINAL][0] == "node1(node2(root))"
@@ -460,7 +455,7 @@ def test_compose_with_state():
         graph.connect_default_terminal(
             composers.make_compose(reducer_node, node1, node2)
         ),
-        frozenset([GraphTestException]),
+        frozenset([_GraphTestError]),
     )
 
     result = cg(arg1=_ROOT_VALUE)
@@ -477,7 +472,7 @@ def test_compose_with_partial():
                 functools.partial(node3, arg2="arg2_partial"), node1, node2
             )
         ),
-        frozenset([GraphTestException]),
+        frozenset([_GraphTestError]),
     )
 
     result = cg(arg1=_ROOT_VALUE)
@@ -493,7 +488,7 @@ def test_partial():
         composers.make_first(functools.partial(node3, arg2="arg2_partial"))
     )
 
-    result = run.to_callable(edges, frozenset([GraphTestException]))(arg1=_ROOT_VALUE)
+    result = run.to_callable(edges, frozenset([_GraphTestError]))(arg1=_ROOT_VALUE)
 
     assert (
         result.result[graph.DEFAULT_TERMINAL][0]
@@ -506,7 +501,7 @@ def test_curry():
         composers.make_first(curried_node(arg2="arg2_curried"))
     )
 
-    result = run.to_callable(edges, frozenset([GraphTestException]))(arg1=_ROOT_VALUE)
+    result = run.to_callable(edges, frozenset([_GraphTestError]))(arg1=_ROOT_VALUE)
 
     assert (
         result.result[graph.DEFAULT_TERMINAL][0]
@@ -519,7 +514,7 @@ def test_compose_when_all_arguments_have_a_default():
         composers.make_compose(node_with_optional_param, node1)
     )
 
-    result = run.to_callable(edges, frozenset([GraphTestException]))(arg1=_ROOT_VALUE)
+    result = run.to_callable(edges, frozenset([_GraphTestError]))(arg1=_ROOT_VALUE)
 
     assert (
         result.result[graph.DEFAULT_TERMINAL][0]
@@ -531,7 +526,7 @@ def test_optional_with_sometimes_unactionable_reducer():
     edges = graph.connect_default_terminal(
         composers.make_optional(sometimes_unactionable_reducer_node, default_value=None)
     )
-    cg = run.to_callable(edges, frozenset([GraphTestException]))
+    cg = run.to_callable(edges, frozenset([_GraphTestError]))
     result = cg(arg1=_ROOT_VALUE)
     result = cg(arg1="fail", state=result.state)
     result = cg(arg1=_ROOT_VALUE, state=result.state)
@@ -542,9 +537,7 @@ def test_optional_with_sometimes_unactionable_reducer():
 def test_unary_graph_composition():
     inner = composers.make_compose(node1, node4)
     edges = graph.connect_default_terminal(composers.make_first(inner))
-    result = run.to_callable(edges, frozenset([GraphTestException]))(
-        y=_ROOT_VALUE, z=10
-    )
+    result = run.to_callable(edges, frozenset([_GraphTestError]))(y=_ROOT_VALUE, z=10)
 
     assert result.result[graph.DEFAULT_TERMINAL][0] == "node1(node4(root, z=10))"
 
@@ -553,7 +546,7 @@ def test_curry_with_state():
 
     edges = graph.connect_default_terminal(composers.make_first(curried_stateful_node))
 
-    cg = run.to_callable(edges, frozenset([GraphTestException]))
+    cg = run.to_callable(edges, frozenset([_GraphTestError]))
     result = cg(arg1=_ROOT_VALUE, arg2="arg2")
     result = cg(arg1=_ROOT_VALUE, arg2="arg2", state=result.state)
     result = cg(arg1=_ROOT_VALUE, arg2="arg2", state=result.state)
@@ -572,7 +565,7 @@ def test_state_is_serializable():
         )
     )
 
-    cg = run.to_callable(edges, frozenset([GraphTestException]))
+    cg = run.to_callable(edges, frozenset([_GraphTestError]))
     result = cg(arg1=_ROOT_VALUE)
     result = cg(arg1=_ROOT_VALUE, state=result.state)
     result = cg(arg1=_ROOT_VALUE, state=result.state)
@@ -589,7 +582,7 @@ def test_compose_compose():
         composers.make_compose(inner_graph, node4, key="arg2")
     )
 
-    result = run.to_callable(edges, frozenset([GraphTestException]))(
+    result = run.to_callable(edges, frozenset([_GraphTestError]))(
         y="y", z="z", arg1="arg1"
     )
 
@@ -606,7 +599,7 @@ def test_compose_after_first():
             composers.make_first(unactionable_node, node1, node2), node3, key="arg1"
         )
     )
-    result = run.to_callable(edges, frozenset([GraphTestException]))(
+    result = run.to_callable(edges, frozenset([_GraphTestError]))(
         arg1="arg1", arg2="arg2"
     )
     assert (
@@ -621,7 +614,7 @@ def test_first_after_compose():
         graph.connect_default_terminal(
             composers.make_first(unactionable_node, inner_edges, node1)
         ),
-        frozenset([GraphTestException]),
+        frozenset([_GraphTestError]),
     )
 
     result = cg(arg1="arg1")
@@ -635,7 +628,7 @@ def test_first_first():
         graph.connect_default_terminal(
             composers.make_first(unactionable_node, inner_first, node1)
         ),
-        frozenset([GraphTestException]),
+        frozenset([_GraphTestError]),
     )
 
     result = cg(arg1=_ROOT_VALUE)
@@ -650,7 +643,7 @@ def test_compose_with_node_already_in_graph():
         composers.make_compose(inner_edges1, inner_edges2, key="arg1")
     )
 
-    result = run.to_callable(edges, frozenset([GraphTestException]))(
+    result = run.to_callable(edges, frozenset([_GraphTestError]))(
         arg1=_ROOT_VALUE, arg2="arg2", side_effects="side_effects"
     )
 
@@ -663,7 +656,7 @@ def test_compose_with_node_already_in_graph():
 def test_first_with_subgraph_that_raises():
     inner = composers.make_compose(node2, unactionable_node)
     edges = graph.connect_default_terminal(composers.make_first(inner, node1))
-    result = run.to_callable(edges, frozenset([GraphTestException]))(arg1=_ROOT_VALUE)
+    result = run.to_callable(edges, frozenset([_GraphTestError]))(arg1=_ROOT_VALUE)
     assert result.result[graph.DEFAULT_TERMINAL][0] == "node1(root)"
 
 
@@ -673,7 +666,7 @@ def test_or_with_sink_that_raises():
             (unactionable_node, node1), merge_fn=merger_that_raises_when_empty
         )
     )
-    result = run.to_callable(edges, frozenset([GraphTestException]))(arg1=_ROOT_VALUE)
+    result = run.to_callable(edges, frozenset([_GraphTestError]))(arg1=_ROOT_VALUE)
 
     assert result.result[graph.DEFAULT_TERMINAL][0] == "[node1(root)]"
 
@@ -684,7 +677,7 @@ def test_two_terminals():
     terminal2 = graph.make_terminal("TERMINAL2", gamla.wrap_tuple)
     edges += (graph.make_edge(source=node1, destination=terminal2),)
 
-    result = run.to_callable(edges, frozenset([GraphTestException]))(arg1=_ROOT_VALUE)
+    result = run.to_callable(edges, frozenset([_GraphTestError]))(arg1=_ROOT_VALUE)
     assert result.result[graph.DEFAULT_TERMINAL][0] == "node2(node1(root))"
     assert result.result[terminal2][0] == "node1(root)"
 
@@ -693,7 +686,25 @@ def test_two_paths_succeed():
     edges = graph.connect_default_terminal(composers.make_first(node2, node1))
     terminal2 = graph.make_terminal("TERMINAL2", gamla.wrap_tuple)
     edges += (graph.make_edge(source=node1, destination=terminal2),)
-    result = run.to_callable(edges, frozenset([GraphTestException]))(arg1=_ROOT_VALUE)
+    result = run.to_callable(edges, frozenset([_GraphTestError]))(arg1=_ROOT_VALUE)
 
     assert result.result[graph.DEFAULT_TERMINAL][0] == "node2(root)"
     assert result.result[terminal2][0] == "node1(root)"
+
+
+def test_double_star_signature_considered_unary():
+    cg = run.to_callable(
+        graph.connect_default_terminal(
+            composers.make_compose(
+                gamla.juxt(
+                    lambda some_argname: some_argname + 1,
+                    lambda different_argname: different_argname * 2,
+                ),
+                lambda: 3,
+            )
+        ),
+        frozenset([_GraphTestError]),
+    )
+    result = cg(arg1=_ROOT_VALUE)
+    assert isinstance(result, base_types.ComputationResult)
+    assert result.result[graph.DEFAULT_TERMINAL][0] == (4, 6)

@@ -190,6 +190,7 @@ def _get_bound_signature(
     return base_types.NodeSignature(
         is_args=is_args and any(edge.args for edge in incoming_edges),
         kwargs=_get_kwargs_from_edges(incoming_edges),
+        optional_kwargs=(),
     )
 
 
