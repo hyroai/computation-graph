@@ -41,7 +41,7 @@ _parameter_name = gamla.attrgetter("name")
 )
 def _infer_callable_signature(function_parameters: Tuple) -> base_types.NodeSignature:
     if gamla.anymap(_is_double_star)(function_parameters):
-        return base_types.NodeSignature(True, (), (), True)
+        return base_types.NodeSignature(False, (), (), True)
     return base_types.NodeSignature(
         is_args=gamla.anymap(_is_star)(function_parameters),
         kwargs=gamla.pipe(
@@ -100,13 +100,6 @@ def make_edge(
     priority: int = 0,
 ) -> base_types.ComputationEdge:
     destination_as_node = make_computation_node(destination)
-    if destination_as_node.signature.is_kwargs:
-        assert not isinstance(source, tuple)
-        return base_types.ComputationEdge(
-            args=gamla.wrap_tuple(make_computation_node(source)),
-            destination=destination_as_node,
-            priority=priority,
-        )
     if isinstance(source, tuple):
         return base_types.ComputationEdge(
             args=tuple(map(make_computation_node, source)),

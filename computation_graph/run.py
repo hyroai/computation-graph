@@ -212,6 +212,12 @@ def _get_computation_input(
         )
         == 1
     ):
+        if signature.is_kwargs:
+            return base_types.ComputationInput(
+                args=gamla.wrap_tuple(gamla.head(gamla.head(results)).result),
+                kwargs={},
+                state=None,
+            )
         return base_types.ComputationInput(
             args=(),
             kwargs=_get_unary_computation_input(
