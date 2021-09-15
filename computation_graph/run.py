@@ -203,7 +203,9 @@ def _get_computation_input(
     bound_signature = _get_bound_signature(signature.is_args, incoming_edges)
     unbound_signature = _signature_difference(signature, bound_signature)
     if signature.is_kwargs:
-        assert len(results) == 1
+        assert (
+            len(results) == 1
+        ), f"signature {signature} contains `**kwargs`. This is considered unary, meaning one incoming edge, but we got more than one: {incoming_edges}."
         return base_types.ComputationInput(
             args=gamla.wrap_tuple(gamla.head(gamla.head(results)).result),
             kwargs={},
