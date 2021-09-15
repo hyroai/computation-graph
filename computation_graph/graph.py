@@ -40,19 +40,19 @@ _parameter_name = gamla.attrgetter("name")
     )
 )
 def _infer_callable_signature(function_parameters: Tuple) -> base_types.NodeSignature:
-    if gamla.anymap(_is_double_star)(function_parameters):
-        return base_types.NodeSignature(False, (), (), True)
     return base_types.NodeSignature(
         is_args=gamla.anymap(_is_star)(function_parameters),
+        is_kwargs=gamla.anymap(_is_double_star)(function_parameters),
         kwargs=gamla.pipe(
             function_parameters,
-            gamla.remove(_is_star),
+            gamla.remove(gamla.anyjuxt(_is_star, _is_double_star)),
             gamla.map(_parameter_name),
             tuple,
         ),
         optional_kwargs=gamla.pipe(
             function_parameters,
-            gamla.filter(gamla.alljuxt(gamla.complement(_is_star), _is_default)),
+            gamla.remove(gamla.anyjuxt(_is_star, _is_double_star)),
+            gamla.filter(_is_default),
             gamla.map(_parameter_name),
             tuple,
         ),

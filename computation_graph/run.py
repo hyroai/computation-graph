@@ -202,6 +202,12 @@ def _get_computation_input(
 ) -> base_types.ComputationInput:
     bound_signature = _get_bound_signature(signature.is_args, incoming_edges)
     unbound_signature = _signature_difference(signature, bound_signature)
+    if signature.is_kwargs:
+        return base_types.ComputationInput(
+            args=gamla.wrap_tuple(gamla.head(gamla.head(results)).result),
+            kwargs={},
+            state=None,
+        )
     if (
         not (unbound_signature.is_args or bound_signature.is_args)
         and sum(
@@ -212,12 +218,6 @@ def _get_computation_input(
         )
         == 1
     ):
-        if signature.is_kwargs:
-            return base_types.ComputationInput(
-                args=gamla.wrap_tuple(gamla.head(gamla.head(results)).result),
-                kwargs={},
-                state=None,
-            )
         return base_types.ComputationInput(
             args=(),
             kwargs=_get_unary_computation_input(
