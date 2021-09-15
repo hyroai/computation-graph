@@ -63,9 +63,10 @@ class ComputationInput:
 
 @dataclasses.dataclass(frozen=True)
 class NodeSignature:
-    is_args: bool = False
-    kwargs: Tuple[Text, ...] = ()
-    optional_kwargs: Tuple[Text, ...] = ()
+    is_args: bool
+    kwargs: Tuple[Text, ...]
+    optional_kwargs: Tuple[Text, ...]
+    is_kwargs: bool = False
 
 
 edge_destination = gamla.attrgetter("destination")

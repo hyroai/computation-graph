@@ -159,11 +159,6 @@ def test_kwargs():
     )
 
 
-def test_do_not_allow_kwargs():
-    with pytest.raises(AssertionError):
-        composers.make_first(lambda **kwargs: 0)
-
-
 def test_state():
     edges = graph.connect_default_terminal(
         (
@@ -695,3 +690,21 @@ def test_two_paths_succeed():
 
     assert result.result[graph.DEFAULT_TERMINAL][0] == "node2(root)"
     assert result.result[terminal2][0] == "node1(root)"
+
+
+def test_double_star_signature_considered_unary():
+    cg = run.to_callable(
+        graph.connect_default_terminal(
+            composers.make_compose(
+                gamla.juxt(
+                    lambda some_argname: some_argname + 1,
+                    lambda different_argname: different_argname * 2,
+                ),
+                lambda: 3,
+            )
+        ),
+        frozenset([_GraphTestError]),
+    )
+    result = cg(arg1=_ROOT_VALUE)
+    assert isinstance(result, base_types.ComputationResult)
+    assert result.result[graph.DEFAULT_TERMINAL][0] == (4, 6)

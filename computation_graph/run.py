@@ -190,6 +190,7 @@ def _get_bound_signature(
     return base_types.NodeSignature(
         is_args=is_args and any(edge.args for edge in incoming_edges),
         kwargs=_get_kwargs_from_edges(incoming_edges),
+        optional_kwargs=(),
     )
 
 
@@ -201,6 +202,15 @@ def _get_computation_input(
 ) -> base_types.ComputationInput:
     bound_signature = _get_bound_signature(signature.is_args, incoming_edges)
     unbound_signature = _signature_difference(signature, bound_signature)
+    if signature.is_kwargs:
+        assert (
+            len(results) == 1
+        ), f"signature {signature} contains `**kwargs`. This is considered unary, meaning one incoming edge, but we got more than one: {incoming_edges}."
+        return base_types.ComputationInput(
+            args=gamla.wrap_tuple(gamla.head(gamla.head(results)).result),
+            kwargs={},
+            state=None,
+        )
     if (
         not (unbound_signature.is_args or bound_signature.is_args)
         and sum(
