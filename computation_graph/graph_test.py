@@ -108,28 +108,18 @@ def _runner(edges: base_types.GraphType, **kwargs):
 
 
 def test_simple():
-    cg = run.to_callable(
-        graph.connect_default_terminal(
-            (graph.make_edge(source=_node1, destination=_node2, key="arg1"),)
-        ),
-        frozenset([_GraphTestError]),
+    result = _runner(
+        (graph.make_edge(source=_node1, destination=_node2, key="arg1"),),
+        arg1=_ROOT_VALUE,
     )
-    result = cg(arg1=_ROOT_VALUE)
-    assert isinstance(result, base_types.ComputationResult)
-    assert result.result[graph.DEFAULT_TERMINAL][0] == f"node2(node1({_ROOT_VALUE}))"
+    assert result == f"node2(node1({_ROOT_VALUE}))"
 
 
 def test_none_as_input():
-    cg = run.to_callable(
-        graph.connect_default_terminal(
-            (graph.make_edge(source=_node1, destination=_node2, key="arg1"),)
-        ),
-        frozenset([_GraphTestError]),
+    result = _runner(
+        (graph.make_edge(source=_node1, destination=_node2, key="arg1"),), arg1=None
     )
-    result = cg(arg1=None)
-
-    assert isinstance(result, base_types.ComputationResult)
-    assert result.result[graph.DEFAULT_TERMINAL][0] == "node2(node1(None))"
+    assert result == "node2(node1(None))"
 
 
 async def test_simple_async():
