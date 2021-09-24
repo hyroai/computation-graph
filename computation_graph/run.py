@@ -337,7 +337,6 @@ def _construct_computation_result(edges: base_types.GraphType, edges_to_node_id)
 
 
 def type_check(node: base_types.ComputationNode, result):
-    """To be used with `to_callable_with_side_effect_for_single_and_multiple`."""
     try:
         return_typing = typing.get_type_hints(node.func).get("return", None)
     except TypeError:
