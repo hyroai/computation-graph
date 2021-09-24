@@ -11,17 +11,23 @@ A functional composition framework that supports:
 
 To deploy: `python setup.py sdist bdist_wheel; twine upload dist/*; rm -rf dist/;`
 
+### Type checking
+
+The runner will type check all outputs for nodes with return type annotations. In case of a wrong typing, it will log the node at fault.
+
 ### Debugging
 
-We need graphviz to visualize computation graphs:
+Available debuggers:
 
-```bash
-sudo apt update && apt install graphviz
-pip install pygraphviz
-```
+1. `graphviz.computation_trace`
+1. `mermaid.computation_trace`
+1. `ascii.computation_trace`
 
-Debugging is possible by replacing `to_callable` with `run.to_callable_with_side_effect` with `ascii.computation_trace` as the first argument.
-This will save a file on each graph execution to current working directory.
+To use, replace `to_callable` with `run.to_callable_with_side_effect` with your selected debugger as the first argument.
+
+#### Graphviz debugger
+
+This debugger will save a file on each graph execution to current working directory.
 
 You can use this file in a graph viewer like [gephi](https://gephi.org/).
 Nodes colored red are part of the 'winning' computation path.

@@ -1,5 +1,3 @@
-import logging
-import pprint
 from typing import Callable, Iterable, Tuple
 
 import gamla
@@ -122,4 +120,4 @@ def computation_trace(graph_instance: base_types.GraphType):
             ),
         )
 
-    return gamla.compose_left(computation_trace, pprint.pformat, logging.info)
+    return gamla.compose_left(computation_trace, gamla.debug)
