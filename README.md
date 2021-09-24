@@ -13,7 +13,7 @@ To deploy: `python setup.py sdist bdist_wheel; twine upload dist/*; rm -rf dist/
 
 ### Type checking
 
-Use `run.type_check` as the first argument in `run.to_callable_with_side_effect_for_single_and_multiple`.
+The runner will type check all outputs for nodes with return type annotations. In case of a wrong typing, it will log the node at fault.
 
 ### Debugging
 

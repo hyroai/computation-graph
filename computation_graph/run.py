@@ -336,14 +336,17 @@ def _construct_computation_result(edges: base_types.GraphType, edges_to_node_id)
     return construct_computation_result
 
 
-def type_check(node: base_types.ComputationNode, result):
+def _type_check(node: base_types.ComputationNode, result):
     try:
         return_typing = typing.get_type_hints(node.func).get("return", None)
     except TypeError:
         # Does not support `functools.partial`.
         return
     if return_typing:
-        typeguard.check_type("bla", result, return_typing)
+        try:
+            typeguard.check_type(str(node), result, return_typing)
+        except TypeError as e:
+            logging.error([node.func.__code__, e])
 
 
 def _apply(node: base_types.ComputationNode, node_input: base_types.ComputationInput):
@@ -520,7 +523,7 @@ def add_final_sink(edges: base_types.GraphType) -> base_types.GraphType:
     return edges + composers.make_or(terminals, merge_fn=_final_sink)
 
 
-def to_callable_with_side_effect_for_single_and_multiple(
+def _to_callable_with_side_effect_for_single_and_multiple(
     single_node_side_effect: _SingleNodeSideEffect,
     all_nodes_side_effect: Callable,
     edges: base_types.GraphType,
@@ -557,8 +560,8 @@ def to_callable_with_side_effect_for_single_and_multiple(
 
 
 to_callable_with_side_effect = gamla.curry(
-    to_callable_with_side_effect_for_single_and_multiple
-)(gamla.just(None))
+    _to_callable_with_side_effect_for_single_and_multiple
+)(_type_check)
 
 # Use the second line if you want to see the winning path in the computation graph (a little slower).
 to_callable = to_callable_with_side_effect(gamla.just(gamla.just(None)))
