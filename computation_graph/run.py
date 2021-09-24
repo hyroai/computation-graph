@@ -191,12 +191,18 @@ def _get_bound_signature(
     )
 
 
+_ChoiceOfOutputForNode = Tuple[
+    Tuple[base_types.ComputationResult, _DecisionsType], base_types.ComputationNode,
+]
+
+
 @gamla.curry
 def _get_computation_input(
     unbound_input: Callable[[base_types.ComputationNode], base_types.ComputationInput],
     node: base_types.ComputationNode,
     incoming_edges: base_types.GraphType,
-    values_for_edges_choice: Iterable[Iterable[Iterable[Iterable]]],
+    # For each edge, there are multiple values options, each having its own trace.
+    values_for_edges_choice: Iterable[Iterable[_ChoiceOfOutputForNode]],
 ) -> base_types.ComputationInput:
     bound_signature = _get_bound_signature(node.signature.is_args, incoming_edges)
     unbound_signature = _signature_difference(node.signature, bound_signature)
@@ -265,7 +271,9 @@ def _inject_state(unbound_input: base_types.ComputationInput):
     return inject_state
 
 
-_choice_to_value = opt_gamla.compose_left(gamla.head, gamla.head)
+_choice_to_value: Callable[
+    [_ChoiceOfOutputForNode], base_types.ComputationResult
+] = opt_gamla.compose_left(gamla.head, gamla.head)
 
 _decisions_from_value_choices = opt_gamla.compose_left(
     gamla.concat,
@@ -274,7 +282,7 @@ _decisions_from_value_choices = opt_gamla.compose_left(
             opt_gamla.map(opt_gamla.compose_left(gamla.head, gamla.second)),
             opt_gamla.reduce(
                 opt_gamla.merge_with_reducer(_check_equal_and_take_one),
-                gamla.frozendict(),
+                immutables.Map(),
             ),
         ),
         opt_gamla.mapdict(opt_gamla.juxt(gamla.second, _choice_to_value)),
@@ -424,7 +432,9 @@ def _dag_layer_reduce(
     )
 
 
-def _edge_to_value_options(accumulated_outputs):
+def _edge_to_value_options(
+    accumulated_outputs,
+) -> Callable[[Iterable[base_types.ComputationEdge]], Iterable[Any]]:
     return opt_gamla.mapduct(
         opt_gamla.compose_left(
             _get_edge_sources,
@@ -433,7 +443,7 @@ def _edge_to_value_options(accumulated_outputs):
                     opt_gamla.pair_left(
                         opt_gamla.compose_left(
                             gamla.dict_to_getter_with_default(
-                                gamla.frozendict(), accumulated_outputs
+                                immutables.Map(), accumulated_outputs
                             ),
                             dict.items,
                         )
