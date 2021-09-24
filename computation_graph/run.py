@@ -6,9 +6,10 @@ import pathlib
 import sys
 import traceback
 import typing
-from typing import Any, Callable, Dict, FrozenSet, Set, Text, Tuple, Type
+from typing import Any, Callable, Dict, FrozenSet, Iterable, Set, Text, Tuple, Type
 
 import gamla
+import immutables
 import toposort
 import typeguard
 from gamla.optimized import async_functions as opt_async_gamla
@@ -33,7 +34,9 @@ def _get_edge_sources(edge: base_types.ComputationEdge):
     return edge.args or (edge.source,)
 
 
-_toposort_nodes = opt_gamla.compose_left(
+_toposort_nodes: Callable[
+    [base_types.GraphType], Tuple[FrozenSet[base_types.ComputationNode], ...]
+] = opt_gamla.compose_left(
     opt_gamla.groupby_many(_get_edge_sources),
     opt_gamla.valmap(
         opt_gamla.compose_left(opt_gamla.map(base_types.edge_destination), set)
@@ -143,7 +146,7 @@ _get_inner_kwargs = opt_gamla.compose_left(
 
 _DecisionsType = Dict[base_types.ComputationNode, base_types.ComputationResult]
 _ResultToDecisionsType = Dict[base_types.ComputationResult, _DecisionsType]
-_ResultToDependencies = Callable[[base_types.ComputationNode], _ResultToDecisionsType]
+_IntermediaryResults = Dict[base_types.ComputationNode, _ResultToDecisionsType]
 
 
 class _NotCoherent(Exception):
@@ -158,14 +161,6 @@ def _check_equal_and_take_one(x, y):
 
 
 NodeToResults = Callable[[base_types.ComputationNode], _ResultToDecisionsType]
-
-
-def _node_to_value_choices(node_to_results: NodeToResults):
-    return opt_gamla.compose_left(
-        opt_gamla.pair_left(opt_gamla.compose_left(node_to_results, dict.items)),
-        opt_gamla.packstack(gamla.identity, itertools.repeat),
-        opt_gamla.star(zip),
-    )
 
 
 def _signature_difference(
@@ -201,12 +196,13 @@ def _get_computation_input(
     unbound_input: Callable[[base_types.ComputationNode], base_types.ComputationInput],
     node: base_types.ComputationNode,
     incoming_edges: base_types.GraphType,
-    values_for_edges_choice,
+    values_for_edges_choice: Iterable[Iterable[Iterable[Iterable]]],
 ) -> base_types.ComputationInput:
     bound_signature = _get_bound_signature(node.signature.is_args, incoming_edges)
     unbound_signature = _signature_difference(node.signature, bound_signature)
-    results = opt_gamla.maptuple(opt_gamla.maptuple(_choice_to_value))(
-        values_for_edges_choice
+    results = gamla.pipe(
+        values_for_edges_choice,
+        opt_gamla.maptuple(opt_gamla.maptuple(_choice_to_value)),
     )
     if node.signature.is_kwargs:
         assert (
@@ -312,7 +308,11 @@ def _merge_with_previous_state(
 
 
 def _construct_computation_result(edges: base_types.GraphType, edges_to_node_id):
-    def construct_computation_result(result_to_dependencies: _ResultToDependencies):
+    def construct_computation_result(
+        result_to_dependencies: Callable[
+            [base_types.ComputationNode], _ResultToDecisionsType
+        ]
+    ):
         return opt_gamla.pipe(
             edges,
             graph.infer_graph_sink,
@@ -350,13 +350,12 @@ def _type_check(node: base_types.ComputationNode, result):
 
 
 def _apply(node: base_types.ComputationNode, node_input: base_types.ComputationInput):
-    result = node.func(
+    return node.func(
         *node_input.args,
         **gamla.add_key_value("state", node_input.state)(node_input.kwargs)
         if node.is_stateful
         else node_input.kwargs,
     )
-    return result
 
 
 _SingleNodeSideEffect = Callable[[base_types.ComputationNode, Any], None]
@@ -394,15 +393,35 @@ def _run_keeping_choices(
     return run_keeping_choices
 
 
-def _process_layer_in_parallel(f):
+def _merge_immutable(x, y):
+    return x.update(y)
+
+
+def _process_layer_in_parallel(
+    f: Callable[
+        [_IntermediaryResults, base_types.ComputationNode], _IntermediaryResults
+    ]
+) -> Callable[
+    [_IntermediaryResults, FrozenSet[base_types.ComputationNode]], _IntermediaryResults,
+]:
     return gamla.compose_left(
-        gamla.pack, gamla.explode(1), gamla.map(f), opt_gamla.merge
+        gamla.pack,
+        gamla.explode(1),
+        gamla.map(f),
+        opt_gamla.reduce(_merge_immutable, immutables.Map()),
     )
 
 
-def _dag_layer_reduce(f: Callable):
+def _dag_layer_reduce(
+    f: Callable[
+        [_IntermediaryResults, FrozenSet[base_types.ComputationNode]],
+        _IntermediaryResults,
+    ]
+) -> Callable[[base_types.GraphType], _IntermediaryResults]:
     """Directed acyclic graph reduction."""
-    return gamla.compose_left(_toposort_nodes, gamla.reduce_curried(f, {}))
+    return gamla.compose_left(
+        _toposort_nodes, gamla.reduce_curried(f, immutables.Map())
+    )
 
 
 def _edge_to_value_options(accumulated_outputs):
@@ -410,10 +429,16 @@ def _edge_to_value_options(accumulated_outputs):
         opt_gamla.compose_left(
             _get_edge_sources,
             opt_gamla.mapduct(
-                _node_to_value_choices(
-                    gamla.dict_to_getter_with_default(
-                        gamla.frozendict(), accumulated_outputs
-                    )
+                opt_gamla.compose_left(
+                    opt_gamla.pair_left(
+                        opt_gamla.compose_left(
+                            gamla.dict_to_getter_with_default(
+                                gamla.frozendict(), accumulated_outputs
+                            ),
+                            dict.items,
+                        )
+                    ),
+                    gamla.explode(0),
                 )
             ),
         )
@@ -421,6 +446,7 @@ def _edge_to_value_options(accumulated_outputs):
 
 
 _create_node_run_options = opt_gamla.compose_left(
+    gamla.pack,
     gamla.explode(1),
     opt_gamla.mapcat(
         opt_gamla.compose_left(
@@ -433,45 +459,61 @@ _create_node_run_options = opt_gamla.compose_left(
 )
 
 
-def _process_node(is_async, get_edge_options):
-    def process_node(f):
+def _assoc_immutable(d, k, v):
+    return d.set(k, v)
+
+
+@gamla.curry
+def _lift_single_runner_to_run_on_many_options(is_async: bool, f):
+    return (opt_async_gamla.compose_left if is_async else opt_gamla.compose_left)(
+        _create_node_run_options,
+        (opt_async_gamla.map if is_async else opt_gamla.map)(f),
+        opt_gamla.filter(gamla.identity),
+        dict,
+    )
+
+
+def _process_node(
+    is_async: bool, get_edge_options: Callable[[base_types.ComputationNode], Any]
+) -> Callable[[Callable], Callable]:
+    def process_node(f: Callable):
         if is_async:
 
-            async def process_node(params):
-                accumulated_results, node = params
-                params = (
+            @opt_async_gamla.star
+            async def process_node(
+                accumulated_results: _IntermediaryResults,
+                node: base_types.ComputationNode,
+            ) -> _IntermediaryResults:
+                return _assoc_immutable(
+                    accumulated_results,
                     node,
-                    get_edge_options(node),
-                    _edge_to_value_options(accumulated_results),
+                    await f(
+                        node,
+                        get_edge_options(node),
+                        _edge_to_value_options(accumulated_results),
+                    ),
                 )
-                accumulated_results[node] = await opt_async_gamla.compose_left(
-                    _create_node_run_options,
-                    opt_async_gamla.map(f),
-                    opt_gamla.filter(gamla.identity),
-                    dict,
-                )(params)
-
-                return accumulated_results
 
             return process_node
 
-        def process_node_sync(params):
-            accumulated_results, node = params
-            params = (
-                node,
-                get_edge_options(node),
-                _edge_to_value_options(accumulated_results),
-            )
-            accumulated_results[node] = opt_gamla.compose_left(
-                _create_node_run_options,
-                opt_gamla.map(f),
-                opt_gamla.filter(gamla.identity),
-                dict,
-            )(params)
+        else:
 
-            return accumulated_results
+            @opt_gamla.star
+            def process_node(
+                accumulated_results: _IntermediaryResults,
+                node: base_types.ComputationNode,
+            ) -> _IntermediaryResults:
+                return _assoc_immutable(
+                    accumulated_results,
+                    node,
+                    f(
+                        node,
+                        get_edge_options(node),
+                        _edge_to_value_options(accumulated_results),
+                    ),
+                )
 
-        return process_node_sync
+            return process_node
 
     return process_node
 
@@ -498,6 +540,7 @@ def _make_runner(
             _dag_layer_reduce,
             _process_layer_in_parallel,
             _process_node(is_async, _incoming_edge_options(edges)),
+            _lift_single_runner_to_run_on_many_options(is_async),
             gamla.excepts(
                 (*handled_exceptions, _NotCoherent),
                 opt_gamla.compose_left(type, _log_handled_exception, gamla.just(None)),
