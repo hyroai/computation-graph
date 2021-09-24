@@ -6,10 +6,10 @@ with open("README.md", "r") as fh:
 
 setuptools.setup(
     name="computation-graph",
-    version="14",
+    version="15",
     long_description=_LONG_DESCRIPTION,
     long_description_content_type="text/markdown",
     packages=setuptools.find_namespace_packages(),
-    install_requires=["gamla>=83", "toposort"],
+    install_requires=["gamla>=83", "typeguard", "toposort"],
     extras_require={"test": ["pygraphviz", "pytest>=5.4.0"]},
 )
