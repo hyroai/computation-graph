@@ -669,7 +669,6 @@ def test_or_with_sink_that_raises():
         )
     )
     result = run.to_callable(edges, frozenset([_GraphTestError]))(arg1=_ROOT_VALUE)
-
     assert result.result[graph.DEFAULT_TERMINAL][0] == "[node1(root)]"
 
 
@@ -678,7 +677,6 @@ def test_two_terminals():
     edges = graph.connect_default_terminal(composers.make_compose(_node2, _node1))
     terminal2 = graph.make_terminal("TERMINAL2", gamla.wrap_tuple)
     edges += (graph.make_edge(source=_node1, destination=terminal2),)
-
     result = run.to_callable(edges, frozenset([_GraphTestError]))(arg1=_ROOT_VALUE)
     assert result.result[graph.DEFAULT_TERMINAL][0] == "node2(node1(root))"
     assert result.result[terminal2][0] == "node1(root)"
