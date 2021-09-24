@@ -708,3 +708,27 @@ def test_double_star_signature_considered_unary():
     result = cg(arg1=_ROOT_VALUE)
     assert isinstance(result, base_types.ComputationResult)
     assert result.result[graph.DEFAULT_TERMINAL][0] == (4, 6)
+
+
+# TODO(uri): This file is repeating this function all over, deduplicate.
+def _runner(edges: base_types.GraphType):
+    return run.to_callable(
+        graph.connect_default_terminal(composers.make_first(edges)),
+        frozenset([_GraphTestError]),
+    )().result[graph.DEFAULT_TERMINAL][0]
+
+
+def test_type_safety_messages(caplog):
+    def f(x) -> int:  # Bad typing!
+        return "hello " + x
+
+    assert _runner(composers.make_compose(f, lambda: "world")) == "hello world"
+    assert "TypeError" in caplog.text
+
+
+def test_type_safety_messages_no_overtrigger(caplog):
+    def f(x) -> str:
+        return "hello " + x
+
+    assert _runner(composers.make_compose(f, lambda: "world")) == "hello world"
+    assert "TypeError" not in caplog.text

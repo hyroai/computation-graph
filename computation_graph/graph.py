@@ -169,7 +169,7 @@ get_terminals = gamla.compose_left(
 )
 
 
-def _aggregator_for_terminal(*args) -> base_types.GraphType:
+def _aggregator_for_terminal(*args):
     return tuple(args)
 
 
