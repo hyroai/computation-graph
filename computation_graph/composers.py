@@ -184,9 +184,7 @@ def _infer_composition_edges(
         ), f"Cannot compose, destination signature does not contain key '{key}'"
 
         return (
-            graph.make_edge(
-                source=_infer_sink(source), destination=destination, key=key
-            ),
+            graph.make_edge(_infer_sink(source), destination, key, 0),
             *_get_edges_from_node_or_graph(source),
         )
 

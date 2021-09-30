@@ -5,6 +5,8 @@ from typing import Any, Callable, Dict, Optional, Text, Tuple
 
 import gamla
 
+from computation_graph import type_safety
+
 
 @dataclasses.dataclass(frozen=True)
 class ComputationResult:
@@ -16,15 +18,32 @@ class ComputationResult:
 class ComputationEdge:
     destination: ComputationNode
     priority: int
-    # Either key+source, just source, just args.
-    key: Optional[Text] = None
-    source: Optional[ComputationNode] = None
-    args: Tuple[ComputationNode, ...] = ()
+    key: Optional[Text]
+    source: Optional[ComputationNode]
+    args: Tuple[ComputationNode, ...]
 
     def __post_init__(self):
+        assert (
+            not (self.args) or not self.key
+        ), f"Edge with `args` cannot have a `key`: {self.args} {self.key}"
         assert bool(self.args) != bool(
             self.source
-        ), "Edge must have a source or args, not both."
+        ), f"Edge must have a source or args, not both: {self}"
+        if (
+            not self.args
+            # TODO(uri): Remove `ComputationResult` for more powerful type checks.
+            and not self.destination.func.__annotations__.get("return")
+            == ComputationResult
+        ):
+            assert type_safety.can_compose(
+                self.destination.func, self.source.func, self.key
+            ), "\n".join(
+                [
+                    f"Type mismatch for {self.source.func} and {self.destination.func}.",
+                    self.source.func.__annotations__,
+                    self.destination.func.__annotations__,
+                ]
+            )
 
     def __repr__(self):
         source_str = (
