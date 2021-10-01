@@ -1,4 +1,4 @@
-from typing import Collection, FrozenSet, Union
+from typing import Any, Collection, FrozenSet, List, Sequence, Set, Tuple, Union
 
 from computation_graph import type_safety
 
@@ -35,27 +35,29 @@ def test_compose_on_key():
     assert not type_safety.can_compose(f, g, "x")
 
 
-def test_compose_generics():
-    def f(x: FrozenSet[int]) -> Collection[str]:
-        pass
+def test_is_subtype():
+    for x in [
+        [FrozenSet[str], FrozenSet[str]],
+        [str, Any],
+        [Tuple[str, ...], Tuple[str, ...]],
+        [Set[str], Collection[str]],
+        [List, Sequence],
+        [Union[int, str], Union[int, str]],
+        [str, Union[int, str]],
+        [Union[List, Set], Collection],
+    ]:
+        assert type_safety.is_subtype(x)
 
-    def g(x: Collection[str]) -> str:
-        pass
 
-    assert type_safety.can_compose(g, f, None)
-    assert not type_safety.can_compose(f, g, None)
-
-
-def test_union():
-    def f(x: Union[int, str]) -> Union[str, int]:
-        pass
-
-    def g(x: str) -> str:
-        pass
-
-    def h(x: Union[str, int]):
-        pass
-
-    assert type_safety.can_compose(f, g, None)
-    assert not type_safety.can_compose(g, f, None)
-    assert type_safety.can_compose(h, f, None)
+def test_not_is_subtype():
+    for x in [
+        [FrozenSet[int], FrozenSet[str]],
+        [str, FrozenSet[str]],
+        [Collection, FrozenSet],
+        [Tuple[str, ...], Tuple[int, ...]],
+        [Union[int, str], int],
+        [Any, str],
+        [List, Union[int, str]],
+        [Union[int, str, List], Union[int, str]],
+    ]:
+        assert not type_safety.is_subtype(x)
