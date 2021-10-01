@@ -16,20 +16,25 @@ class ComputationResult:
     state: Any
 
 
+def _pretty_print_function_name(f: Callable) -> str:
+    return f"{f.__code__.co_filename}:{f.__code__.co_firstlineno}:{f.__name__}"
+
+
 def _mismatch_message(key, source: Callable, destination: Callable) -> str:
     return "\n".join(
         [
-            f"Type mismatch: `{source.__name__}`--`{key}`-->`{destination.__name__}`",
-            ":".join(
-                map(str, [typing.get_type_hints(source)["return"], source.__code__])
-            ),
-            ":".join(
-                map(
-                    str, [typing.get_type_hints(destination)[key], destination.__code__]
-                )
-            ),
+            "",
+            f"source: {_pretty_print_function_name(source)}",
+            f"key: {key}",
+            f"destination: {_pretty_print_function_name(destination)}",
+            str(typing.get_type_hints(source)["return"]),
+            str(typing.get_type_hints(destination)[key]),
         ]
     )
+
+
+class _TypeError(Exception):
+    pass
 
 
 @dataclasses.dataclass(frozen=True)
@@ -56,9 +61,12 @@ class ComputationEdge:
             and typing.get_type_hints(self.source.func).get("return")
             is not ComputationResult
         ):
-            assert type_safety.can_compose(
+            if not type_safety.can_compose(
                 self.destination.func, self.source.func, self.key
-            ), _mismatch_message(self.key, self.source.func, self.destination.func)
+            ):
+                raise _TypeError(
+                    _mismatch_message(self.key, self.source.func, self.destination.func)
+                )
 
     def __repr__(self):
         source_str = (
