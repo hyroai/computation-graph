@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import dataclasses
+import typing
 from typing import Any, Callable, Dict, Optional, Text, Tuple
 
 import gamla
@@ -32,16 +33,16 @@ class ComputationEdge:
         if (
             not self.args
             # TODO(uri): Remove `ComputationResult` for more powerful type checks.
-            and not self.destination.func.__annotations__.get("return")
-            == ComputationResult
+            and typing.get_type_hints(self.source.func).get("return")
+            is not ComputationResult
         ):
             assert type_safety.can_compose(
                 self.destination.func, self.source.func, self.key
             ), "\n".join(
                 [
                     f"Type mismatch for {self.source.func} and {self.destination.func}.",
-                    self.source.func.__annotations__,
-                    self.destination.func.__annotations__,
+                    str(typing.get_type_hints(self.source.func)),
+                    str(typing.get_type_hints(self.destination.func)),
                 ]
             )
 
