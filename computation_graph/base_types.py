@@ -16,6 +16,22 @@ class ComputationResult:
     state: Any
 
 
+def _mismatch_message(key, source: Callable, destination: Callable) -> str:
+    return "\n".join(
+        [
+            f"Type mismatch for argument `{key}`. in composition {source.__name__} onto {destination.__name__} ",
+            ":".join(
+                map(str, [typing.get_type_hints(source)["return"], source.__code__])
+            ),
+            ":".join(
+                map(
+                    str, [typing.get_type_hints(destination)[key], destination.__code__]
+                )
+            ),
+        ]
+    )
+
+
 @dataclasses.dataclass(frozen=True)
 class ComputationEdge:
     destination: ComputationNode
@@ -42,13 +58,7 @@ class ComputationEdge:
         ):
             assert type_safety.can_compose(
                 self.destination.func, self.source.func, self.key
-            ), "\n".join(
-                [
-                    f"Type mismatch for {self.source.func} and {self.destination.func}.",
-                    str(typing.get_type_hints(self.source.func)),
-                    str(typing.get_type_hints(self.destination.func)),
-                ]
-            )
+            ), _mismatch_message(self.key, self.source.func, self.destination.func)
 
     def __repr__(self):
         source_str = (
