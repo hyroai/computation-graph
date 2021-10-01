@@ -19,7 +19,7 @@ class ComputationResult:
 def _mismatch_message(key, source: Callable, destination: Callable) -> str:
     return "\n".join(
         [
-            f"Type mismatch for argument `{key}`. in composition {source.__name__} onto {destination.__name__} ",
+            f"Type mismatch: `{source.__name__}`--`{key}`-->`{destination.__name__}`",
             ":".join(
                 map(str, [typing.get_type_hints(source)["return"], source.__code__])
             ),
