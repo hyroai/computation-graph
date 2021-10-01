@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import dataclasses
+import functools
 import typing
 from typing import Any, Callable, Dict, Optional, Text, Tuple
 
@@ -32,6 +33,9 @@ class ComputationEdge:
         ), f"Edge must have a source or args, not both: {self}"
         if (
             not self.args
+            # TODO(uri): doesn't support `functools.partial`, suggested to drop support for it entirely.
+            and not isinstance(self.source.func, functools.partial)
+            and not isinstance(self.destination.func, functools.partial)
             # TODO(uri): Remove `ComputationResult` for more powerful type checks.
             and typing.get_type_hints(self.source.func).get("return")
             is not ComputationResult

@@ -51,7 +51,11 @@ def test_union():
         pass
 
     def g(x: str) -> str:
-        return x[0]
+        pass
+
+    def h(x: Union[str, int]):
+        pass
 
     assert type_safety.can_compose(f, g, None)
     assert not type_safety.can_compose(g, f, None)
+    assert type_safety.can_compose(h, f, None)
