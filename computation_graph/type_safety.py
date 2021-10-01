@@ -32,6 +32,8 @@ def can_compose(destination: Callable, source: Callable, key: Optional[str]) -> 
     if "return" not in s:
         return True
     if key:
+        if key not in d:
+            return True
         d = d[key]
     else:
         if "return" in d:
