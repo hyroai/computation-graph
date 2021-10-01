@@ -25,8 +25,8 @@ def _mismatch_message(key, source: Callable, destination: Callable) -> str:
         [
             "",
             f"source: {_pretty_print_function_name(source)}",
-            f"key: {key}",
             f"destination: {_pretty_print_function_name(destination)}",
+            f"key: {key}",
             str(typing.get_type_hints(source)["return"]),
             str(typing.get_type_hints(destination)[key]),
         ]
