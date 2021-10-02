@@ -1,9 +1,13 @@
 from __future__ import annotations
 
 import dataclasses
+import functools
+import typing
 from typing import Any, Callable, Dict, Optional, Text, Tuple
 
 import gamla
+
+from computation_graph import type_safety
 
 
 @dataclasses.dataclass(frozen=True)
@@ -12,19 +16,57 @@ class ComputationResult:
     state: Any
 
 
+def _pretty_print_function_name(f: Callable) -> str:
+    return f"{f.__code__.co_filename}:{f.__code__.co_firstlineno}:{f.__name__}"
+
+
+def _mismatch_message(key, source: Callable, destination: Callable) -> str:
+    return "\n".join(
+        [
+            "",
+            f"source: {_pretty_print_function_name(source)}",
+            f"destination: {_pretty_print_function_name(destination)}",
+            f"key: {key}",
+            str(typing.get_type_hints(source)["return"]),
+            str(typing.get_type_hints(destination)[key]),
+        ]
+    )
+
+
+class _TypeError(Exception):
+    pass
+
+
 @dataclasses.dataclass(frozen=True)
 class ComputationEdge:
     destination: ComputationNode
     priority: int
-    # Either key+source, just source, just args.
-    key: Optional[Text] = None
-    source: Optional[ComputationNode] = None
-    args: Tuple[ComputationNode, ...] = ()
+    key: Optional[Text]
+    source: Optional[ComputationNode]
+    args: Tuple[ComputationNode, ...]
 
     def __post_init__(self):
+        assert (
+            not (self.args) or not self.key
+        ), f"Edge with `args` cannot have a `key`: {self.args} {self.key}"
         assert bool(self.args) != bool(
             self.source
-        ), "Edge must have a source or args, not both."
+        ), f"Edge must have a source or args, not both: {self}"
+        if (
+            not self.args
+            # TODO(uri): doesn't support `functools.partial`, suggested to drop support for it entirely.
+            and not isinstance(self.source.func, functools.partial)
+            and not isinstance(self.destination.func, functools.partial)
+            # TODO(uri): Remove `ComputationResult` for more powerful type checks.
+            and typing.get_type_hints(self.source.func).get("return")
+            is not ComputationResult
+        ):
+            if not type_safety.can_compose(
+                self.destination.func, self.source.func, self.key
+            ):
+                raise _TypeError(
+                    _mismatch_message(self.key, self.source.func, self.destination.func)
+                )
 
     def __repr__(self):
         source_str = (

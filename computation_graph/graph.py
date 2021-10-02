@@ -105,12 +105,15 @@ def make_edge(
             args=tuple(map(make_computation_node, source)),
             destination=destination_as_node,
             priority=priority,
+            source=None,
+            key=None,
         )
 
     return base_types.ComputationEdge(
         source=make_computation_node(source),
         destination=destination_as_node,
         key=key,
+        args=(),
         priority=priority,
     )
 
