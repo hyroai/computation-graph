@@ -6,13 +6,13 @@ import gamla
 
 def _handle_union_on_left(type1, type2):
     return gamla.pipe(
-        type1, typing.get_args, gamla.allmap(lambda t: is_subtype((t, type2)))
+        type1, typing.get_args, gamla.allmap(lambda t: _is_subtype((t, type2)))
     )
 
 
 def _handle_union_on_right(type1, type2):
     return gamla.pipe(
-        type2, typing.get_args, gamla.anymap(lambda t: is_subtype((type1, t)))
+        type2, typing.get_args, gamla.anymap(lambda t: _is_subtype((type1, t)))
     )
 
 
@@ -42,7 +42,7 @@ _handle_generics = gamla.alljuxt(
     gamla.compose_left(
         gamla.map(typing.get_args),
         gamla.star(zip),
-        gamla.allmap(_forward_ref(lambda: is_subtype)),
+        gamla.allmap(_forward_ref(lambda: _is_subtype)),
     ),
 )
 
@@ -50,7 +50,7 @@ _handle_plain_classes = gamla.alljuxt(
     gamla.complement(gamla.anymap(typing.get_origin)), gamla.star(issubclass)
 )
 
-is_subtype: Callable[[Tuple[Any, Any]], bool] = gamla.case_dict(
+_is_subtype: Callable[[Tuple[Any, Any]], bool] = gamla.case_dict(
     {
         gamla.inside(Any): gamla.compose_left(gamla.second, gamla.equals(Any)),
         gamla.anymap(_is_union_type): _handle_union,
@@ -59,6 +59,7 @@ is_subtype: Callable[[Tuple[Any, Any]], bool] = gamla.case_dict(
         gamla.just(True): _handle_plain_classes,
     }
 )
+is_subtype = gamla.compose_left(gamla.pack, _is_subtype)
 
 
 def can_compose(destination: Callable, source: Callable, key: Optional[str]) -> bool:
@@ -77,4 +78,4 @@ def can_compose(destination: Callable, source: Callable, key: Optional[str]) -> 
             return True
         assert len(d) == 1
         d = gamla.head(d.values())
-    return is_subtype((s["return"], d))
+    return is_subtype(s["return"], d)

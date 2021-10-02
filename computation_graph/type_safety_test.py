@@ -1,5 +1,7 @@
 from typing import Any, Collection, FrozenSet, List, Sequence, Set, Tuple, Union
 
+import pytest
+
 from computation_graph import type_safety
 
 
@@ -35,8 +37,9 @@ def test_compose_on_key():
     assert not type_safety.can_compose(f, g, "x")
 
 
-def test_is_subtype():
-    for x in [
+@pytest.mark.parametrize(
+    "subtype,supertype",
+    [
         [FrozenSet[str], FrozenSet[str]],
         [str, Any],
         [Tuple[str, ...], Tuple[str, ...]],
@@ -45,12 +48,15 @@ def test_is_subtype():
         [Union[int, str], Union[int, str]],
         [str, Union[int, str]],
         [Union[List, Set], Collection],
-    ]:
-        assert type_safety.is_subtype(x)
+    ],
+)
+def test_is_subtype(subtype, supertype):
+    assert type_safety.is_subtype(subtype, supertype)
 
 
-def test_not_is_subtype():
-    for x in [
+@pytest.mark.parametrize(
+    "subtype,supertype",
+    [
         [FrozenSet[int], FrozenSet[str]],
         [str, FrozenSet[str]],
         [Collection, FrozenSet],
@@ -59,5 +65,7 @@ def test_not_is_subtype():
         [Any, str],
         [List, Union[int, str]],
         [Union[int, str, List], Union[int, str]],
-    ]:
-        assert not type_safety.is_subtype(x)
+    ],
+)
+def test_is_not_subtype(subtype, supertype):
+    assert not type_safety.is_subtype(subtype, supertype)
