@@ -1,6 +1,8 @@
 from typing import (
     Any,
+    Callable,
     Collection,
+    Dict,
     FrozenSet,
     List,
     Optional,
@@ -50,6 +52,10 @@ def test_compose_on_key():
 @pytest.mark.parametrize(
     "subtype,supertype",
     [
+        [Callable[[str], str], Callable[[str], str]],
+        [Callable[..., str], Callable[[str], str]],
+        [Callable[[str], str], Callable[..., str]],
+        [Dict[str, int], Dict[str, int]],
         [type(None), Optional[str]],
         [type(None), type(None)],
         [Optional[str], Optional[str]],
@@ -72,6 +78,9 @@ def test_is_subtype(subtype, supertype):
 @pytest.mark.parametrize(
     "subtype,supertype",
     [
+        [Callable[[str, str], str], Callable[[str], str]],
+        [Callable[[int, str], str], Callable[[str, int], str]],
+        [Dict[str, str], Dict[str, int]],
         [Optional[str], type(None)],
         [Optional[str], Optional[int]],
         [int, Optional[str]],

@@ -1,4 +1,5 @@
 import typing
+from collections import abc
 from typing import Any, Callable, Optional, Tuple, Union
 
 import gamla
@@ -51,15 +52,26 @@ _handle_generics = gamla.alljuxt(
 )
 
 
+def _handle_callable(args1, output1, args2, output2):
+    return is_subtype(output1, output2) and (
+        Ellipsis in [args1, args2]
+        or len(args1) == len(args2)
+        and gamla.pipe([args1, args2], gamla.star(zip), gamla.allmap(_is_subtype))
+    )
+
+
 _is_subtype: Callable[[Tuple[Any, Any]], bool] = gamla.compose_left(
     gamla.map(gamla.when(_origin_equals(Optional), _rewrite_optional)),
     tuple,
     gamla.case_dict(
         {
+            gamla.allmap(_origin_equals(abc.Callable)): gamla.compose_left(
+                gamla.mapcat(typing.get_args), gamla.star(_handle_callable)
+            ),
+            gamla.inside(Any): gamla.compose_left(gamla.second, gamla.equals(Any)),
             gamla.anymap(_origin_equals(Union)): _handle_union,
             gamla.allmap(typing.get_origin): _handle_generics,
             gamla.inside(Ellipsis): gamla.allmap(gamla.equals(Ellipsis)),
-            gamla.inside(Any): gamla.compose_left(gamla.second, gamla.equals(Any)),
             gamla.complement(gamla.anymap(typing.get_origin)): gamla.star(issubclass),
             gamla.just(True): gamla.just(False),
         }
