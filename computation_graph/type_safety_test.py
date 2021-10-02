@@ -1,4 +1,14 @@
-from typing import Any, Collection, FrozenSet, List, Sequence, Set, Tuple, Union
+from typing import (
+    Any,
+    Collection,
+    FrozenSet,
+    List,
+    Optional,
+    Sequence,
+    Set,
+    Tuple,
+    Union,
+)
 
 import pytest
 
@@ -40,6 +50,11 @@ def test_compose_on_key():
 @pytest.mark.parametrize(
     "subtype,supertype",
     [
+        [None, Optional[str]],
+        [None, None],
+        [Optional[str], Optional[str]],
+        [Optional[str], Union[None, str]],
+        [str, Optional[str]],
         [FrozenSet[str], FrozenSet[str]],
         [str, Any],
         [Tuple[str, ...], Tuple[str, ...]],
@@ -57,6 +72,9 @@ def test_is_subtype(subtype, supertype):
 @pytest.mark.parametrize(
     "subtype,supertype",
     [
+        [Optional[str], None],
+        [Optional[str], Optional[int]],
+        [int, Optional[str]],
         [FrozenSet[int], FrozenSet[str]],
         [str, FrozenSet[str]],
         [Collection, FrozenSet],
