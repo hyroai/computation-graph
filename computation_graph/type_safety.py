@@ -60,15 +60,6 @@ _is_subtype: Callable[[Tuple[Any, Any]], bool] = gamla.compose_left(
             gamla.allmap(typing.get_origin): _handle_generics,
             gamla.inside(Ellipsis): gamla.allmap(gamla.equals(Ellipsis)),
             gamla.inside(Any): gamla.compose_left(gamla.second, gamla.equals(Any)),
-            gamla.inside(None): gamla.allmap(
-                gamla.contains(
-                    [
-                        None,
-                        # Needed as `get_args` on `Union[None, x]` will give back a `NoneType`.
-                        type(None),
-                    ]
-                )
-            ),
             gamla.complement(gamla.anymap(typing.get_origin)): gamla.star(issubclass),
             gamla.just(True): gamla.just(False),
         }

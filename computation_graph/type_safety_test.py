@@ -50,8 +50,8 @@ def test_compose_on_key():
 @pytest.mark.parametrize(
     "subtype,supertype",
     [
-        [None, Optional[str]],
-        [None, None],
+        [type(None), Optional[str]],
+        [type(None), type(None)],
         [Optional[str], Optional[str]],
         [Optional[str], Union[None, str]],
         [str, Optional[str]],
@@ -72,7 +72,7 @@ def test_is_subtype(subtype, supertype):
 @pytest.mark.parametrize(
     "subtype,supertype",
     [
-        [Optional[str], None],
+        [Optional[str], type(None)],
         [Optional[str], Optional[int]],
         [int, Optional[str]],
         [FrozenSet[int], FrozenSet[str]],
