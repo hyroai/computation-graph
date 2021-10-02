@@ -7,8 +7,6 @@ from typing import Any, Callable, Dict, Optional, Text, Tuple
 
 import gamla
 
-from computation_graph import type_safety
-
 
 @dataclasses.dataclass(frozen=True)
 class ComputationResult:
@@ -61,9 +59,7 @@ class ComputationEdge:
             and typing.get_type_hints(self.source.func).get("return")
             is not ComputationResult
         ):
-            if not type_safety.can_compose(
-                self.destination.func, self.source.func, self.key
-            ):
+            if not gamla.composable(self.destination.func, self.source.func, self.key):
                 raise _TypeError(
                     _mismatch_message(self.key, self.source.func, self.destination.func)
                 )
