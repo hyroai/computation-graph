@@ -18,6 +18,14 @@ def _pretty_print_function_name(f: Callable) -> str:
     return f"{f.__code__.co_filename}:{f.__code__.co_firstlineno}:{f.__name__}"
 
 
+_get_unary_input_typing = gamla.compose_left(
+    typing.get_type_hints,
+    gamla.when(gamla.inside("return"), gamla.remove_key("return")),
+    dict.values,
+    gamla.head,
+)
+
+
 def _mismatch_message(key, source: Callable, destination: Callable) -> str:
     return "\n".join(
         [
@@ -26,12 +34,16 @@ def _mismatch_message(key, source: Callable, destination: Callable) -> str:
             f"destination: {_pretty_print_function_name(destination)}",
             f"key: {key}",
             str(typing.get_type_hints(source)["return"]),
-            str(typing.get_type_hints(destination)[key]),
+            str(
+                typing.get_type_hints(destination)[key]
+                if key is not None
+                else _get_unary_input_typing(destination)
+            ),
         ]
     )
 
 
-class _TypeError(Exception):
+class ComputationGraphTypeError(Exception):
     pass
 
 
@@ -60,7 +72,7 @@ class ComputationEdge:
             is not ComputationResult
         ):
             if not gamla.composable(self.destination.func, self.source.func, self.key):
-                raise _TypeError(
+                raise ComputationGraphTypeError(
                     _mismatch_message(self.key, self.source.func, self.destination.func)
                 )
 
