@@ -719,3 +719,25 @@ def test_type_safety_messages_no_overtrigger(caplog):
 
     assert _runner(composers.make_compose(f, lambda: "world")) == "hello world"
     assert "TypeError" not in caplog.text
+
+
+def test_anonymous_composition_type_safety():
+    def f() -> str:
+        pass
+
+    def g(x: int):
+        pass
+
+    with pytest.raises(base_types.ComputationGraphTypeError):
+        composers.make_compose(g, f)
+
+
+def test_named_composition_type_safety():
+    def f() -> str:
+        pass
+
+    def g(x: int):
+        pass
+
+    with pytest.raises(base_types.ComputationGraphTypeError):
+        composers.make_compose(g, f, key="x")
