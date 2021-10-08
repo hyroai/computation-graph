@@ -80,7 +80,7 @@ def make_and(funcs, merge_fn: Callable) -> base_types.GraphType:
                 gamla.map(_infer_sink),
                 tuple,
                 lambda nodes: (
-                    graph.make_edge(source=nodes, destination=merge_node),
+                    graph.make_unary_edge(source=nodes, destination=merge_node),
                     graph.make_edge(
                         source=merge_node,
                         destination=graph.make_computation_node(merge_fn),
@@ -111,7 +111,7 @@ def make_or(funcs, merge_fn: Callable) -> base_types.GraphType:
                 gamla.map(_infer_sink),
                 tuple,
                 lambda sinks: (
-                    graph.make_edge(source=sinks, destination=filter_node),
+                    graph.make_unary_edge(sinks, filter_node),
                     graph.make_edge(
                         source=filter_node, destination=merge_node, key="args"
                     ),

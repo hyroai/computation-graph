@@ -93,10 +93,14 @@ def make_computation_node(func: _CallableOrNode) -> base_types.ComputationNode:
     )
 
 
+def make_unary_edge(source, destination):
+    return make_edge(source, destination, None)
+
+
 def make_edge(
     source: Union[_CallableOrNode, Tuple[_CallableOrNode, ...]],
     destination: _CallableOrNode,
-    key: Optional[Text] = None,
+    key: Optional[Text],
     priority: int = 0,
 ) -> base_types.ComputationEdge:
     destination_as_node = make_computation_node(destination)
@@ -180,4 +184,4 @@ DEFAULT_TERMINAL = make_terminal("DEFAULT_TERMINAL", _aggregator_for_terminal)
 
 
 def connect_default_terminal(edges: base_types.GraphType) -> base_types.GraphType:
-    return edges + (make_edge((infer_graph_sink(edges),), DEFAULT_TERMINAL),)
+    return edges + (make_unary_edge((infer_graph_sink(edges),), DEFAULT_TERMINAL),)

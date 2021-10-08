@@ -212,7 +212,7 @@ def test_external_input_and_state():
 def test_tuple_source_node():
     edges = graph.connect_default_terminal(
         (
-            graph.make_edge(
+            graph.make_unary_edge(
                 source=(_node1, _node2),
                 destination=lambda *args, side_effects: "["
                 + ",".join(args)
@@ -610,7 +610,7 @@ def test_two_terminals():
     """graph = node1 --> node2 --> DEFAULT_TERMINAL, node1 --> TERMINAL2"""
     edges = graph.connect_default_terminal(composers.make_compose(_node2, _node1))
     terminal2 = graph.make_terminal("TERMINAL2", gamla.wrap_tuple)
-    edges += (graph.make_edge(source=_node1, destination=terminal2),)
+    edges += (graph.make_unary_edge(source=_node1, destination=terminal2),)
     result = run.to_callable(edges, frozenset([_GraphTestError]))(arg1=_ROOT_VALUE)
     assert result.result[graph.DEFAULT_TERMINAL][0] == "node2(node1(root))"
     assert result.result[terminal2][0] == "node1(root)"
@@ -619,7 +619,7 @@ def test_two_terminals():
 def test_two_paths_succeed():
     edges = graph.connect_default_terminal(composers.make_first(_node2, _node1))
     terminal2 = graph.make_terminal("TERMINAL2", gamla.wrap_tuple)
-    edges += (graph.make_edge(source=_node1, destination=terminal2),)
+    edges += (graph.make_unary_edge(_node1, terminal2),)
     result = run.to_callable(edges, frozenset([_GraphTestError]))(arg1=_ROOT_VALUE)
 
     assert result.result[graph.DEFAULT_TERMINAL][0] == "node2(root)"
