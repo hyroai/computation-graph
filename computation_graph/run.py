@@ -215,7 +215,7 @@ def _get_computation_input(
     if node.signature.is_kwargs:
         assert (
             len(results) == 1
-        ), f"signature {node.signature} contains `**kwargs`. This is considered unary, meaning one incoming edge, but we got more than one: {incoming_edges}. The function in question is {base_types.pretty_print_function_name(node.func)}"
+        ), f"signature {node.signature} contains `**kwargs`. This is considered unary, meaning one incoming edge, but we got: {incoming_edges}. The function in question is {base_types.pretty_print_function_name(node.func)}"
         return base_types.ComputationInput(
             args=gamla.wrap_tuple(gamla.head(gamla.head(results)).result),
             kwargs={},
