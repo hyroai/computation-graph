@@ -116,7 +116,7 @@ class NodeSignature:
     is_args: bool
     kwargs: Tuple[Text, ...]
     optional_kwargs: Tuple[Text, ...]
-    is_kwargs: bool = False
+    is_kwargs: bool
 
 
 edge_destination = gamla.attrgetter("destination")

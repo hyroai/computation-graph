@@ -47,22 +47,6 @@ def _node_with_side_effect(arg1, side_effects, state):
     )
 
 
-@gamla.curry
-def _curried_node(arg1, arg2):
-    return f"curried_node(arg1={arg1}, arg2={arg2})"
-
-
-@gamla.curry
-def _curried_stateful_node(arg1, arg2, state):
-    if state is None:
-        state = 0
-
-    return base_types.ComputationResult(
-        result=f"curried_stateful_node(arg1={arg1}, arg2={arg2}, state={state + 1})",
-        state=(state + 1),
-    )
-
-
 def _unactionable_node(arg1):
     raise _GraphTestError
 
@@ -494,19 +478,6 @@ def test_partial():
     )
 
 
-def test_curry():
-    edges = graph.connect_default_terminal(
-        composers.make_first(_curried_node(arg2="arg2_curried"))
-    )
-
-    result = run.to_callable(edges, frozenset([_GraphTestError]))(arg1=_ROOT_VALUE)
-
-    assert (
-        result.result[graph.DEFAULT_TERMINAL][0]
-        == "curried_node(arg1=root, arg2=arg2_curried)"
-    )
-
-
 def test_compose_when_all_arguments_have_a_default():
     edges = graph.connect_default_terminal(
         composers.make_compose(_node_with_optional_param, _node1)
@@ -542,21 +513,6 @@ def test_unary_graph_composition():
     assert result.result[graph.DEFAULT_TERMINAL][0] == "node1(node4(root, z=10))"
 
 
-def test_curry_with_state():
-
-    edges = graph.connect_default_terminal(composers.make_first(_curried_stateful_node))
-
-    cg = run.to_callable(edges, frozenset([_GraphTestError]))
-    result = cg(arg1=_ROOT_VALUE, arg2="arg2")
-    result = cg(arg1=_ROOT_VALUE, arg2="arg2", state=result.state)
-    result = cg(arg1=_ROOT_VALUE, arg2="arg2", state=result.state)
-
-    assert (
-        result.result[graph.DEFAULT_TERMINAL][0]
-        == "curried_stateful_node(arg1=root, arg2=arg2, state=3)"
-    )
-
-
 def test_state_is_serializable():
     edges = graph.connect_default_terminal(
         (
@@ -571,28 +527,6 @@ def test_state_is_serializable():
     result = cg(arg1=_ROOT_VALUE, state=result.state)
 
     json.dumps(result.state)
-
-
-def test_compose_compose():
-
-    inner_graph = composers.make_compose(
-        _curried_node, _node1, _node3, _node2, key="arg1"
-    )
-    assert len(inner_graph) == 3
-
-    edges = graph.connect_default_terminal(
-        composers.make_compose(inner_graph, _node4, key="arg2")
-    )
-
-    result = run.to_callable(edges, frozenset([_GraphTestError]))(
-        y="y", z="z", arg1="arg1"
-    )
-
-    assert len(edges) == 6
-    assert (
-        result.result[graph.DEFAULT_TERMINAL][0]
-        == "curried_node(arg1=node1(node3(arg1=node2(arg1), arg2=node4(y, z=z))), arg2=node4(y, z=z))"
-    )
 
 
 def test_compose_after_first():

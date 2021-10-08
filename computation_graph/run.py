@@ -173,6 +173,7 @@ def _signature_difference(
         optional_kwargs=tuple(
             filter(lambda x: x not in sig_b.optional_kwargs, sig_a.optional_kwargs)
         ),
+        is_kwargs=False,
     )
 
 
@@ -188,6 +189,7 @@ def _get_bound_signature(
         is_args=is_args and any(edge.args for edge in incoming_edges),
         kwargs=_get_kwargs_from_edges(incoming_edges),
         optional_kwargs=(),
+        is_kwargs=False,
     )
 
 

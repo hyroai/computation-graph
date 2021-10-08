@@ -50,6 +50,7 @@ def _get_unbound_signature_for_single_node(
         and not any(edge.args for edge in incoming_edges),
         kwargs=tuple(keep_not_in_bound_kwargs(node.signature.kwargs)),
         optional_kwargs=tuple(keep_not_in_bound_kwargs(node.signature.optional_kwargs)),
+        is_kwargs=False,
     )
 
 
