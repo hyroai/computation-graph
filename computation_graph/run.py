@@ -348,22 +348,14 @@ def _get_state_from_terminals(
         opt_gamla.map(
             opt_gamla.compose_left(
                 opt_gamla.pair_left(result_to_dependencies),
-                opt_gamla.when(
-                    opt_gamla.compose_left(gamla.head, gamla.empty),
-                    # When there are no result from terminal we need to return an empty ComputationResult to still get the state.
-                    opt_gamla.star(
-                        lambda _, leaf: (
-                            {
-                                base_types.ComputationResult((), None): {
-                                    leaf: base_types.ComputationResult((), None)
-                                }
-                            },
-                            leaf,
-                        )
+                opt_gamla.ternary(
+                    opt_gamla.compose_left(gamla.head, gamla.nonempty),
+                    opt_gamla.compose_left(
+                        opt_gamla.star(_construct_computation_state),
+                        opt_gamla.keymap(edges_to_node_id),
                     ),
+                    gamla.just({}),
                 ),
-                opt_gamla.star(_construct_computation_state),
-                opt_gamla.keymap(edges_to_node_id),
             )
         ),
         opt_gamla.merge,
