@@ -251,10 +251,12 @@ def _get_computation_input(
     )
 
 
-def _wrap_in_result_if_needed(result):
+def _wrap_in_result_if_needed(node: base_types.ComputationNode, result):
     if isinstance(result, base_types.ComputationResult):
         return result
-    return base_types.ComputationResult(result=result, state=None)
+    if node.is_stateful:
+        return base_types.ComputationResult(result, result)
+    return base_types.ComputationResult(result, None)
 
 
 def _inject_state(unbound_input: base_types.ComputationInput):
@@ -382,7 +384,7 @@ def _run_keeping_choices(
                 result = await gamla.to_awaitable(result)
                 side_effect(params[0], result)
                 return (
-                    _wrap_in_result_if_needed(result),
+                    _wrap_in_result_if_needed(params[0], result),
                     _decisions_from_value_choices(params[2]),
                 )
 
@@ -392,7 +394,7 @@ def _run_keeping_choices(
                 result = _apply(params[0], input_maker(params))
                 side_effect(params[0], result)
                 return (
-                    _wrap_in_result_if_needed(result),
+                    _wrap_in_result_if_needed(params[0], result),
                     _decisions_from_value_choices(params[2]),
                 )
 
