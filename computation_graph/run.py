@@ -213,7 +213,7 @@ def _get_computation_input(
     if node.signature.is_kwargs:
         assert (
             len(results) == 1
-        ), f"signature {node.signature} contains `**kwargs`. This is considered unary, meaning one incoming edge, but we got more than one: {incoming_edges}."
+        ), f"signature for {base_types.pretty_print_function_name(node.func)} contains `**kwargs`. This is considered unary, meaning one incoming edge, but we got more than one: {incoming_edges}."
         return base_types.ComputationInput(
             args=gamla.wrap_tuple(gamla.head(gamla.head(results)).result),
             kwargs={},
@@ -251,10 +251,12 @@ def _get_computation_input(
     )
 
 
-def _wrap_in_result_if_needed(result):
+def _wrap_in_result_if_needed(node: base_types.ComputationNode, result):
     if isinstance(result, base_types.ComputationResult):
         return result
-    return base_types.ComputationResult(result=result, state=None)
+    if node.is_stateful:
+        return base_types.ComputationResult(result, result)
+    return base_types.ComputationResult(result, None)
 
 
 def _inject_state(unbound_input: base_types.ComputationInput):
@@ -418,7 +420,7 @@ def _run_keeping_choices(
                 result = await gamla.to_awaitable(result)
                 side_effect(params[0], result)
                 return (
-                    _wrap_in_result_if_needed(result),
+                    _wrap_in_result_if_needed(params[0], result),
                     _decisions_from_value_choices(params[2]),
                 )
 
@@ -428,7 +430,7 @@ def _run_keeping_choices(
                 result = _apply(params[0], input_maker(params))
                 side_effect(params[0], result)
                 return (
-                    _wrap_in_result_if_needed(result),
+                    _wrap_in_result_if_needed(params[0], result),
                     _decisions_from_value_choices(params[2]),
                 )
 
