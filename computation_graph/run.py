@@ -322,7 +322,7 @@ def _get_results_from_terminals(
 ) -> Callable[[Iterable[base_types.ComputationNode]], _DecisionsType]:
     return opt_gamla.compose_left(
         opt_gamla.map(
-            gamla.pair_right(
+            opt_gamla.pair_right(
                 opt_gamla.compose_left(
                     result_to_dependencies,
                     opt_gamla.ternary(
@@ -339,7 +339,7 @@ def _get_results_from_terminals(
             )
         ),
         dict,
-        gamla.valfilter(gamla.identity),  # Only return terminals with results
+        opt_gamla.valfilter(gamla.identity),  # Only return terminals with results
     )
 
 
