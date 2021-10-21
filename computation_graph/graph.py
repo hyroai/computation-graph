@@ -93,11 +93,13 @@ def make_computation_node(func: _CallableOrNode) -> base_types.ComputationNode:
     )
 
 
+@gamla.curry
 def make_edge(
     source: Union[_CallableOrNode, Tuple[_CallableOrNode, ...]],
     destination: _CallableOrNode,
     key: Optional[Text] = None,
     priority: int = 0,
+    is_future: bool = False,
 ) -> base_types.ComputationEdge:
     destination_as_node = make_computation_node(destination)
     if isinstance(source, tuple):
@@ -107,6 +109,7 @@ def make_edge(
             priority=priority,
             source=None,
             key=None,
+            is_future=is_future,
         )
 
     return base_types.ComputationEdge(
@@ -115,7 +118,11 @@ def make_edge(
         key=key,
         args=(),
         priority=priority,
+        is_future=is_future,
     )
+
+
+make_future_edge = make_edge(is_future=True)
 
 
 def get_leaves(edges: base_types.GraphType) -> FrozenSet[base_types.ComputationNode]:

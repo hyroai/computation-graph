@@ -210,6 +210,9 @@ def _get_computation_input(
         values_for_edges_choice,
         opt_gamla.maptuple(opt_gamla.maptuple(_choice_to_value)),
     )
+    # TODO(itay): take future edges related state, and add it as computation input to the node.
+    # gamla.pipe(incoming_edges, gamla.filter("is_future"), )
+
     if node.signature.is_kwargs:
         assert (
             len(results) == 1
@@ -293,8 +296,9 @@ _decisions_from_value_choices = opt_gamla.compose_left(
 )
 
 
+@gamla.curry
 def _construct_computation_state(
-    results: _ResultToDecisionsType, sink_node: base_types.ComputationNode
+    edges, results: _ResultToDecisionsType, sink_node: base_types.ComputationNode
 ) -> Dict:
     first_result = gamla.head(results)
     return {
@@ -302,7 +306,20 @@ def _construct_computation_state(
         **opt_gamla.pipe(
             results,
             gamla.itemgetter(first_result),
-            opt_gamla.valmap(gamla.attrgetter("state")),
+            opt_gamla.juxt(
+                opt_gamla.valmap(gamla.attrgetter("state")),
+                opt_gamla.keyfilter(
+                    gamla.contains(
+                        opt_gamla.pipe(
+                            edges,
+                            opt_gamla.filter(gamla.attrgetter("is_future")),
+                            gamla.map(gamla.attrgetter("source")),
+                            frozenset,
+                        )
+                    )
+                ),
+            ),
+            opt_gamla.merge,
         ),
     }
 
@@ -628,7 +645,7 @@ def _to_callable_with_side_effect_for_single_and_multiple(
                     gamla.after(gamla.to_awaitable)
                     if _is_graph_async(edges)
                     else gamla.identity,
-                    edges,
+                    tuple(gamla.remove(gamla.attrgetter("is_future"))(edges)),
                     handled_exceptions,
                     edges_to_node_id,
                 ),

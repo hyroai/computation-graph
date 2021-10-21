@@ -741,3 +741,28 @@ def test_named_composition_type_safety():
 
     with pytest.raises(base_types.ComputationGraphTypeError):
         composers.make_compose(g, f, key="x")
+
+
+def test_future_edges():
+    def times_2(x):
+        return x * 2
+
+    def plus_1(y):
+        return y + 1
+
+    def multiply(a, b):
+        if b:
+            return a * b
+        return a
+
+    edges = (
+        composers.make_compose(plus_1, times_2)
+        + composers.make_compose(multiply, plus_1, key="a")
+        + (graph.make_future_edge(source=times_2, destination=multiply, key="b"),)
+    )
+    edges = graph.connect_default_terminal(edges)
+    cg = run.to_callable(edges, frozenset([_GraphTestError]))
+
+    assert cg(x=3).result[graph.DEFAULT_TERMINAL][0] == 7
+    assert cg(x=3).result[graph.DEFAULT_TERMINAL][0] == 18
+    assert False
