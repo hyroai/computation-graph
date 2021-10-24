@@ -57,6 +57,9 @@ class ComputationEdge:
     is_future: bool
 
     def __post_init__(self):
+        assert not (
+            self.is_future and self.source.is_stateful
+        ), "A future edge's source cannot be stateful, connect the source to itself with a future edge instead"
         assert (
             not (self.args) or not self.key
         ), f"Edge with `args` cannot have a `key`: {self.args} {self.key}"

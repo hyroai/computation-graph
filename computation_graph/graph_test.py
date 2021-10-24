@@ -763,6 +763,7 @@ def test_future_edges():
     edges = graph.connect_default_terminal(edges)
     cg = run.to_callable(edges, frozenset([_GraphTestError]))
 
-    assert cg(x=3).result[graph.DEFAULT_TERMINAL][0] == 7
-    assert cg(x=3).result[graph.DEFAULT_TERMINAL][0] == 18
+    result = cg(x=3)
+    assert result.result[graph.DEFAULT_TERMINAL][0] == 7
+    assert cg(x=3, state=result.state).result[graph.DEFAULT_TERMINAL][0] == 42
     assert False

@@ -204,19 +204,52 @@ def _get_computation_input(
     # For each edge, there are multiple values options, each having its own trace.
     values_for_edges_choice: Iterable[Iterable[_ChoiceOfOutputForNode]],
 ) -> base_types.ComputationInput:
-    bound_signature = _get_bound_signature(node.signature.is_args, incoming_edges)
+    incoming_edges_no_future = tuple(
+        gamla.remove(gamla.attrgetter("is_future"))(incoming_edges)
+    )
+    bound_signature = _get_bound_signature(
+        node.signature.is_args, incoming_edges_no_future
+    )
     unbound_signature = _signature_difference(node.signature, bound_signature)
     results = gamla.pipe(
         values_for_edges_choice,
+        # TODO(Itay): This is in the right direction to avoid flakiness, but causes stopIteration. find out why.
+        # gamla.filter(
+        #         gamla.anymap(
+        #             gamla.compose_left(
+        #                 gamla.last,
+        #                 gamla.contains(
+        #                     gamla.pipe(
+        #                         incoming_edges_no_future, gamla.map(gamla.attrgetter("source")), frozenset
+        #                     )
+        #                 ),
+        #             )
+        #         )
+        # ),
         opt_gamla.maptuple(opt_gamla.maptuple(_choice_to_value)),
     )
-    # TODO(itay): take future edges related state, and add it as the node's computation input.
-    # gamla.pipe(incoming_edges, gamla.filter("is_future"), )
+
+    future_edges_kwargs = gamla.pipe(
+        incoming_edges,
+        gamla.filter(gamla.attrgetter("is_future")),
+        gamla.map(
+            gamla.juxt(
+                gamla.attrgetter("key"),
+                gamla.compose_left(
+                    gamla.attrgetter("source"),
+                    unbound_input,
+                    gamla.attrgetter("state"),
+                    gamla.when(gamla.identity, gamla.attrgetter("result")),
+                ),
+            )
+        ),
+        dict,
+    )
 
     if node.signature.is_kwargs:
         assert (
             len(results) == 1
-        ), f"signature for {base_types.pretty_print_function_name(node.func)} contains `**kwargs`. This is considered unary, meaning one incoming edge, but we got more than one: {incoming_edges}."
+        ), f"signature for {base_types.pretty_print_function_name(node.func)} contains `**kwargs`. This is considered unary, meaning one incoming edge, but we got more than one: {incoming_edges_no_future}."
         return base_types.ComputationInput(
             args=gamla.wrap_tuple(gamla.head(gamla.head(results)).result),
             kwargs={},
@@ -227,7 +260,7 @@ def _get_computation_input(
         and sum(
             map(
                 opt_gamla.compose_left(base_types.edge_key, gamla.equals(None)),
-                incoming_edges,
+                incoming_edges_no_future,
             )
         )
         == 1
@@ -241,15 +274,29 @@ def _get_computation_input(
             ),
             state=unbound_input(node).state,
         )
-    edges_to_results = dict(zip(incoming_edges, results))
+    edges_to_results = dict(zip(incoming_edges_no_future, results))
+    dictionary = {
+        **_get_outer_kwargs(unbound_signature, unbound_input(node)),
+        **_get_inner_kwargs(edges_to_results),
+        **future_edges_kwargs,
+    }
+    # TODO(Itay): Remove when done.
+    # if node.name == "multiply":
+    #     breakpoint()
+    # print("node=", node)
+    # print(
+    #     "future edge args=",
+    #     future_edges_kwargs,
+    #     "outer args=",
+    #     _get_outer_kwargs(unbound_signature, unbound_input(node)),
+    #     "inner args=",
+    #     _get_inner_kwargs(edges_to_results),
+    # )
     return base_types.ComputationInput(
         args=_get_args(
             edges_to_results, unbound_signature, bound_signature, unbound_input(node)
         ),
-        kwargs={
-            **_get_outer_kwargs(unbound_signature, unbound_input(node)),
-            **_get_inner_kwargs(edges_to_results),
-        },
+        kwargs=dictionary,
         state=unbound_input(node).state,
     )
 
@@ -320,6 +367,8 @@ def _construct_computation_state(
                         )
                     )
                 ),
+                # gamla.side_effect(print),
+                # opt_gamla.valmap(gamla.attrgetter("result"))
             ),
             opt_gamla.merge,
         ),
@@ -649,7 +698,7 @@ def _to_callable_with_side_effect_for_single_and_multiple(
                     gamla.after(gamla.to_awaitable)
                     if _is_graph_async(edges)
                     else gamla.identity,
-                    tuple(gamla.remove(gamla.attrgetter("is_future"))(edges)),
+                    edges,
                     handled_exceptions,
                     edges_to_node_id,
                 ),
