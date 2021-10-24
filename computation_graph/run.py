@@ -343,7 +343,7 @@ def _get_results_from_terminals(
     )
 
 
-def _get_state_from_terminals(
+def _get_computation_state_from_terminals(
     result_to_dependencies: Callable, edges_to_node_id: Callable
 ) -> Callable[[Iterable[base_types.ComputationNode]], Dict]:
     return opt_gamla.compose_left(
@@ -373,9 +373,13 @@ def _construct_computation_result(edges: base_types.GraphType, edges_to_node_id)
         return opt_gamla.pipe(
             edges,
             graph.get_leaves,
+            opt_gamla.filter(gamla.attrgetter("is_terminal")),
+            frozenset,
             opt_gamla.juxt(
                 _get_results_from_terminals(result_to_dependencies),
-                _get_state_from_terminals(result_to_dependencies, edges_to_node_id),
+                _get_computation_state_from_terminals(
+                    result_to_dependencies, edges_to_node_id
+                ),
             ),
         )
 
