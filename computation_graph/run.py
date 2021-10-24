@@ -15,7 +15,7 @@ import typeguard
 from gamla.optimized import async_functions as opt_async_gamla
 from gamla.optimized import sync as opt_gamla
 
-from computation_graph import base_types, composers, graph
+from computation_graph import base_types, graph
 
 
 class _ComputationGraphException(Exception):
@@ -317,6 +317,53 @@ def _merge_with_previous_state(
     )
 
 
+def _get_results_from_terminals(
+    result_to_dependencies: Callable,
+) -> Callable[[Iterable[base_types.ComputationNode]], _DecisionsType]:
+    return opt_gamla.compose_left(
+        opt_gamla.map(
+            opt_gamla.pair_right(
+                opt_gamla.compose_left(
+                    result_to_dependencies,
+                    opt_gamla.ternary(
+                        gamla.identity,
+                        opt_gamla.compose_left(
+                            dict.items,
+                            gamla.head,
+                            gamla.head,  # Take results, not dependencies
+                            gamla.attrgetter("result"),
+                        ),
+                        gamla.just({}),
+                    ),
+                )
+            )
+        ),
+        dict,
+        opt_gamla.valfilter(gamla.identity),  # Only return terminals with results
+    )
+
+
+def _get_computation_state_from_terminals(
+    result_to_dependencies: Callable, edges_to_node_id: Callable
+) -> Callable[[Iterable[base_types.ComputationNode]], Dict]:
+    return opt_gamla.compose_left(
+        opt_gamla.map(
+            opt_gamla.compose_left(
+                opt_gamla.pair_left(result_to_dependencies),
+                opt_gamla.ternary(
+                    opt_gamla.compose_left(gamla.head, gamla.nonempty),
+                    opt_gamla.compose_left(
+                        opt_gamla.star(_construct_computation_state),
+                        opt_gamla.keymap(edges_to_node_id),
+                    ),
+                    gamla.just({}),
+                ),
+            )
+        ),
+        opt_gamla.merge,
+    )
+
+
 def _construct_computation_result(edges: base_types.GraphType, edges_to_node_id):
     def construct_computation_result(
         result_to_dependencies: Callable[
@@ -325,20 +372,13 @@ def _construct_computation_result(edges: base_types.GraphType, edges_to_node_id)
     ):
         return opt_gamla.pipe(
             edges,
-            graph.infer_graph_sink,
-            opt_gamla.pair_left(
-                opt_gamla.compose_left(result_to_dependencies, dict.items, gamla.head)
-            ),
-            opt_gamla.packstack(
-                gamla.compose_left(
-                    gamla.second,  # Take dependencies, not results
-                    gamla.keyfilter(gamla.attrgetter("is_terminal")),
-                    gamla.valmap(gamla.attrgetter("result")),
-                ),
-                opt_gamla.compose_left(
-                    opt_gamla.pair_left(result_to_dependencies),
-                    opt_gamla.star(_construct_computation_state),
-                    opt_gamla.keymap(edges_to_node_id),
+            graph.get_leaves,
+            opt_gamla.filter(gamla.attrgetter("is_terminal")),
+            frozenset,
+            opt_gamla.juxt(
+                _get_results_from_terminals(result_to_dependencies),
+                _get_computation_state_from_terminals(
+                    result_to_dependencies, edges_to_node_id
                 ),
             ),
         )
@@ -568,23 +608,13 @@ def _make_runner(
     )
 
 
-def _final_sink(args):  # noqa: N802
-    return args
-
-
-def add_final_sink(edges: base_types.GraphType) -> base_types.GraphType:
-    terminals = graph.get_terminals(edges)
-    assert terminals, "Graph does not contain terminals, it should contain at least 1."
-    return edges + composers.make_or(terminals, merge_fn=_final_sink)
-
-
 def _to_callable_with_side_effect_for_single_and_multiple(
     single_node_side_effect: _SingleNodeSideEffect,
     all_nodes_side_effect: Callable,
     edges: base_types.GraphType,
     handled_exceptions: FrozenSet[Type[Exception]],
 ) -> Callable:
-    edges = gamla.pipe(edges, add_final_sink, gamla.unique, tuple)
+    edges = gamla.pipe(edges, gamla.unique, tuple)
     edges_to_node_id = graph.edges_to_node_id_map(edges).__getitem__
     return gamla.compose_left(
         _make_outer_computation_input,

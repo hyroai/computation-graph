@@ -118,7 +118,7 @@ def make_edge(
     )
 
 
-def _get_leaves(edges: base_types.GraphType) -> FrozenSet[base_types.ComputationNode]:
+def get_leaves(edges: base_types.GraphType) -> FrozenSet[base_types.ComputationNode]:
     return gamla.pipe(
         edges,
         get_all_nodes,
@@ -135,7 +135,7 @@ def _get_leaves(edges: base_types.GraphType) -> FrozenSet[base_types.Computation
 
 
 def infer_graph_sink(edges: base_types.GraphType) -> base_types.ComputationNode:
-    leaves = _get_leaves(edges)
+    leaves = get_leaves(edges)
     assert len(leaves) == 1, f"computation graph has more than one sink: {leaves}"
     return gamla.head(leaves)
 
@@ -144,7 +144,7 @@ def infer_graph_sink_excluding_terminals(
     edges: base_types.GraphType,
 ) -> base_types.ComputationNode:
     leaves = gamla.pipe(
-        edges, _get_leaves, gamla.remove(gamla.attrgetter("is_terminal")), tuple
+        edges, get_leaves, gamla.remove(gamla.attrgetter("is_terminal")), tuple
     )
     assert len(leaves) == 1, f"computation graph has more than one sink: {leaves}"
     return gamla.head(leaves)
