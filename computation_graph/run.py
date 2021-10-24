@@ -298,7 +298,9 @@ _decisions_from_value_choices = opt_gamla.compose_left(
 
 @gamla.curry
 def _construct_computation_state(
-    edges, results: _ResultToDecisionsType, sink_node: base_types.ComputationNode
+    edges: base_types.GraphType,
+    results: _ResultToDecisionsType,
+    sink_node: base_types.ComputationNode,
 ) -> Dict:
     first_result = gamla.head(results)
     return {
@@ -361,7 +363,9 @@ def _get_results_from_terminals(
 
 
 def _get_computation_state_from_terminals(
-    result_to_dependencies: Callable, edges_to_node_id: Callable
+    result_to_dependencies: Callable,
+    edges_to_node_id: Callable,
+    edges: base_types.GraphType,
 ) -> Callable[[Iterable[base_types.ComputationNode]], Dict]:
     return opt_gamla.compose_left(
         opt_gamla.map(
@@ -370,7 +374,7 @@ def _get_computation_state_from_terminals(
                 opt_gamla.ternary(
                     opt_gamla.compose_left(gamla.head, gamla.nonempty),
                     opt_gamla.compose_left(
-                        opt_gamla.star(_construct_computation_state),
+                        opt_gamla.star(_construct_computation_state(edges)),
                         opt_gamla.keymap(edges_to_node_id),
                     ),
                     gamla.just({}),
@@ -395,7 +399,7 @@ def _construct_computation_result(edges: base_types.GraphType, edges_to_node_id)
             opt_gamla.juxt(
                 _get_results_from_terminals(result_to_dependencies),
                 _get_computation_state_from_terminals(
-                    result_to_dependencies, edges_to_node_id
+                    result_to_dependencies, edges_to_node_id, edges
                 ),
             ),
         )
