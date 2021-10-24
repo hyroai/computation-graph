@@ -210,7 +210,7 @@ def _get_computation_input(
         values_for_edges_choice,
         opt_gamla.maptuple(opt_gamla.maptuple(_choice_to_value)),
     )
-    # TODO(itay): take future edges related state, and add it as computation input to the node.
+    # TODO(itay): take future edges related state, and add it as the node's computation input.
     # gamla.pipe(incoming_edges, gamla.filter("is_future"), )
 
     if node.signature.is_kwargs:
