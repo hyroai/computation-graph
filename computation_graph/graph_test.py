@@ -766,4 +766,3 @@ def test_future_edges():
     result = cg(x=3)
     assert result.result[graph.DEFAULT_TERMINAL][0] == 7
     assert cg(x=3, state=result.state).result[graph.DEFAULT_TERMINAL][0] == 42
-    assert False

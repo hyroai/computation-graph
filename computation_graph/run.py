@@ -213,19 +213,20 @@ def _get_computation_input(
     unbound_signature = _signature_difference(node.signature, bound_signature)
     results = gamla.pipe(
         values_for_edges_choice,
-        # TODO(Itay): This is in the right direction to avoid flakiness, but causes stopIteration. find out why.
-        # gamla.filter(
-        #         gamla.anymap(
-        #             gamla.compose_left(
-        #                 gamla.last,
-        #                 gamla.contains(
-        #                     gamla.pipe(
-        #                         incoming_edges_no_future, gamla.map(gamla.attrgetter("source")), frozenset
-        #                     )
-        #                 ),
-        #             )
-        #         )
-        # ),
+        gamla.filter(
+            gamla.anymap(
+                gamla.compose_left(
+                    gamla.last,
+                    gamla.contains(
+                        gamla.pipe(
+                            incoming_edges_no_future,
+                            gamla.map(lambda edge: edge.source or edge.args[0]),
+                            frozenset,
+                        )
+                    ),
+                )
+            )
+        ),
         opt_gamla.maptuple(opt_gamla.maptuple(_choice_to_value)),
     )
 
@@ -275,28 +276,15 @@ def _get_computation_input(
             state=unbound_input(node).state,
         )
     edges_to_results = dict(zip(incoming_edges_no_future, results))
-    dictionary = {
-        **_get_outer_kwargs(unbound_signature, unbound_input(node)),
-        **_get_inner_kwargs(edges_to_results),
-        **future_edges_kwargs,
-    }
-    # TODO(Itay): Remove when done.
-    # if node.name == "multiply":
-    #     breakpoint()
-    # print("node=", node)
-    # print(
-    #     "future edge args=",
-    #     future_edges_kwargs,
-    #     "outer args=",
-    #     _get_outer_kwargs(unbound_signature, unbound_input(node)),
-    #     "inner args=",
-    #     _get_inner_kwargs(edges_to_results),
-    # )
     return base_types.ComputationInput(
         args=_get_args(
             edges_to_results, unbound_signature, bound_signature, unbound_input(node)
         ),
-        kwargs=dictionary,
+        kwargs={
+            **_get_outer_kwargs(unbound_signature, unbound_input(node)),
+            **_get_inner_kwargs(edges_to_results),
+            **future_edges_kwargs,
+        },
         state=unbound_input(node).state,
     )
 
