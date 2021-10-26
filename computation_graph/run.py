@@ -1,4 +1,5 @@
 import asyncio
+import collections
 import dataclasses
 import itertools
 import logging
@@ -204,9 +205,7 @@ def _get_computation_input(
     # For each edge, there are multiple values options, each having its own trace.
     values_for_edges_choice: Iterable[Iterable[_ChoiceOfOutputForNode]],
 ) -> base_types.ComputationInput:
-    incoming_edges_no_future = tuple(
-        gamla.remove(gamla.attrgetter("is_future"))(incoming_edges)
-    )
+    incoming_edges_no_future = tuple(_remove_future_edges(incoming_edges))
     bound_signature = _get_bound_signature(
         node.signature.is_args, incoming_edges_no_future
     )
@@ -220,7 +219,7 @@ def _get_computation_input(
                     gamla.contains(
                         gamla.pipe(
                             incoming_edges_no_future,
-                            gamla.map(lambda edge: edge.source or edge.args[0]),
+                            gamla.mapcat(_get_edge_sources),
                             frozenset,
                         )
                     ),
@@ -235,7 +234,7 @@ def _get_computation_input(
         gamla.filter(gamla.attrgetter("is_future")),
         gamla.map(
             gamla.juxt(
-                gamla.attrgetter("key"),
+                base_types.edge_key,
                 gamla.compose_left(
                     gamla.attrgetter("source"),
                     unbound_input,
@@ -355,8 +354,6 @@ def _construct_computation_state(
                         )
                     )
                 ),
-                # gamla.side_effect(print),
-                # opt_gamla.valmap(gamla.attrgetter("result"))
             ),
             opt_gamla.merge,
         ),
@@ -528,7 +525,7 @@ def _dag_layer_reduce(
 ) -> Callable[[base_types.GraphType], _IntermediaryResults]:
     """Directed acyclic graph reduction."""
     return gamla.compose_left(
-        _toposort_nodes, gamla.reduce_curried(f, immutables.Map())
+        _remove_future_edges, _toposort_nodes, gamla.reduce_curried(f, immutables.Map())
     )
 
 
@@ -545,7 +542,7 @@ def _edge_to_value_options(
                             gamla.dict_to_getter_with_default(
                                 immutables.Map(), accumulated_outputs
                             ),
-                            dict.items,
+                            collections.abc.Mapping.items,
                         )
                     ),
                     gamla.explode(0),
@@ -555,13 +552,21 @@ def _edge_to_value_options(
     )
 
 
+_remove_future_edges = opt_gamla.remove(gamla.attrgetter("is_future"))
+
 _create_node_run_options = opt_gamla.compose_left(
     gamla.pack,
     gamla.explode(1),
     opt_gamla.mapcat(
         opt_gamla.compose_left(
             gamla.bifurcate(
-                gamla.head, gamla.second, opt_gamla.star(lambda _, y, z: z(y))
+                gamla.head,
+                gamla.second,
+                opt_gamla.star(
+                    lambda _, edges, edge_to_value_options: opt_gamla.compose_left(
+                        _remove_future_edges, edge_to_value_options
+                    )(edges)
+                ),
             ),
             gamla.explode(2),
         )

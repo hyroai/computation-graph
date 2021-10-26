@@ -81,12 +81,22 @@ def _node_with_optional_param(optional_param: int = 5):
     return f"node_with_optional_param(optional_param={optional_param})"
 
 
+def _next_int(x):
+    if x is None:
+        return 0
+    return x + 1
+
+
 def _reducer_node(arg1, state):
     if state is None:
         state = 0
     return base_types.ComputationResult(
         result=arg1 + f" state={state + 1}", state=state + 1
     )
+
+
+def _reducer_node2(arg1, current_int):
+    return arg1 + f" state={current_int}"
 
 
 def _sometimes_unactionable_reducer_node(arg1, state):
@@ -158,26 +168,21 @@ def test_kwargs():
 def test_state():
     edges = graph.connect_default_terminal(
         (
-            graph.make_edge(source=_node1, destination=_reducer_node, key="arg1"),
-            graph.make_edge(source=_reducer_node, destination=_node2, key="arg1"),
+            graph.make_edge(source=_node1, destination=_reducer_node2, key="arg1"),
+            graph.make_edge(source=_reducer_node2, destination=_node2, key="arg1"),
+            graph.make_edge(
+                source=_next_int, destination=_reducer_node2, key="current_int"
+            ),
+            graph.make_future_edge(source=_next_int, destination=_next_int, key="x"),
         )
     )
-
     cg = run.to_callable(edges, frozenset([_GraphTestError]))
 
     result = cg(arg1=_ROOT_VALUE)
     result = cg(arg1=_ROOT_VALUE, state=result.state)
     result = cg(arg1=_ROOT_VALUE, state=result.state)
-
     assert isinstance(result, base_types.ComputationResult)
-    assert (
-        dict(result.state)[
-            graph.edges_to_node_id_map(edges)[
-                graph.make_computation_node(_reducer_node)
-            ]
-        ]
-        == 3
-    )
+    assert result.result[graph.DEFAULT_TERMINAL][0] == "node2(node1(root) state=2)"
 
 
 def test_multiple_inputs():
