@@ -239,7 +239,7 @@ def _get_computation_input(
                     gamla.attrgetter("source"),
                     unbound_input,
                     gamla.attrgetter("state"),
-                    gamla.when(gamla.identity, gamla.attrgetter("result")),
+                    # gamla.when(gamla.identity, gamla.attrgetter("result")),
                 ),
             )
         ),
@@ -345,15 +345,18 @@ def _construct_computation_state(
             gamla.itemgetter(first_result),
             opt_gamla.juxt(
                 opt_gamla.valmap(gamla.attrgetter("state")),
-                opt_gamla.keyfilter(
-                    gamla.contains(
-                        opt_gamla.pipe(
-                            edges,
-                            opt_gamla.filter(gamla.attrgetter("is_future")),
-                            gamla.map(gamla.attrgetter("source")),
-                            frozenset,
+                gamla.compose_left(
+                    opt_gamla.keyfilter(
+                        gamla.contains(
+                            opt_gamla.pipe(
+                                edges,
+                                opt_gamla.filter(gamla.attrgetter("is_future")),
+                                gamla.map(gamla.attrgetter("source")),
+                                frozenset,
+                            )
                         )
-                    )
+                    ),
+                    opt_gamla.valmap(gamla.attrgetter("result")),
                 ),
             ),
             opt_gamla.merge,
