@@ -48,14 +48,8 @@ def _curried_node(arg1, arg2):
 
 
 @gamla.curry
-def _curried_stateful_node(arg1, arg2, state):
-    if state is None:
-        state = 0
-
-    return base_types.ComputationResult(
-        result=f"curried_stateful_node(arg1={arg1}, arg2={arg2}, state={state + 1})",
-        state=(state + 1),
-    )
+def _curried_stateful_node(arg1, arg2, cur_int):
+    return f"curried_stateful_node(arg1={arg1}, arg2={arg2}, state={cur_int + 1})"
 
 
 def _unactionable_node(arg1):
@@ -82,28 +76,14 @@ def _next_int(x):
     return x + 1
 
 
-def _reducer_node(arg1, state):
-    if state is None:
-        state = 0
-    return base_types.ComputationResult(
-        result=arg1 + f" state={state + 1}", state=state + 1
-    )
-
-
-def _reducer_node2(arg1, cur_int):
+def _reducer_node(arg1, cur_int):
     return arg1 + f" state={cur_int + 1}"
 
 
-def _sometimes_unactionable_reducer_node(arg1, state):
+def _sometimes_unactionable_reducer_node(arg1, cur_int):
     if arg1 == "fail":
         raise _GraphTestError
-
-    if state is None:
-        state = 0
-
-    return base_types.ComputationResult(
-        result=arg1 + f" state={state + 1}", state=state + 1
-    )
+    return arg1 + f" state={cur_int + 1}"
 
 
 def _runner(edges: base_types.GraphType, **kwargs):
@@ -163,11 +143,9 @@ def test_kwargs():
 def test_state():
     edges = graph.connect_default_terminal(
         (
-            graph.make_edge(source=_node1, destination=_reducer_node2, key="arg1"),
-            graph.make_edge(source=_reducer_node2, destination=_node2, key="arg1"),
-            graph.make_edge(
-                source=_next_int, destination=_reducer_node2, key="cur_int"
-            ),
+            graph.make_edge(source=_node1, destination=_reducer_node, key="arg1"),
+            graph.make_edge(source=_reducer_node, destination=_node2, key="arg1"),
+            graph.make_edge(source=_next_int, destination=_reducer_node, key="cur_int"),
             graph.make_future_edge(source=_next_int, destination=_next_int, key="x"),
         )
     )
@@ -263,11 +241,9 @@ def test_optional():
 
 def test_optional_with_state():
     edges = graph.connect_default_terminal(
-        composers.make_optional(_reducer_node2, default_value=None)
+        composers.make_optional(_reducer_node, default_value=None)
         + (
-            graph.make_edge(
-                source=_next_int, destination=_reducer_node2, key="cur_int"
-            ),
+            graph.make_edge(source=_next_int, destination=_reducer_node, key="cur_int"),
             graph.make_future_edge(source=_next_int, destination=_next_int),
         )
     )
@@ -313,10 +289,10 @@ def test_first_all_unactionable():
 def test_first_with_state():
     cg = run.to_callable(
         graph.connect_default_terminal(
-            composers.make_first(_unactionable_node, _reducer_node2, _node1)
+            composers.make_first(_unactionable_node, _reducer_node, _node1)
             + (
                 graph.make_edge(
-                    source=_next_int, destination=_reducer_node2, key="cur_int"
+                    source=_next_int, destination=_reducer_node, key="cur_int"
                 ),
                 graph.make_future_edge(source=_next_int, destination=_next_int),
             )
@@ -332,11 +308,9 @@ def test_first_with_state():
 
 def test_and():
     edges = graph.connect_default_terminal(
-        composers.make_and(funcs=(_reducer_node2, _node2, _node1), merge_fn=_merger)
+        composers.make_and(funcs=(_reducer_node, _node2, _node1), merge_fn=_merger)
         + (
-            graph.make_edge(
-                source=_next_int, destination=_reducer_node2, key="cur_int"
-            ),
+            graph.make_edge(source=_next_int, destination=_reducer_node, key="cur_int"),
             graph.make_future_edge(source=_next_int, destination=_next_int),
         )
     )
@@ -374,6 +348,10 @@ def test_and_with_unactionable():
         composers.make_and(
             funcs=(_reducer_node, _node2, _node1, _unactionable_node), merge_fn=_merger
         )
+        + (
+            graph.make_edge(source=_next_int, destination=_reducer_node, key="cur_int"),
+            graph.make_future_edge(source=_next_int, destination=_next_int),
+        )
     )
     result = run.to_callable(edges, frozenset([_GraphTestError]))(arg1=_ROOT_VALUE)
     assert not result.result
@@ -383,6 +361,10 @@ def test_or():
     edges = graph.connect_default_terminal(
         composers.make_or(
             funcs=(_reducer_node, _node2, _node1, _unactionable_node), merge_fn=_merger
+        )
+        + (
+            graph.make_edge(source=_next_int, destination=_reducer_node, key="cur_int"),
+            graph.make_future_edge(source=_next_int, destination=_next_int),
         )
     )
 
@@ -468,6 +450,12 @@ def test_compose_with_state():
     cg = run.to_callable(
         graph.connect_default_terminal(
             composers.make_compose(_reducer_node, _node1, _node2)
+            + (
+                graph.make_edge(
+                    source=_next_int, destination=_reducer_node, key="cur_int"
+                ),
+                graph.make_future_edge(source=_next_int, destination=_next_int),
+            )
         ),
         frozenset([_GraphTestError]),
     )
@@ -475,7 +463,6 @@ def test_compose_with_state():
     result = cg(arg1=_ROOT_VALUE)
     result = cg(arg1=_ROOT_VALUE, state=result.state)
     result = cg(arg1=_ROOT_VALUE, state=result.state)
-
     assert result.result[graph.DEFAULT_TERMINAL][0] == "node1(node2(root)) state=3"
 
 
@@ -541,6 +528,14 @@ def test_optional_with_sometimes_unactionable_reducer():
         composers.make_optional(
             _sometimes_unactionable_reducer_node, default_value=None
         )
+        + (
+            graph.make_edge(
+                source=_next_int,
+                destination=_sometimes_unactionable_reducer_node,
+                key="cur_int",
+            ),
+            graph.make_future_edge(source=_next_int, destination=_next_int),
+        )
     )
     cg = run.to_callable(edges, frozenset([_GraphTestError]))
     result = cg(arg1=_ROOT_VALUE)
@@ -559,8 +554,15 @@ def test_unary_graph_composition():
 
 
 def test_curry_with_state():
-
-    edges = graph.connect_default_terminal(composers.make_first(_curried_stateful_node))
+    edges = graph.connect_default_terminal(
+        composers.make_first(_curried_stateful_node)
+        + (
+            graph.make_edge(
+                source=_next_int, destination=_curried_stateful_node, key="cur_int"
+            ),
+            graph.make_future_edge(source=_next_int, destination=_next_int),
+        )
+    )
 
     cg = run.to_callable(edges, frozenset([_GraphTestError]))
     result = cg(arg1=_ROOT_VALUE, arg2="arg2")
@@ -578,6 +580,8 @@ def test_state_is_serializable():
         (
             graph.make_edge(source=_node1, destination=_reducer_node, key="arg1"),
             graph.make_edge(source=_reducer_node, destination=_node2, key="arg1"),
+            graph.make_edge(source=_next_int, destination=_reducer_node, key="cur_int"),
+            graph.make_future_edge(source=_next_int, destination=_next_int),
         )
     )
 
@@ -585,7 +589,6 @@ def test_state_is_serializable():
     result = cg(arg1=_ROOT_VALUE)
     result = cg(arg1=_ROOT_VALUE, state=result.state)
     result = cg(arg1=_ROOT_VALUE, state=result.state)
-
     json.dumps(result.state)
 
 
