@@ -39,7 +39,7 @@ def _node4(y, z=5):
 
 
 def _node_with_side_effect(arg1, side_effects, cur_int):
-    return f"node_with_side_effect(arg1={arg1},side_effects={side_effects}, state={cur_int})"
+    return f"node_with_side_effect(arg1={arg1},side_effects={side_effects}, state={cur_int + 1})"
 
 
 @gamla.curry
@@ -91,7 +91,7 @@ def _reducer_node(arg1, state):
 
 
 def _reducer_node2(arg1, cur_int):
-    return arg1 + f" state={cur_int}"
+    return arg1 + f" state={cur_int + 1}"
 
 
 def _sometimes_unactionable_reducer_node(arg1, state):
@@ -177,7 +177,7 @@ def test_state():
     result = cg(arg1=_ROOT_VALUE, state=result.state)
     result = cg(arg1=_ROOT_VALUE, state=result.state)
     assert isinstance(result, base_types.ComputationResult)
-    assert result.result[graph.DEFAULT_TERMINAL][0] == "node2(node1(root) state=2)"
+    assert result.result[graph.DEFAULT_TERMINAL][0] == "node2(node1(root) state=3)"
 
 
 def test_multiple_inputs():
@@ -225,7 +225,7 @@ def test_external_input_and_state():
 
     assert (
         result.result[graph.DEFAULT_TERMINAL][0]
-        == "node_with_side_effect(arg1=node2(node1(root)),side_effects=side_effects, state=2)"
+        == "node_with_side_effect(arg1=node2(node1(root)),side_effects=side_effects, state=3)"
     )
 
 
@@ -276,7 +276,7 @@ def test_optional_with_state():
     result = cg(arg1=_ROOT_VALUE)
     result = cg(arg1=_ROOT_VALUE, state=result.state)
     result = cg(arg1=_ROOT_VALUE, state=result.state)
-    assert result.result[graph.DEFAULT_TERMINAL][0] == "root state=2"
+    assert result.result[graph.DEFAULT_TERMINAL][0] == "root state=3"
 
 
 def test_optional_default_value():
@@ -327,12 +327,18 @@ def test_first_with_state():
     result = cg(arg1=_ROOT_VALUE)
     result = cg(arg1=_ROOT_VALUE, state=result.state)
     result = cg(arg1=_ROOT_VALUE, state=result.state)
-    assert result.result[graph.DEFAULT_TERMINAL][0] == "root state=2"
+    assert result.result[graph.DEFAULT_TERMINAL][0] == "root state=3"
 
 
 def test_and():
     edges = graph.connect_default_terminal(
-        composers.make_and(funcs=(_reducer_node, _node2, _node1), merge_fn=_merger)
+        composers.make_and(funcs=(_reducer_node2, _node2, _node1), merge_fn=_merger)
+        + (
+            graph.make_edge(
+                source=_next_int, destination=_reducer_node2, key="cur_int"
+            ),
+            graph.make_future_edge(source=_next_int, destination=_next_int),
+        )
     )
     cg = run.to_callable(edges, frozenset([_GraphTestError]))
     result = cg(arg1=_ROOT_VALUE, side_effects="side_effects")
