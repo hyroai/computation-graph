@@ -213,7 +213,7 @@ def test_external_input_and_state():
             graph.make_edge(
                 source=_next_int, destination=_node_with_side_effect, key="current_int"
             ),
-            graph.make_future_edge(source=_next_int, destination=_next_int, key="x"),
+            graph.make_future_edge(source=_next_int, destination=_next_int),
         )
     )
 

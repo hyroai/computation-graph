@@ -234,7 +234,7 @@ def _get_computation_input(
         gamla.filter(gamla.attrgetter("is_future")),
         gamla.map(
             gamla.juxt(
-                base_types.edge_key,
+                lambda edge: edge.key or edge.source.signature.kwargs[0],
                 gamla.compose_left(
                     gamla.attrgetter("source"),
                     unbound_input,
@@ -260,14 +260,15 @@ def _get_computation_input(
         and sum(
             map(
                 opt_gamla.compose_left(base_types.edge_key, gamla.equals(None)),
-                incoming_edges_no_future,
+                incoming_edges,
             )
         )
         == 1
     ):
         return base_types.ComputationInput(
             args=(),
-            kwargs=_get_unary_computation_input(
+            kwargs=future_edges_kwargs
+            or _get_unary_computation_input(
                 node.signature.kwargs,
                 gamla.head(gamla.head(results)),
                 unbound_signature,
