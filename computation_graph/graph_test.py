@@ -38,13 +38,8 @@ def _node4(y, z=5):
     return f"node4({y}, z={z})"
 
 
-def _node_with_side_effect(arg1, side_effects, state):
-    if state is None:
-        state = 0
-    return base_types.ComputationResult(
-        result=f"node_with_side_effect(arg1={arg1},side_effects={side_effects}, state={state + 1})",
-        state=(state + 1),
-    )
+def _node_with_side_effect(arg1, side_effects, current_int):
+    return f"node_with_side_effect(arg1={arg1},side_effects={side_effects}, state={current_int + 1})"
 
 
 @gamla.curry
@@ -215,6 +210,10 @@ def test_external_input_and_state():
             graph.make_edge(
                 source=_node2, destination=_node_with_side_effect, key="arg1"
             ),
+            graph.make_edge(
+                source=_next_int, destination=_node_with_side_effect, key="current_int"
+            ),
+            graph.make_future_edge(source=_next_int, destination=_next_int, key="x"),
         )
     )
 
