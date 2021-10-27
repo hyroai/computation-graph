@@ -38,8 +38,8 @@ def _node4(y, z=5):
     return f"node4({y}, z={z})"
 
 
-def _node_with_side_effect(arg1, side_effects, current_int):
-    return f"node_with_side_effect(arg1={arg1},side_effects={side_effects}, state={current_int + 1})"
+def _node_with_side_effect(arg1, side_effects, cur_int):
+    return f"node_with_side_effect(arg1={arg1},side_effects={side_effects}, state={cur_int})"
 
 
 @gamla.curry
@@ -90,8 +90,8 @@ def _reducer_node(arg1, state):
     )
 
 
-def _reducer_node2(arg1, current_int):
-    return arg1 + f" state={current_int}"
+def _reducer_node2(arg1, cur_int):
+    return arg1 + f" state={cur_int}"
 
 
 def _sometimes_unactionable_reducer_node(arg1, state):
@@ -166,7 +166,7 @@ def test_state():
             graph.make_edge(source=_node1, destination=_reducer_node2, key="arg1"),
             graph.make_edge(source=_reducer_node2, destination=_node2, key="arg1"),
             graph.make_edge(
-                source=_next_int, destination=_reducer_node2, key="current_int"
+                source=_next_int, destination=_reducer_node2, key="cur_int"
             ),
             graph.make_future_edge(source=_next_int, destination=_next_int, key="x"),
         )
@@ -211,7 +211,7 @@ def test_external_input_and_state():
                 source=_node2, destination=_node_with_side_effect, key="arg1"
             ),
             graph.make_edge(
-                source=_next_int, destination=_node_with_side_effect, key="current_int"
+                source=_next_int, destination=_node_with_side_effect, key="cur_int"
             ),
             graph.make_future_edge(source=_next_int, destination=_next_int),
         )
@@ -225,7 +225,7 @@ def test_external_input_and_state():
 
     assert (
         result.result[graph.DEFAULT_TERMINAL][0]
-        == "node_with_side_effect(arg1=node2(node1(root)),side_effects=side_effects, state=3)"
+        == "node_with_side_effect(arg1=node2(node1(root)),side_effects=side_effects, state=2)"
     )
 
 
@@ -263,18 +263,20 @@ def test_optional():
 
 def test_optional_with_state():
     edges = graph.connect_default_terminal(
-        composers.make_optional(_reducer_node, default_value=None)
+        composers.make_optional(_reducer_node2, default_value=None)
+        + (
+            graph.make_edge(
+                source=_next_int, destination=_reducer_node2, key="cur_int"
+            ),
+            graph.make_future_edge(source=_next_int, destination=_next_int),
+        )
     )
+    cg = run.to_callable(edges, frozenset([_GraphTestError]))
 
-    result = run.to_callable(edges, frozenset([_GraphTestError]))(arg1=_ROOT_VALUE)
-    result = run.to_callable(edges, frozenset([_GraphTestError]))(
-        arg1=_ROOT_VALUE, state=result.state
-    )
-    result = run.to_callable(edges, frozenset([_GraphTestError]))(
-        arg1=_ROOT_VALUE, state=result.state
-    )
-
-    assert result.result[graph.DEFAULT_TERMINAL][0] == "root state=3"
+    result = cg(arg1=_ROOT_VALUE)
+    result = cg(arg1=_ROOT_VALUE, state=result.state)
+    result = cg(arg1=_ROOT_VALUE, state=result.state)
+    assert result.result[graph.DEFAULT_TERMINAL][0] == "root state=2"
 
 
 def test_optional_default_value():
@@ -311,7 +313,13 @@ def test_first_all_unactionable():
 def test_first_with_state():
     cg = run.to_callable(
         graph.connect_default_terminal(
-            composers.make_first(_unactionable_node, _reducer_node, _node1)
+            composers.make_first(_unactionable_node, _reducer_node2, _node1)
+            + (
+                graph.make_edge(
+                    source=_next_int, destination=_reducer_node2, key="cur_int"
+                ),
+                graph.make_future_edge(source=_next_int, destination=_next_int),
+            )
         ),
         frozenset([_GraphTestError]),
     )
@@ -319,8 +327,7 @@ def test_first_with_state():
     result = cg(arg1=_ROOT_VALUE)
     result = cg(arg1=_ROOT_VALUE, state=result.state)
     result = cg(arg1=_ROOT_VALUE, state=result.state)
-
-    assert result.result[graph.DEFAULT_TERMINAL][0] == "root state=3"
+    assert result.result[graph.DEFAULT_TERMINAL][0] == "root state=2"
 
 
 def test_and():
@@ -331,7 +338,6 @@ def test_and():
     result = cg(arg1=_ROOT_VALUE, side_effects="side_effects")
     result = cg(arg1=_ROOT_VALUE, state=result.state, side_effects="side_effects")
     result = cg(arg1=_ROOT_VALUE, state=result.state, side_effects="side_effects")
-
     assert (
         result.result[graph.DEFAULT_TERMINAL][0]
         == "[root state=3,node2(root),node1(root)], side_effects=side_effects"
