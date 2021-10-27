@@ -346,6 +346,7 @@ def _construct_computation_state(
             opt_gamla.juxt(
                 opt_gamla.valmap(gamla.attrgetter("state")),
                 gamla.compose_left(
+                    opt_gamla.valmap(gamla.attrgetter("result")),
                     opt_gamla.keyfilter(
                         gamla.contains(
                             opt_gamla.pipe(
@@ -356,7 +357,6 @@ def _construct_computation_state(
                             )
                         )
                     ),
-                    opt_gamla.valmap(gamla.attrgetter("result")),
                 ),
             ),
             opt_gamla.merge,

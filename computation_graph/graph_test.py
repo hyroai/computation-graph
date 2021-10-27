@@ -449,8 +449,9 @@ def test_compose():
 def test_compose_with_state():
     cg = run.to_callable(
         graph.connect_default_terminal(
-            composers.make_compose(_reducer_node, _node1, _node2)
+            composers.make_compose(_node1, _node2)
             + (
+                graph.make_edge(source=_node1, destination=_reducer_node, key="arg1"),
                 graph.make_edge(
                     source=_next_int, destination=_reducer_node, key="cur_int"
                 ),
