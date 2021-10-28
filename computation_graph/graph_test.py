@@ -778,7 +778,7 @@ def test_future_edges():
     edges = (
         composers.make_compose(plus_1, times_2)
         + composers.make_compose(multiply, plus_1, key="a")
-        + (graph.make_future_edge(source=times_2, destination=multiply, key="b"),)
+        + (graph.make_future_edge(times_2, multiply, key="b"),)
     )
     edges = graph.connect_default_terminal(edges)
     cg = run.to_callable(edges, frozenset([_GraphTestError]))
@@ -786,3 +786,19 @@ def test_future_edges():
     result = cg(x=3)
     assert result.result[graph.DEFAULT_TERMINAL][0] == 7
     assert cg(x=3, state=result.state).result[graph.DEFAULT_TERMINAL][0] == 42
+
+
+def test_sink_with_incoming_future_edge():
+    def f(x):
+        return x
+
+    def g(x, y):
+        if y is None:
+            y = 4
+        return f"x={x}, y={y}"
+
+    edges = composers.make_compose(g, f, key="x") + (
+        graph.make_future_edge(g, g, key="y"),
+    )
+    assert graph.infer_graph_sink(edges).name == "g"
+    assert _runner(edges, x=3) == "x=3, y=4"

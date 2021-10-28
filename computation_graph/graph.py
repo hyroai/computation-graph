@@ -4,6 +4,7 @@ from types import MappingProxyType
 from typing import Callable, FrozenSet, Optional, Text, Tuple, Union
 
 import gamla
+from gamla.optimized import sync as opt_gamla
 
 from computation_graph import base_types
 
@@ -132,6 +133,7 @@ def get_leaves(edges: base_types.GraphType) -> FrozenSet[base_types.ComputationN
         gamla.remove(
             gamla.pipe(
                 edges,
+                remove_future_edges,
                 gamla.mapcat(lambda edge: (edge.source, *edge.args)),
                 frozenset,
                 gamla.contains,
@@ -143,7 +145,9 @@ def get_leaves(edges: base_types.GraphType) -> FrozenSet[base_types.ComputationN
 
 def infer_graph_sink(edges: base_types.GraphType) -> base_types.ComputationNode:
     leaves = get_leaves(edges)
-    assert len(leaves) == 1, f"computation graph has more than one sink: {leaves}"
+    assert (
+        len(leaves) == 1
+    ), f"computation graph has more than one sink: {leaves}, {edges}"
     return gamla.head(leaves)
 
 
@@ -153,7 +157,9 @@ def infer_graph_sink_excluding_terminals(
     leaves = gamla.pipe(
         edges, get_leaves, gamla.remove(gamla.attrgetter("is_terminal")), tuple
     )
-    assert len(leaves) == 1, f"computation graph has more than one sink: {leaves}"
+    assert (
+        len(leaves) == 1
+    ), f"computation graph has more than one sink: {leaves}, {edges}"
     return gamla.head(leaves)
 
 
@@ -188,3 +194,6 @@ DEFAULT_TERMINAL = make_terminal("DEFAULT_TERMINAL", _aggregator_for_terminal)
 
 def connect_default_terminal(edges: base_types.GraphType) -> base_types.GraphType:
     return edges + (make_edge((infer_graph_sink(edges),), DEFAULT_TERMINAL),)
+
+
+remove_future_edges = opt_gamla.remove(gamla.attrgetter("is_future"))

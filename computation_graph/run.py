@@ -205,7 +205,7 @@ def _get_computation_input(
     # For each edge, there are multiple values options, each having its own trace.
     values_for_edges_choice: Iterable[Iterable[_ChoiceOfOutputForNode]],
 ) -> base_types.ComputationInput:
-    incoming_edges_no_future = tuple(_remove_future_edges(incoming_edges))
+    incoming_edges_no_future = tuple(graph.remove_future_edges(incoming_edges))
     bound_signature = _get_bound_signature(
         node.signature.is_args, incoming_edges_no_future
     )
@@ -529,7 +529,9 @@ def _dag_layer_reduce(
 ) -> Callable[[base_types.GraphType], _IntermediaryResults]:
     """Directed acyclic graph reduction."""
     return gamla.compose_left(
-        _remove_future_edges, _toposort_nodes, gamla.reduce_curried(f, immutables.Map())
+        graph.remove_future_edges,
+        _toposort_nodes,
+        gamla.reduce_curried(f, immutables.Map()),
     )
 
 
@@ -556,8 +558,6 @@ def _edge_to_value_options(
     )
 
 
-_remove_future_edges = opt_gamla.remove(gamla.attrgetter("is_future"))
-
 _create_node_run_options = opt_gamla.compose_left(
     gamla.pack,
     gamla.explode(1),
@@ -568,7 +568,7 @@ _create_node_run_options = opt_gamla.compose_left(
                 gamla.second,
                 opt_gamla.star(
                     lambda _, edges, edge_to_value_options: opt_gamla.compose_left(
-                        _remove_future_edges, edge_to_value_options
+                        graph.remove_future_edges, edge_to_value_options
                     )(edges)
                 ),
             ),
