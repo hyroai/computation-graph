@@ -236,10 +236,7 @@ def _get_computation_input(
             gamla.juxt(
                 lambda edge: edge.key or edge.source.signature.kwargs[0],
                 gamla.compose_left(
-                    gamla.attrgetter("source"),
-                    unbound_input,
-                    gamla.attrgetter("state"),
-                    # gamla.when(gamla.identity, gamla.attrgetter("result")),
+                    gamla.attrgetter("source"), unbound_input, gamla.attrgetter("state")
                 ),
             )
         ),
