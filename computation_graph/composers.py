@@ -16,8 +16,8 @@ class _ComputationError:
     pass
 
 
-_callable_or_graph_type_to_node_or_graph_type = gamla.ternary(
-    lambda x: isinstance(x, tuple), gamla.identity, graph.make_computation_node
+_callable_or_graph_type_to_node_or_graph_type = gamla.unless(
+    gamla.is_instance(tuple), graph.make_computation_node
 )
 
 
@@ -95,7 +95,7 @@ def make_and(funcs, merge_fn: Callable) -> base_types.GraphType:
 def make_or(funcs, merge_fn: Callable) -> base_types.GraphType:
     def filter_computation_errors(*args):
         return gamla.pipe(
-            args, gamla.filter(lambda x: not isinstance(x, _ComputationError)), tuple
+            args, gamla.remove(gamla.is_instance(_ComputationError)), tuple
         )
 
     filter_node = graph.make_computation_node(filter_computation_errors)
