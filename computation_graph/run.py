@@ -212,12 +212,12 @@ def _get_computation_input(
     unbound_signature = _signature_difference(node.signature, bound_signature)
     results = gamla.pipe(
         values_for_edges_choice,
-        gamla.filter(
-            gamla.anymap(
-                gamla.compose_left(
+        opt_gamla.filter(
+            opt_gamla.anymap(
+                opt_gamla.compose_left(
                     gamla.last,
                     gamla.contains(
-                        gamla.pipe(
+                        opt_gamla.pipe(
                             incoming_edges_no_future,
                             gamla.mapcat(_get_edge_sources),
                             frozenset,
@@ -229,13 +229,13 @@ def _get_computation_input(
         opt_gamla.maptuple(opt_gamla.maptuple(_choice_to_value)),
     )
 
-    future_edges_kwargs = gamla.pipe(
+    future_edges_kwargs = opt_gamla.pipe(
         incoming_edges,
-        gamla.filter(gamla.attrgetter("is_future")),
-        gamla.map(
-            gamla.juxt(
+        opt_gamla.filter(gamla.attrgetter("is_future")),
+        opt_gamla.map(
+            opt_gamla.juxt(
                 lambda edge: edge.key or edge.source.signature.kwargs[0],
-                gamla.compose_left(
+                opt_gamla.compose_left(
                     gamla.attrgetter("source"), unbound_input, gamla.attrgetter("state")
                 ),
             )
@@ -248,7 +248,13 @@ def _get_computation_input(
             len(results) == 1
         ), f"signature for {base_types.pretty_print_function_name(node.func)} contains `**kwargs`. This is considered unary, meaning one incoming edge, but we got more than one: {incoming_edges_no_future}."
         return base_types.ComputationInput(
-            args=gamla.wrap_tuple(gamla.head(gamla.head(results)).result),
+            args=opt_gamla.pipe(
+                results,
+                gamla.head,
+                gamla.head,
+                gamla.attrgetter("result"),
+                gamla.wrap_tuple,
+            ),
             kwargs={},
             state=None,
         )
