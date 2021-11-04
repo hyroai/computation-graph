@@ -102,7 +102,7 @@ def _runner(edges: base_types.GraphType, **kwargs):
 
 def test_simple():
     result = _runner(
-        (graph.make_edge(source=_node1, destination=_node2, key="arg1"),),
+        (graph.make_standard_edge(source=_node1, destination=_node2, key="arg1"),),
         arg1=_ROOT_VALUE,
     )
     assert result == f"node2(node1({_ROOT_VALUE}))"
@@ -110,7 +110,8 @@ def test_simple():
 
 def test_none_as_input():
     result = _runner(
-        (graph.make_edge(source=_node1, destination=_node2, key="arg1"),), arg1=None
+        (graph.make_standard_edge(source=_node1, destination=_node2, key="arg1"),),
+        arg1=None,
     )
     assert result == "node2(node1(None))"
 
@@ -118,7 +119,11 @@ def test_none_as_input():
 async def test_simple_async():
     cg = run.to_callable(
         graph.connect_default_terminal(
-            (graph.make_edge(source=_node1_async, destination=_node2, key="arg1"),)
+            (
+                graph.make_standard_edge(
+                    source=_node1_async, destination=_node2, key="arg1"
+                ),
+            )
         ),
         frozenset([_GraphTestError]),
     )
@@ -132,8 +137,8 @@ def test_kwargs():
     cg = run.to_callable(
         graph.connect_default_terminal(
             (
-                graph.make_edge(source=_node1, destination=_node3, key="arg1"),
-                graph.make_edge(source=_node2, destination=_node3, key="arg2"),
+                graph.make_standard_edge(source=_node1, destination=_node3, key="arg1"),
+                graph.make_standard_edge(source=_node2, destination=_node3, key="arg2"),
             )
         ),
         frozenset([_GraphTestError]),
@@ -151,8 +156,12 @@ def test_kwargs():
 def test_state():
     edges = graph.connect_default_terminal(
         (
-            graph.make_edge(_node1, _node_with_state_as_arg, key="arg1"),
-            graph.make_edge(_node_with_state_as_arg, _node2, key="arg1"),
+            graph.make_standard_edge(
+                source=_node1, destination=_node_with_state_as_arg, key="arg1"
+            ),
+            graph.make_standard_edge(
+                source=_node_with_state_as_arg, destination=_node2, key="arg1"
+            ),
         )
     )
     cg = run.to_callable(edges, frozenset([_GraphTestError]))
@@ -175,9 +184,15 @@ def test_state():
 def test_self_future_edge():
     edges = graph.connect_default_terminal(
         (
-            graph.make_edge(source=_node1, destination=_reducer_node, key="arg1"),
-            graph.make_edge(source=_reducer_node, destination=_node2, key="arg1"),
-            graph.make_edge(source=_next_int, destination=_reducer_node, key="cur_int"),
+            graph.make_standard_edge(
+                source=_node1, destination=_reducer_node, key="arg1"
+            ),
+            graph.make_standard_edge(
+                source=_reducer_node, destination=_node2, key="arg1"
+            ),
+            graph.make_standard_edge(
+                source=_next_int, destination=_reducer_node, key="cur_int"
+            ),
             graph.make_future_edge(source=_next_int, destination=_next_int, key="x"),
         )
     )
@@ -193,9 +208,9 @@ def test_self_future_edge():
 def test_multiple_inputs():
     edges = graph.connect_default_terminal(
         (
-            graph.make_edge(source=_node1, destination=_node2, key="arg1"),
-            graph.make_edge(source=_node1, destination=_node3, key="arg1"),
-            graph.make_edge(source=_node2, destination=_node3, key="arg2"),
+            graph.make_standard_edge(source=_node1, destination=_node2, key="arg1"),
+            graph.make_standard_edge(source=_node1, destination=_node3, key="arg1"),
+            graph.make_standard_edge(source=_node2, destination=_node3, key="arg2"),
         )
     )
     result = run.to_callable(edges, frozenset([_GraphTestError]))(arg1=_ROOT_VALUE)
@@ -207,7 +222,11 @@ def test_multiple_inputs():
 
 def test_empty_result():
     edges = graph.connect_default_terminal(
-        (graph.make_edge(source=_node1, destination=_unactionable_node, key="arg1"),)
+        (
+            graph.make_standard_edge(
+                source=_node1, destination=_unactionable_node, key="arg1"
+            ),
+        )
     )
     result = run.to_callable(edges, frozenset([_GraphTestError]))(arg1=_ROOT_VALUE)
     assert not result.result
@@ -216,11 +235,11 @@ def test_empty_result():
 def test_external_input_and_future_edge():
     edges = graph.connect_default_terminal(
         (
-            graph.make_edge(source=_node1, destination=_node2, key="arg1"),
-            graph.make_edge(
+            graph.make_standard_edge(source=_node1, destination=_node2, key="arg1"),
+            graph.make_standard_edge(
                 source=_node2, destination=_node_with_side_effect, key="arg1"
             ),
-            graph.make_edge(
+            graph.make_standard_edge(
                 source=_next_int, destination=_node_with_side_effect, key="cur_int"
             ),
             graph.make_future_edge(source=_next_int, destination=_next_int),
@@ -242,7 +261,7 @@ def test_external_input_and_future_edge():
 def test_tuple_source_node():
     edges = graph.connect_default_terminal(
         (
-            graph.make_edge(
+            graph.make_standard_edge(
                 source=(_node1, _node2),
                 destination=lambda *args, side_effects: "["
                 + ",".join(args)
@@ -275,7 +294,9 @@ def test_optional_with_future_edge():
     edges = graph.connect_default_terminal(
         composers.make_optional(_reducer_node, default_value=None)
         + (
-            graph.make_edge(source=_next_int, destination=_reducer_node, key="cur_int"),
+            graph.make_standard_edge(
+                source=_next_int, destination=_reducer_node, key="cur_int"
+            ),
             graph.make_future_edge(source=_next_int, destination=_next_int),
         )
     )
@@ -323,7 +344,7 @@ def test_first_with_future_edge():
         graph.connect_default_terminal(
             composers.make_first(_unactionable_node, _reducer_node, _node1)
             + (
-                graph.make_edge(
+                graph.make_standard_edge(
                     source=_next_int, destination=_reducer_node, key="cur_int"
                 ),
                 graph.make_future_edge(source=_next_int, destination=_next_int),
@@ -342,7 +363,9 @@ def test_and():
     edges = graph.connect_default_terminal(
         composers.make_and(funcs=(_reducer_node, _node2, _node1), merge_fn=_merger)
         + (
-            graph.make_edge(source=_next_int, destination=_reducer_node, key="cur_int"),
+            graph.make_standard_edge(
+                source=_next_int, destination=_reducer_node, key="cur_int"
+            ),
             graph.make_future_edge(source=_next_int, destination=_next_int),
         )
     )
@@ -381,7 +404,9 @@ def test_and_with_unactionable():
             funcs=(_reducer_node, _node2, _node1, _unactionable_node), merge_fn=_merger
         )
         + (
-            graph.make_edge(source=_next_int, destination=_reducer_node, key="cur_int"),
+            graph.make_standard_edge(
+                source=_next_int, destination=_reducer_node, key="cur_int"
+            ),
             graph.make_future_edge(source=_next_int, destination=_next_int),
         )
     )
@@ -395,7 +420,9 @@ def test_or():
             funcs=(_reducer_node, _node2, _node1, _unactionable_node), merge_fn=_merger
         )
         + (
-            graph.make_edge(source=_next_int, destination=_reducer_node, key="cur_int"),
+            graph.make_standard_edge(
+                source=_next_int, destination=_reducer_node, key="cur_int"
+            ),
             graph.make_future_edge(source=_next_int, destination=_next_int),
         )
     )
@@ -438,7 +465,7 @@ def test_graph_wrapping():
 def test_node_with_optional_param():
     edges = graph.connect_default_terminal(
         (
-            graph.make_edge(
+            graph.make_standard_edge(
                 source=_node_with_optional_param, destination=_node1, key="arg1"
             ),
         )
@@ -455,7 +482,7 @@ def test_node_with_optional_param():
 def test_node_with_bound_optional_param():
     edges = graph.connect_default_terminal(
         (
-            graph.make_edge(
+            graph.make_standard_edge(
                 source=_node_with_optional_param, destination=_node1, key="arg1"
             ),
         )
@@ -483,8 +510,10 @@ def test_compose_with_future_edge():
         graph.connect_default_terminal(
             composers.make_compose(_node1, _node2)
             + (
-                graph.make_edge(source=_node1, destination=_reducer_node, key="arg1"),
-                graph.make_edge(
+                graph.make_standard_edge(
+                    source=_node1, destination=_reducer_node, key="arg1"
+                ),
+                graph.make_standard_edge(
                     source=_next_int, destination=_reducer_node, key="cur_int"
                 ),
                 graph.make_future_edge(source=_next_int, destination=_next_int),
@@ -562,7 +591,7 @@ def test_optional_with_sometimes_unactionable_reducer():
             _sometimes_unactionable_reducer_node, default_value=None
         )
         + (
-            graph.make_edge(
+            graph.make_standard_edge(
                 source=_next_int,
                 destination=_sometimes_unactionable_reducer_node,
                 key="cur_int",
@@ -590,7 +619,7 @@ def test_curry_with_future_edge():
     edges = graph.connect_default_terminal(
         composers.make_first(_curried_stateful_node)
         + (
-            graph.make_edge(
+            graph.make_standard_edge(
                 source=_next_int, destination=_curried_stateful_node, key="cur_int"
             ),
             graph.make_future_edge(source=_next_int, destination=_next_int),
@@ -611,9 +640,15 @@ def test_curry_with_future_edge():
 def test_state_is_serializable():
     edges = graph.connect_default_terminal(
         (
-            graph.make_edge(source=_node1, destination=_reducer_node, key="arg1"),
-            graph.make_edge(source=_reducer_node, destination=_node2, key="arg1"),
-            graph.make_edge(source=_next_int, destination=_reducer_node, key="cur_int"),
+            graph.make_standard_edge(
+                source=_node1, destination=_reducer_node, key="arg1"
+            ),
+            graph.make_standard_edge(
+                source=_reducer_node, destination=_node2, key="arg1"
+            ),
+            graph.make_standard_edge(
+                source=_next_int, destination=_reducer_node, key="cur_int"
+            ),
             graph.make_future_edge(source=_next_int, destination=_next_int),
         )
     )
@@ -728,7 +763,7 @@ def test_two_terminals():
     """graph = node1 --> node2 --> DEFAULT_TERMINAL, node1 --> TERMINAL2"""
     edges = graph.connect_default_terminal(composers.make_compose(_node2, _node1))
     terminal2 = graph.make_terminal("TERMINAL2", gamla.wrap_tuple)
-    edges += (graph.make_edge(source=_node1, destination=terminal2),)
+    edges += (graph.make_standard_edge(source=_node1, destination=terminal2),)
     result = run.to_callable(edges, frozenset([_GraphTestError]))(arg1=_ROOT_VALUE)
     assert result.result[graph.DEFAULT_TERMINAL][0] == "node2(node1(root))"
     assert result.result[terminal2][0] == "node1(root)"
@@ -737,7 +772,7 @@ def test_two_terminals():
 def test_two_paths_succeed():
     edges = graph.connect_default_terminal(composers.make_first(_node2, _node1))
     terminal2 = graph.make_terminal("TERMINAL2", gamla.wrap_tuple)
-    edges += (graph.make_edge(source=_node1, destination=terminal2),)
+    edges += (graph.make_standard_edge(source=_node1, destination=terminal2),)
     result = run.to_callable(edges, frozenset([_GraphTestError]))(arg1=_ROOT_VALUE)
 
     assert result.result[graph.DEFAULT_TERMINAL][0] == "node2(root)"
@@ -810,7 +845,7 @@ def test_future_edges():
     edges = (
         composers.make_compose(plus_1, times_2)
         + composers.make_compose(multiply, plus_1, key="a")
-        + (graph.make_future_edge(times_2, multiply, key="b"),)
+        + (graph.make_future_edge(source=times_2, destination=multiply, key="b"),)
     )
     edges = graph.connect_default_terminal(edges)
     cg = run.to_callable(edges, frozenset([_GraphTestError]))
@@ -830,7 +865,7 @@ def test_sink_with_incoming_future_edge():
         return f"x={x}, y={y}"
 
     edges = composers.make_compose(g, f, key="x") + (
-        graph.make_future_edge(g, g, key="y"),
+        graph.make_future_edge(source=g, destination=g, key="y"),
     )
     assert graph.infer_graph_sink(edges) == graph.make_computation_node(g)
     assert _runner(edges, x=3) == "x=3, y=4"

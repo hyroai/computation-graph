@@ -96,11 +96,11 @@ def make_computation_node(func: _CallableOrNode) -> base_types.ComputationNode:
 
 @gamla.curry
 def make_edge(
+    is_future: bool,
+    priority: int,
     source: Union[_CallableOrNode, Tuple[_CallableOrNode, ...]],
     destination: _CallableOrNode,
     key: Optional[Text] = None,
-    priority: int = 0,
-    is_future: bool = False,
 ) -> base_types.ComputationEdge:
     destination_as_node = make_computation_node(destination)
     if isinstance(source, tuple):
@@ -123,7 +123,8 @@ def make_edge(
     )
 
 
-make_future_edge = make_edge(is_future=True)
+make_standard_edge = make_edge(is_future=False, priority=0)
+make_future_edge = make_edge(is_future=True, priority=0)
 
 
 def get_leaves(edges: base_types.GraphType) -> FrozenSet[base_types.ComputationNode]:
@@ -189,7 +190,11 @@ DEFAULT_TERMINAL = make_terminal("DEFAULT_TERMINAL", _aggregator_for_terminal)
 
 
 def connect_default_terminal(edges: base_types.GraphType) -> base_types.GraphType:
-    return edges + (make_edge((infer_graph_sink(edges),), DEFAULT_TERMINAL),)
+    return edges + (
+        make_standard_edge(
+            source=(infer_graph_sink(edges),), destination=DEFAULT_TERMINAL
+        ),
+    )
 
 
 remove_future_edges = opt_gamla.remove(gamla.attrgetter("is_future"))
