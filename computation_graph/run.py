@@ -212,20 +212,6 @@ def _get_computation_input(
     unbound_signature = _signature_difference(node.signature, bound_signature)
     results = gamla.pipe(
         values_for_edges_choice,
-        # opt_gamla.filter(
-        #     opt_gamla.anymap(
-        #         opt_gamla.compose_left(
-        #             gamla.last,
-        #             gamla.contains(
-        #                 opt_gamla.pipe(
-        #                     incoming_edges_no_future,
-        #                     gamla.mapcat(_get_edge_sources),
-        #                     frozenset,
-        #                 )
-        #             ),
-        #         )
-        #     )
-        # ),
         opt_gamla.maptuple(opt_gamla.maptuple(_choice_to_value)),
     )
 
@@ -542,20 +528,23 @@ def _edge_to_value_options(
     accumulated_outputs,
 ) -> Callable[[Iterable[base_types.ComputationEdge]], Iterable[Any]]:
     return opt_gamla.mapduct(
-        opt_gamla.compose_left(
-            _get_edge_sources,
-            opt_gamla.mapduct(
-                opt_gamla.compose_left(
-                    opt_gamla.pair_left(
-                        opt_gamla.compose_left(
-                            gamla.dict_to_getter_with_default(
-                                immutables.Map(), accumulated_outputs
-                            ),
-                            collections.abc.Mapping.items,
-                        )
-                    ),
-                    gamla.explode(0),
-                )
+        gamla.unless(
+            gamla.attrgetter("is_future"),
+            opt_gamla.compose_left(
+                _get_edge_sources,
+                opt_gamla.mapduct(
+                    opt_gamla.compose_left(
+                        opt_gamla.pair_left(
+                            opt_gamla.compose_left(
+                                gamla.dict_to_getter_with_default(
+                                    immutables.Map(), accumulated_outputs
+                                ),
+                                collections.abc.Mapping.items,
+                            )
+                        ),
+                        gamla.explode(0),
+                    )
+                ),
             ),
         )
     )
