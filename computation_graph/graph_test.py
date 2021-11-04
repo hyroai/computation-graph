@@ -39,7 +39,7 @@ def _node4(y, z=5):
 
 
 def _node_with_side_effect(arg1, side_effects, cur_int):
-    return f"node_with_side_effect(arg1={arg1},side_effects={side_effects}, state={cur_int + 1})"
+    return f"node_with_side_effect(arg1={arg1},side_effects={side_effects}, cur_int={cur_int + 1})"
 
 
 @gamla.curry
@@ -49,7 +49,7 @@ def _curried_node(arg1, arg2):
 
 @gamla.curry
 def _curried_stateful_node(arg1, arg2, cur_int):
-    return f"curried_stateful_node(arg1={arg1}, arg2={arg2}, state={cur_int + 1})"
+    return f"curried_stateful_node(arg1={arg1}, arg2={arg2}, cur_int={cur_int + 1})"
 
 
 def _unactionable_node(arg1):
@@ -70,6 +70,14 @@ def _node_with_optional_param(optional_param: int = 5):
     return f"node_with_optional_param(optional_param={optional_param})"
 
 
+def _node_with_state_as_arg(arg1, state):
+    if state is None:
+        state = 0
+    return base_types.ComputationResult(
+        result=arg1 + f" state={state + 1}", state=state + 1
+    )
+
+
 def _next_int(x):
     if x is None:
         return 0
@@ -77,7 +85,7 @@ def _next_int(x):
 
 
 def _reducer_node(arg1, cur_int):
-    return arg1 + f" state={cur_int + 1}"
+    return arg1 + f" cur_int={cur_int + 1}"
 
 
 def _sometimes_unactionable_reducer_node(arg1, cur_int):
@@ -143,6 +151,30 @@ def test_kwargs():
 def test_state():
     edges = graph.connect_default_terminal(
         (
+            graph.make_edge(_node1, _node_with_state_as_arg, key="arg1"),
+            graph.make_edge(_node_with_state_as_arg, _node2, key="arg1"),
+        )
+    )
+    cg = run.to_callable(edges, frozenset([_GraphTestError]))
+
+    result = cg(arg1=_ROOT_VALUE)
+    result = cg(arg1=_ROOT_VALUE, state=result.state)
+    result = cg(arg1=_ROOT_VALUE, state=result.state)
+
+    assert isinstance(result, base_types.ComputationResult)
+    assert (
+        dict(result.state)[
+            graph.edges_to_node_id_map(edges)[
+                graph.make_computation_node(_node_with_state_as_arg)
+            ]
+        ]
+        == 3
+    )
+
+
+def test_self_future_edge():
+    edges = graph.connect_default_terminal(
+        (
             graph.make_edge(source=_node1, destination=_reducer_node, key="arg1"),
             graph.make_edge(source=_reducer_node, destination=_node2, key="arg1"),
             graph.make_edge(source=_next_int, destination=_reducer_node, key="cur_int"),
@@ -155,7 +187,7 @@ def test_state():
     result = cg(arg1=_ROOT_VALUE, state=result.state)
     result = cg(arg1=_ROOT_VALUE, state=result.state)
     assert isinstance(result, base_types.ComputationResult)
-    assert result.result[graph.DEFAULT_TERMINAL][0] == "node2(node1(root) state=3)"
+    assert result.result[graph.DEFAULT_TERMINAL][0] == "node2(node1(root) cur_int=3)"
 
 
 def test_multiple_inputs():
@@ -181,7 +213,7 @@ def test_empty_result():
     assert not result.result
 
 
-def test_external_input_and_state():
+def test_external_input_and_future_edge():
     edges = graph.connect_default_terminal(
         (
             graph.make_edge(source=_node1, destination=_node2, key="arg1"),
@@ -203,7 +235,7 @@ def test_external_input_and_state():
 
     assert (
         result.result[graph.DEFAULT_TERMINAL][0]
-        == "node_with_side_effect(arg1=node2(node1(root)),side_effects=side_effects, state=3)"
+        == "node_with_side_effect(arg1=node2(node1(root)),side_effects=side_effects, cur_int=3)"
     )
 
 
@@ -239,7 +271,7 @@ def test_optional():
     assert result.result[graph.DEFAULT_TERMINAL][0] is None
 
 
-def test_optional_with_state():
+def test_optional_with_future_edge():
     edges = graph.connect_default_terminal(
         composers.make_optional(_reducer_node, default_value=None)
         + (
@@ -252,7 +284,7 @@ def test_optional_with_state():
     result = cg(arg1=_ROOT_VALUE)
     result = cg(arg1=_ROOT_VALUE, state=result.state)
     result = cg(arg1=_ROOT_VALUE, state=result.state)
-    assert result.result[graph.DEFAULT_TERMINAL][0] == "root state=3"
+    assert result.result[graph.DEFAULT_TERMINAL][0] == "root cur_int=3"
 
 
 def test_optional_default_value():
@@ -286,7 +318,7 @@ def test_first_all_unactionable():
     assert not result.result
 
 
-def test_first_with_state():
+def test_first_with_future_edge():
     cg = run.to_callable(
         graph.connect_default_terminal(
             composers.make_first(_unactionable_node, _reducer_node, _node1)
@@ -303,7 +335,7 @@ def test_first_with_state():
     result = cg(arg1=_ROOT_VALUE)
     result = cg(arg1=_ROOT_VALUE, state=result.state)
     result = cg(arg1=_ROOT_VALUE, state=result.state)
-    assert result.result[graph.DEFAULT_TERMINAL][0] == "root state=3"
+    assert result.result[graph.DEFAULT_TERMINAL][0] == "root cur_int=3"
 
 
 def test_and():
@@ -320,7 +352,7 @@ def test_and():
     result = cg(arg1=_ROOT_VALUE, state=result.state, side_effects="side_effects")
     assert (
         result.result[graph.DEFAULT_TERMINAL][0]
-        == "[root state=3,node2(root),node1(root)], side_effects=side_effects"
+        == "[root cur_int=3,node2(root),node1(root)], side_effects=side_effects"
     )
 
 
@@ -380,7 +412,7 @@ def test_or():
 
     assert (
         result.result[graph.DEFAULT_TERMINAL][0]
-        == "[root state=3,node2(root),node1(root)], side_effects=side_effects"
+        == "[root cur_int=3,node2(root),node1(root)], side_effects=side_effects"
     )
 
 
@@ -446,7 +478,7 @@ def test_compose():
     assert result.result[graph.DEFAULT_TERMINAL][0] == "node1(node2(root))"
 
 
-def test_compose_with_state():
+def test_compose_with_future_edge():
     cg = run.to_callable(
         graph.connect_default_terminal(
             composers.make_compose(_node1, _node2)
@@ -464,7 +496,7 @@ def test_compose_with_state():
     result = cg(arg1=_ROOT_VALUE)
     result = cg(arg1=_ROOT_VALUE, state=result.state)
     result = cg(arg1=_ROOT_VALUE, state=result.state)
-    assert result.result[graph.DEFAULT_TERMINAL][0] == "node1(node2(root)) state=3"
+    assert result.result[graph.DEFAULT_TERMINAL][0] == "node1(node2(root)) cur_int=3"
 
 
 def test_compose_with_partial():
@@ -554,7 +586,7 @@ def test_unary_graph_composition():
     assert result.result[graph.DEFAULT_TERMINAL][0] == "node1(node4(root, z=10))"
 
 
-def test_curry_with_state():
+def test_curry_with_future_edge():
     edges = graph.connect_default_terminal(
         composers.make_first(_curried_stateful_node)
         + (
@@ -572,7 +604,7 @@ def test_curry_with_state():
 
     assert (
         result.result[graph.DEFAULT_TERMINAL][0]
-        == "curried_stateful_node(arg1=root, arg2=arg2, state=3)"
+        == "curried_stateful_node(arg1=root, arg2=arg2, cur_int=3)"
     )
 
 
@@ -800,5 +832,5 @@ def test_sink_with_incoming_future_edge():
     edges = composers.make_compose(g, f, key="x") + (
         graph.make_future_edge(g, g, key="y"),
     )
-    assert graph.infer_graph_sink(edges).name == "g"
+    assert graph.infer_graph_sink(edges) == graph.make_computation_node(g)
     assert _runner(edges, x=3) == "x=3, y=4"

@@ -145,9 +145,7 @@ def get_leaves(edges: base_types.GraphType) -> FrozenSet[base_types.ComputationN
 
 def infer_graph_sink(edges: base_types.GraphType) -> base_types.ComputationNode:
     leaves = get_leaves(edges)
-    assert (
-        len(leaves) == 1
-    ), f"computation graph has more than one sink: {leaves}, {edges}"
+    assert len(leaves) == 1, f"computation graph has more than one sink: {leaves}"
     return gamla.head(leaves)
 
 
@@ -157,9 +155,7 @@ def infer_graph_sink_excluding_terminals(
     leaves = gamla.pipe(
         edges, get_leaves, gamla.remove(gamla.attrgetter("is_terminal")), tuple
     )
-    assert (
-        len(leaves) == 1
-    ), f"computation graph has more than one sink: {leaves}, {edges}"
+    assert len(leaves) == 1, f"computation graph has more than one sink: {leaves}"
     return gamla.head(leaves)
 
 

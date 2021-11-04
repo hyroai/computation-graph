@@ -564,9 +564,9 @@ _create_node_run_options = opt_gamla.compose_left(
                 gamla.head,
                 gamla.second,
                 opt_gamla.star(
-                    lambda _, edges, edge_to_value_options: opt_gamla.compose_left(
-                        graph.remove_future_edges, edge_to_value_options
-                    )(edges)
+                    lambda _, edges, edge_to_value_options: opt_gamla.pipe(
+                        edges, graph.remove_future_edges, edge_to_value_options
+                    )
                 ),
             ),
             gamla.explode(2),
