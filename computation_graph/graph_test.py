@@ -830,29 +830,42 @@ def test_named_composition_type_safety():
         composers.make_compose(g, f, key="x")
 
 
+def multiply(a, b):
+    if b:
+        return a * b
+    return a
+
+
+def plus_1(y):
+    return y + 1
+
+
+def times_2(x):
+    return x * 2
+
+
 def test_future_edges():
-    def times_2(x):
-        return x * 2
-
-    def plus_1(y):
-        return y + 1
-
-    def multiply(a, b):
-        if b:
-            return a * b
-        return a
-
-    edges = (
+    edges = graph.connect_default_terminal(
         composers.make_compose(plus_1, times_2)
         + composers.make_compose(multiply, plus_1, key="a")
         + (graph.make_future_edge(source=times_2, destination=multiply, key="b"),)
     )
-    edges = graph.connect_default_terminal(edges)
     cg = run.to_callable(edges, frozenset([_GraphTestError]))
 
     result = cg(x=3)
     assert result.result[graph.DEFAULT_TERMINAL][0] == 7
     assert cg(x=3, state=result.state).result[graph.DEFAULT_TERMINAL][0] == 42
+
+
+def test_future_edges_with_circuit():
+    edges = graph.connect_default_terminal(
+        composers.make_compose(plus_1, multiply)
+        + composers.make_compose(times_2, plus_1)
+        + (graph.make_future_edge(source=times_2, destination=multiply, key="b"),)
+    )
+    cg = run.to_callable(edges, frozenset([_GraphTestError]))
+    result = cg(a=3)
+    assert cg(a=3, state=result.state).result[graph.DEFAULT_TERMINAL][0] == 50
 
 
 def test_sink_with_incoming_future_edge():
