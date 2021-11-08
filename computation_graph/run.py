@@ -1,4 +1,5 @@
 import asyncio
+import collections
 import dataclasses
 import itertools
 import logging
@@ -204,18 +205,42 @@ def _get_computation_input(
     # For each edge, there are multiple values options, each having its own trace.
     values_for_edges_choice: Iterable[Iterable[_ChoiceOfOutputForNode]],
 ) -> base_types.ComputationInput:
-    bound_signature = _get_bound_signature(node.signature.is_args, incoming_edges)
+    incoming_edges_no_future = tuple(graph.remove_future_edges(incoming_edges))
+    bound_signature = _get_bound_signature(
+        node.signature.is_args, incoming_edges_no_future
+    )
     unbound_signature = _signature_difference(node.signature, bound_signature)
     results = gamla.pipe(
         values_for_edges_choice,
         opt_gamla.maptuple(opt_gamla.maptuple(_choice_to_value)),
     )
+
+    future_edges_kwargs = opt_gamla.pipe(
+        incoming_edges,
+        opt_gamla.filter(gamla.attrgetter("is_future")),
+        opt_gamla.map(
+            opt_gamla.juxt(
+                lambda edge: edge.key or edge.source.signature.kwargs[0],
+                opt_gamla.compose_left(
+                    gamla.attrgetter("source"), unbound_input, gamla.attrgetter("state")
+                ),
+            )
+        ),
+        dict,
+    )
+
     if node.signature.is_kwargs:
         assert (
             len(results) == 1
-        ), f"signature for {base_types.pretty_print_function_name(node.func)} contains `**kwargs`. This is considered unary, meaning one incoming edge, but we got more than one: {incoming_edges}."
+        ), f"signature for {base_types.pretty_print_function_name(node.func)} contains `**kwargs`. This is considered unary, meaning one incoming edge, but we got more than one: {incoming_edges_no_future}."
         return base_types.ComputationInput(
-            args=gamla.wrap_tuple(gamla.head(gamla.head(results)).result),
+            args=opt_gamla.pipe(
+                results,
+                gamla.head,
+                gamla.head,
+                gamla.attrgetter("result"),
+                gamla.wrap_tuple,
+            ),
             kwargs={},
             state=None,
         )
@@ -231,14 +256,15 @@ def _get_computation_input(
     ):
         return base_types.ComputationInput(
             args=(),
-            kwargs=_get_unary_computation_input(
+            kwargs=future_edges_kwargs
+            or _get_unary_computation_input(
                 node.signature.kwargs,
                 gamla.head(gamla.head(results)),
                 unbound_signature,
             ),
             state=unbound_input(node).state,
         )
-    edges_to_results = dict(zip(incoming_edges, results))
+    edges_to_results = dict(zip(incoming_edges_no_future, results))
     return base_types.ComputationInput(
         args=_get_args(
             edges_to_results, unbound_signature, bound_signature, unbound_input(node)
@@ -246,6 +272,7 @@ def _get_computation_input(
         kwargs={
             **_get_outer_kwargs(unbound_signature, unbound_input(node)),
             **_get_inner_kwargs(edges_to_results),
+            **future_edges_kwargs,
         },
         state=unbound_input(node).state,
     )
@@ -293,8 +320,11 @@ _decisions_from_value_choices = opt_gamla.compose_left(
 )
 
 
+@gamla.curry
 def _construct_computation_state(
-    results: _ResultToDecisionsType, sink_node: base_types.ComputationNode
+    edges: base_types.GraphType,
+    results: _ResultToDecisionsType,
+    sink_node: base_types.ComputationNode,
 ) -> Dict:
     first_result = gamla.head(results)
     return {
@@ -302,7 +332,23 @@ def _construct_computation_state(
         **opt_gamla.pipe(
             results,
             gamla.itemgetter(first_result),
-            opt_gamla.valmap(gamla.attrgetter("state")),
+            opt_gamla.juxt(
+                opt_gamla.valmap(gamla.attrgetter("state")),
+                gamla.compose_left(
+                    opt_gamla.valmap(gamla.attrgetter("result")),
+                    opt_gamla.keyfilter(
+                        gamla.contains(
+                            opt_gamla.pipe(
+                                edges,
+                                opt_gamla.filter(gamla.attrgetter("is_future")),
+                                gamla.map(gamla.attrgetter("source")),
+                                frozenset,
+                            )
+                        )
+                    ),
+                ),
+            ),
+            opt_gamla.merge,
         ),
     }
 
@@ -344,7 +390,9 @@ def _get_results_from_terminals(
 
 
 def _get_computation_state_from_terminals(
-    result_to_dependencies: Callable, edges_to_node_id: Callable
+    result_to_dependencies: Callable,
+    edges_to_node_id: Callable,
+    edges: base_types.GraphType,
 ) -> Callable[[Iterable[base_types.ComputationNode]], Dict]:
     return opt_gamla.compose_left(
         opt_gamla.map(
@@ -353,7 +401,7 @@ def _get_computation_state_from_terminals(
                 opt_gamla.ternary(
                     opt_gamla.compose_left(gamla.head, gamla.nonempty),
                     opt_gamla.compose_left(
-                        opt_gamla.star(_construct_computation_state),
+                        opt_gamla.star(_construct_computation_state(edges)),
                         opt_gamla.keymap(edges_to_node_id),
                     ),
                     gamla.just({}),
@@ -378,7 +426,7 @@ def _construct_computation_result(edges: base_types.GraphType, edges_to_node_id)
             opt_gamla.juxt(
                 _get_results_from_terminals(result_to_dependencies),
                 _get_computation_state_from_terminals(
-                    result_to_dependencies, edges_to_node_id
+                    result_to_dependencies, edges_to_node_id, edges
                 ),
             ),
         )
@@ -470,7 +518,9 @@ def _dag_layer_reduce(
 ) -> Callable[[base_types.GraphType], _IntermediaryResults]:
     """Directed acyclic graph reduction."""
     return gamla.compose_left(
-        _toposort_nodes, gamla.reduce_curried(f, immutables.Map())
+        graph.remove_future_edges,
+        _toposort_nodes,
+        gamla.reduce_curried(f, immutables.Map()),
     )
 
 
@@ -478,20 +528,23 @@ def _edge_to_value_options(
     accumulated_outputs,
 ) -> Callable[[Iterable[base_types.ComputationEdge]], Iterable[Any]]:
     return opt_gamla.mapduct(
-        opt_gamla.compose_left(
-            _get_edge_sources,
-            opt_gamla.mapduct(
-                opt_gamla.compose_left(
-                    opt_gamla.pair_left(
-                        opt_gamla.compose_left(
-                            gamla.dict_to_getter_with_default(
-                                immutables.Map(), accumulated_outputs
-                            ),
-                            dict.items,
-                        )
-                    ),
-                    gamla.explode(0),
-                )
+        gamla.unless(
+            gamla.attrgetter("is_future"),
+            opt_gamla.compose_left(
+                _get_edge_sources,
+                opt_gamla.mapduct(
+                    opt_gamla.compose_left(
+                        opt_gamla.pair_left(
+                            opt_gamla.compose_left(
+                                gamla.dict_to_getter_with_default(
+                                    immutables.Map(), accumulated_outputs
+                                ),
+                                collections.abc.Mapping.items,
+                            )
+                        ),
+                        gamla.explode(0),
+                    )
+                ),
             ),
         )
     )
@@ -503,7 +556,13 @@ _create_node_run_options = opt_gamla.compose_left(
     opt_gamla.mapcat(
         opt_gamla.compose_left(
             gamla.bifurcate(
-                gamla.head, gamla.second, opt_gamla.star(lambda _, y, z: z(y))
+                gamla.head,
+                gamla.second,
+                opt_gamla.star(
+                    lambda _, edges, edge_to_value_options: opt_gamla.pipe(
+                        edges, graph.remove_future_edges, edge_to_value_options
+                    )
+                ),
             ),
             gamla.explode(2),
         )

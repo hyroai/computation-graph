@@ -79,8 +79,8 @@ def make_and(funcs, merge_fn: Callable) -> base_types.GraphType:
                 gamla.map(_infer_sink),
                 tuple,
                 lambda nodes: (
-                    graph.make_edge(source=nodes, destination=merge_node),
-                    graph.make_edge(
+                    graph.make_standard_edge(source=nodes, destination=merge_node),
+                    graph.make_standard_edge(
                         source=merge_node,
                         destination=graph.make_computation_node(merge_fn),
                         key="args",
@@ -110,8 +110,8 @@ def make_or(funcs, merge_fn: Callable) -> base_types.GraphType:
                 gamla.map(_infer_sink),
                 tuple,
                 lambda sinks: (
-                    graph.make_edge(source=sinks, destination=filter_node),
-                    graph.make_edge(
+                    graph.make_standard_edge(source=sinks, destination=filter_node),
+                    graph.make_standard_edge(
                         source=filter_node, destination=merge_node, key="args"
                     ),
                 ),
@@ -137,10 +137,11 @@ def _add_first_edge(
 ) -> base_types.GraphType:
     return (
         graph.make_edge(
+            is_future=False,
+            priority=priority,
             source=_infer_sink(source),
             destination=destination,
             key=key,
-            priority=priority,
         ),
         *_get_edges_from_node_or_graph(source),
     )
@@ -184,7 +185,9 @@ def _infer_composition_edges(
         ), f"Cannot compose, destination signature does not contain key '{key}'"
 
         return (
-            graph.make_edge(_infer_sink(source), destination, key, 0),
+            graph.make_standard_edge(
+                source=_infer_sink(source), destination=destination, key=key
+            ),
             *_get_edges_from_node_or_graph(source),
         )
 
@@ -207,7 +210,7 @@ def _infer_composition_edges(
                 or node not in graph.get_all_nodes(source)
             ),
             gamla.map(
-                lambda node: graph.make_edge(
+                lambda node: graph.make_standard_edge(
                     source=_infer_sink(source), destination=node, key=key
                 )
             ),

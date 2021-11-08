@@ -4,6 +4,7 @@ from types import MappingProxyType
 from typing import Callable, FrozenSet, Optional, Text, Tuple, Union
 
 import gamla
+from gamla.optimized import sync as opt_gamla
 
 from computation_graph import base_types
 
@@ -93,11 +94,13 @@ def make_computation_node(func: _CallableOrNode) -> base_types.ComputationNode:
     )
 
 
+@gamla.curry
 def make_edge(
+    is_future: bool,
+    priority: int,
     source: Union[_CallableOrNode, Tuple[_CallableOrNode, ...]],
     destination: _CallableOrNode,
     key: Optional[Text] = None,
-    priority: int = 0,
 ) -> base_types.ComputationEdge:
     destination_as_node = make_computation_node(destination)
     if isinstance(source, tuple):
@@ -107,6 +110,7 @@ def make_edge(
             priority=priority,
             source=None,
             key=None,
+            is_future=is_future,
         )
 
     return base_types.ComputationEdge(
@@ -115,7 +119,12 @@ def make_edge(
         key=key,
         args=(),
         priority=priority,
+        is_future=is_future,
     )
+
+
+make_standard_edge = make_edge(is_future=False, priority=0)
+make_future_edge = make_edge(is_future=True, priority=0)
 
 
 def get_leaves(edges: base_types.GraphType) -> FrozenSet[base_types.ComputationNode]:
@@ -125,6 +134,7 @@ def get_leaves(edges: base_types.GraphType) -> FrozenSet[base_types.ComputationN
         gamla.remove(
             gamla.pipe(
                 edges,
+                remove_future_edges,
                 gamla.mapcat(lambda edge: (edge.source, *edge.args)),
                 frozenset,
                 gamla.contains,
@@ -180,4 +190,11 @@ DEFAULT_TERMINAL = make_terminal("DEFAULT_TERMINAL", _aggregator_for_terminal)
 
 
 def connect_default_terminal(edges: base_types.GraphType) -> base_types.GraphType:
-    return edges + (make_edge((infer_graph_sink(edges),), DEFAULT_TERMINAL),)
+    return edges + (
+        make_standard_edge(
+            source=(infer_graph_sink(edges),), destination=DEFAULT_TERMINAL
+        ),
+    )
+
+
+remove_future_edges = opt_gamla.remove(gamla.attrgetter("is_future"))

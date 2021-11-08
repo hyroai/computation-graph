@@ -54,8 +54,12 @@ class ComputationEdge:
     key: Optional[Text]
     source: Optional[ComputationNode]
     args: Tuple[ComputationNode, ...]
+    is_future: bool
 
     def __post_init__(self):
+        assert not (
+            self.is_future and self.source.is_stateful
+        ), "A future edge's source cannot be stateful, connect the source to itself with a future edge instead"
         assert (
             not (self.args) or not self.key
         ), f"Edge with `args` cannot have a `key`: {self.args} {self.key}"
@@ -80,7 +84,8 @@ class ComputationEdge:
         source_str = (
             "".join(map(str, self.args)) if self.source is None else str(self.source)
         )
-        return f"{source_str}----{self.key or ''}---->{self.destination}"
+        line = "...." if self.is_future else "----"
+        return source_str + line + (self.key or "") + line + ">" + str(self.destination)
 
 
 # We use a tuple to generate a unique id for each node based on the order of edges.
