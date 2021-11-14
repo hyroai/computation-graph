@@ -830,25 +830,25 @@ def test_named_composition_type_safety():
         composers.make_compose(g, f, key="x")
 
 
-def multiply(a, b):
+def _multiply(a, b):
     if b:
         return a * b
     return a
 
 
-def plus_1(y):
+def _plus_1(y):
     return y + 1
 
 
-def times_2(x):
+def _times_2(x):
     return x * 2
 
 
 def test_future_edges():
     edges = graph.connect_default_terminal(
-        composers.make_compose(plus_1, times_2)
-        + composers.make_compose(multiply, plus_1, key="a")
-        + (graph.make_future_edge(source=times_2, destination=multiply, key="b"),)
+        composers.make_compose(_plus_1, _times_2)
+        + composers.make_compose(_multiply, _plus_1, key="a")
+        + (graph.make_future_edge(source=_times_2, destination=_multiply, key="b"),)
     )
     cg = run.to_callable(edges, frozenset([_GraphTestError]))
 
@@ -859,9 +859,9 @@ def test_future_edges():
 
 def test_future_edges_with_circuit():
     edges = graph.connect_default_terminal(
-        composers.make_compose(plus_1, multiply)
-        + composers.make_compose(times_2, plus_1)
-        + (graph.make_future_edge(source=times_2, destination=multiply, key="b"),)
+        composers.make_compose(_plus_1, _multiply)
+        + composers.make_compose(_times_2, _plus_1)
+        + (graph.make_future_edge(source=_times_2, destination=_multiply, key="b"),)
     )
     cg = run.to_callable(edges, frozenset([_GraphTestError]))
     result = cg(a=3)
