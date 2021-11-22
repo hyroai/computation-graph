@@ -176,6 +176,7 @@ def make_first(*funcs: _ComposersInputType) -> base_types.GraphType:
 @gamla.curry
 def _infer_composition_edges(
     key: Optional[Text],
+    is_future: bool,
     source: _ComputationNodeOrGraphType,
     destination: _ComputationNodeOrGraphType,
 ) -> base_types.GraphType:
@@ -185,8 +186,12 @@ def _infer_composition_edges(
         ), f"Cannot compose, destination signature does not contain key '{key}'"
 
         return (
-            graph.make_standard_edge(
-                source=_infer_sink(source), destination=destination, key=key
+            graph.make_edge(
+                is_future=is_future,
+                priority=0,
+                source=_infer_sink(source),
+                destination=destination,
+                key=key,
             ),
             *_get_edges_from_node_or_graph(source),
         )
@@ -210,8 +215,12 @@ def _infer_composition_edges(
                 or node not in graph.get_all_nodes(source)
             ),
             gamla.map(
-                lambda node: graph.make_standard_edge(
-                    source=_infer_sink(source), destination=node, key=key
+                lambda node: graph.make_edge(
+                    is_future=is_future,
+                    priority=0,
+                    source=_infer_sink(source),
+                    destination=node,
+                    key=key,
                 )
             ),
             tuple,
@@ -228,7 +237,7 @@ def _infer_composition_edges(
 
 
 def make_compose(
-    *funcs: _ComposersInputType, key: Optional[Text] = None
+    *funcs: _ComposersInputType, key: Optional[Text] = None, is_future=False
 ) -> base_types.GraphType:
     assert (
         len(funcs) > 1
@@ -238,6 +247,6 @@ def make_compose(
         reversed,
         gamla.map(_callable_or_graph_type_to_node_or_graph_type),
         gamla.sliding_window(2),
-        gamla.mapcat(gamla.star(_infer_composition_edges(key))),
+        gamla.mapcat(gamla.star(_infer_composition_edges(key, is_future))),
         tuple,
     )
