@@ -31,6 +31,7 @@ def _handle_edge(pgv_graph, edge):
             hash(edge.source),
             hash(edge.destination),
             label=trace_utils.get_edge_label(edge),
+            style="dashed" if edge.is_future else "",
         )
     else:
         for source in edge.args:
