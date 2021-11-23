@@ -844,6 +844,10 @@ def _times_2(x):
     return x * 2
 
 
+def _sum(args):
+    return sum(args)
+
+
 def test_future_edges():
     edges = graph.connect_default_terminal(
         composers.make_compose(_plus_1, _times_2)
@@ -882,3 +886,17 @@ def test_sink_with_incoming_future_edge():
     )
     assert graph.infer_graph_sink(edges) == graph.make_computation_node(g)
     assert _runner(edges, x=3) == "x=3, y=4"
+
+
+def test_compose_future():
+    edges = composers.make_compose_future(
+        _multiply,
+        composers.make_and([_plus_1, _times_2, _multiply], merge_fn=_sum),
+        key="b",
+    )
+    edges = graph.connect_default_terminal(edges)
+    cg = run.to_callable(edges, frozenset([_GraphTestError]))
+    result = cg(a=2, x=2, y=2)
+    assert result.result[graph.DEFAULT_TERMINAL][0] == 9
+    result = cg(a=2, x=2, y=2, state=result.state)
+    assert result.result[graph.DEFAULT_TERMINAL][0] == 25
