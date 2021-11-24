@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any, Callable, Optional, Text, Union
+from typing import Any, Callable, Optional, Sequence, Text, Union
 
 import gamla
 from gamla.optimized import sync as opt_gamla
@@ -63,7 +63,9 @@ def make_optional(
     return make_first(func, graph.make_computation_node(return_default_value))
 
 
-def make_and(funcs, merge_fn: Callable) -> base_types.GraphType:
+def make_and(
+    funcs: Sequence[_ComposersInputType], merge_fn: _ComposersInputType
+) -> base_types.GraphType:
     def args_to_tuple(*args):
         return args
 
@@ -80,11 +82,7 @@ def make_and(funcs, merge_fn: Callable) -> base_types.GraphType:
                 tuple,
                 lambda nodes: (
                     graph.make_standard_edge(source=nodes, destination=merge_node),
-                    graph.make_standard_edge(
-                        source=merge_node,
-                        destination=graph.make_computation_node(merge_fn),
-                        key="args",
-                    ),
+                    *make_compose(merge_fn, merge_node, key="args"),
                 ),
             ),
         ),
@@ -92,14 +90,16 @@ def make_and(funcs, merge_fn: Callable) -> base_types.GraphType:
     )
 
 
-def make_or(funcs, merge_fn: Callable) -> base_types.GraphType:
+def make_or(
+    funcs: Sequence[_ComposersInputType], merge_fn: _ComposersInputType
+) -> base_types.GraphType:
     def filter_computation_errors(*args):
         return gamla.pipe(
             args, gamla.remove(gamla.is_instance(_ComputationError)), tuple
         )
 
     filter_node = graph.make_computation_node(filter_computation_errors)
-    merge_node = graph.make_computation_node(merge_fn)
+
     return gamla.pipe(
         funcs,
         gamla.map(make_optional(default_value=_ComputationError())),
@@ -111,9 +111,7 @@ def make_or(funcs, merge_fn: Callable) -> base_types.GraphType:
                 tuple,
                 lambda sinks: (
                     graph.make_standard_edge(source=sinks, destination=filter_node),
-                    graph.make_standard_edge(
-                        source=filter_node, destination=merge_node, key="args"
-                    ),
+                    *make_compose(merge_fn, filter_node, key="args"),
                 ),
             ),
         ),
@@ -122,7 +120,7 @@ def make_or(funcs, merge_fn: Callable) -> base_types.GraphType:
 
 
 def _infer_sink(
-    graph_or_node: Union[_ComputationNodeOrGraphType],
+    graph_or_node: _ComputationNodeOrGraphType,
 ) -> base_types.ComputationNode:
     if isinstance(graph_or_node, base_types.ComputationNode):
         return graph_or_node
