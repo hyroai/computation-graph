@@ -225,7 +225,7 @@ def _infer_composition_edges(
 
 
 def _make_compose_inner(
-    *funcs: _ComposersInputType, key: Optional[Text], is_future=False
+    *funcs: _ComposersInputType, key: Optional[Text], is_future
 ) -> base_types.GraphType:
     assert (
         len(funcs) > 1
