@@ -3,7 +3,7 @@ from __future__ import annotations
 import dataclasses
 import functools
 import typing
-from typing import Any, Callable, Dict, Optional, Text, Tuple
+from typing import Any, Callable, Dict, Optional, Tuple
 
 import gamla
 
@@ -51,7 +51,7 @@ class ComputationGraphTypeError(Exception):
 class ComputationEdge:
     destination: ComputationNode
     priority: int
-    key: Optional[Text]
+    key: Optional[str]
     source: Optional[ComputationNode]
     args: Tuple[ComputationNode, ...]
     is_future: bool
@@ -94,7 +94,7 @@ GraphType = Tuple[ComputationEdge, ...]
 
 @dataclasses.dataclass(frozen=True)
 class ComputationNode:
-    name: Text
+    name: str
     func: Callable
     signature: NodeSignature
     is_stateful: bool
@@ -111,7 +111,7 @@ class ComputationNode:
 
 @dataclasses.dataclass(frozen=True)
 class ComputationInput:
-    kwargs: Dict[Text, Any]
+    kwargs: Dict[str, Any]
     state: Any = None
     args: Tuple[Any, ...] = ()
 
@@ -119,8 +119,8 @@ class ComputationInput:
 @dataclasses.dataclass(frozen=True)
 class NodeSignature:
     is_args: bool
-    kwargs: Tuple[Text, ...]
-    optional_kwargs: Tuple[Text, ...]
+    kwargs: Tuple[str, ...]
+    optional_kwargs: Tuple[str, ...]
     is_kwargs: bool = False
 
 

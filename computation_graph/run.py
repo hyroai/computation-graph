@@ -7,7 +7,7 @@ import pathlib
 import sys
 import traceback
 import typing
-from typing import Any, Callable, Dict, FrozenSet, Iterable, Set, Text, Tuple, Type
+from typing import Any, Callable, Dict, FrozenSet, Iterable, Set, Tuple, Type
 
 import gamla
 import immutables
@@ -97,10 +97,10 @@ def _get_args(
 
 
 def _get_unary_computation_input(
-    kwargs: Tuple[Text, ...],
+    kwargs: Tuple[str, ...],
     value: base_types.ComputationResult,
     unbound_signature: base_types.NodeSignature,
-) -> Dict[Text, Any]:
+) -> Dict[str, Any]:
     return opt_gamla.pipe(
         unbound_signature.kwargs,
         opt_gamla.remove(
@@ -124,7 +124,7 @@ def _get_unary_computation_input(
 def _get_outer_kwargs(
     unbound_signature: base_types.NodeSignature,
     unbound_input: base_types.ComputationInput,
-) -> Dict[Text, Any]:
+) -> Dict[str, Any]:
     # Optimized because being called a lot.
     d = {}
     for kwarg in unbound_signature.kwargs:

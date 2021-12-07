@@ -1,4 +1,4 @@
-from typing import Callable, Iterable, Text, Tuple
+from typing import Callable, Iterable, Tuple
 from xml.sax import saxutils
 
 import gamla
@@ -93,7 +93,7 @@ union_graphviz: Callable[[Iterable[pgv.AGraph]], pgv.AGraph] = gamla.compose_lef
 )
 
 
-def _save_as_png(filename: Text) -> Callable[[pgv.AGraph], pgv.AGraph]:
+def _save_as_png(filename: str) -> Callable[[pgv.AGraph], pgv.AGraph]:
     return gamla.side_effect(lambda pgv_graph: pgv_graph.write(filename))
 
 

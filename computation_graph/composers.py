@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any, Callable, Optional, Sequence, Text, Union
+from typing import Any, Callable, Optional, Sequence, Union
 
 import gamla
 from gamla.optimized import sync as opt_gamla
@@ -130,7 +130,7 @@ def _infer_sink(
 def _add_first_edge(
     source: _ComputationNodeOrGraphType,
     destination: base_types.ComputationNode,
-    key: Text,
+    key: str,
     priority: int,
 ) -> base_types.GraphType:
     return (
@@ -173,7 +173,7 @@ def make_first(*funcs: _ComposersInputType) -> base_types.GraphType:
 
 @gamla.curry
 def _infer_composition_edges(
-    key: Optional[Text],
+    key: Optional[str],
     is_future: bool,
     source: _ComputationNodeOrGraphType,
     destination: _ComputationNodeOrGraphType,
@@ -225,7 +225,7 @@ def _infer_composition_edges(
 
 
 def _make_compose_inner(
-    *funcs: _ComposersInputType, key: Optional[Text], is_future
+    *funcs: _ComposersInputType, key: Optional[str], is_future
 ) -> base_types.GraphType:
     assert (
         len(funcs) > 1

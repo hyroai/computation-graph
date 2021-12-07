@@ -1,7 +1,7 @@
 import functools
 import inspect
 from types import MappingProxyType
-from typing import Callable, FrozenSet, Optional, Text, Tuple, Union
+from typing import Callable, FrozenSet, Optional, Tuple, Union
 
 import gamla
 from gamla.optimized import sync as opt_gamla
@@ -60,7 +60,7 @@ def _infer_callable_signature(function_parameters: Tuple) -> base_types.NodeSign
     )
 
 
-def _infer_callable_name(func: Callable) -> Text:
+def _infer_callable_name(func: Callable) -> str:
     if isinstance(func, functools.partial):
         return func.func.__name__
     return func.__name__
@@ -100,7 +100,7 @@ def make_edge(
     priority: int,
     source: Union[_CallableOrNode, Tuple[_CallableOrNode, ...]],
     destination: _CallableOrNode,
-    key: Optional[Text] = None,
+    key: Optional[str] = None,
 ) -> base_types.ComputationEdge:
     destination_as_node = make_computation_node(destination)
     if isinstance(source, tuple):
