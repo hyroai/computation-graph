@@ -241,12 +241,12 @@ def _make_compose_inner(
 
 
 def make_compose(
-    *funcs: _ComposersInputType, key: Optional[Text] = None
+    *funcs: _ComposersInputType, key: Optional[str] = None
 ) -> base_types.GraphType:
     return _make_compose_inner(*funcs, key=key, is_future=False)
 
 
 def make_compose_future(
-    *funcs: _ComposersInputType, key: Optional[Text] = None
+    destination: _ComposersInputType, source: _ComposersInputType, key: str
 ) -> base_types.GraphType:
-    return _make_compose_inner(*funcs, key=key, is_future=True)
+    return _make_compose_inner(destination, source, key=key, is_future=True)
