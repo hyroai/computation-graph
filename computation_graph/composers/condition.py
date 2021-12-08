@@ -36,7 +36,6 @@ def case(cases: Dict[Callable, Callable]) -> base_types.GraphType:
         cases,
         dict.items,
         gamla.map(gamla.star(lambda predicate, fn: require(predicate, fn))),
-        tuple,
         gamla.star(composers.make_first),
     )
 

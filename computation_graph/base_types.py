@@ -135,7 +135,7 @@ edge_destination = gamla.attrgetter("destination")
 edge_key = gamla.attrgetter("key")
 
 is_computation_graph = gamla.alljuxt(
-    # Note that this cannot be set to `GraphType` (is_instance limitation).
+    # Note that this cannot be set to `GraphType` (due to `is_instance` limitation).
     gamla.is_instance(tuple),
     gamla.allmap(gamla.is_instance(ComputationEdge)),
 )

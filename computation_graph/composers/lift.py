@@ -14,7 +14,9 @@ def always(x):
 
 
 def function_to_graph(f: Callable) -> base_types.GraphType:
-    return composers.compose_unary(gamla.identity, f)
+    # Note that the used identity function must be a new instance every time,
+    # so can't be replace with something like `gamla.identity`.
+    return composers.compose_unary(lambda x: x, f)
 
 
 any_to_graph = gamla.case_dict(
