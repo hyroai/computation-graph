@@ -5,7 +5,7 @@ import gamla
 import pygraphviz as pgv
 
 from computation_graph import base_types, graph
-from computation_graph.debug import trace_utils
+from computation_graph.trace import trace_utils
 
 
 def _get_node_shape(node: base_types.ComputationNode):

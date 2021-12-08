@@ -17,13 +17,15 @@ The runner will type check all outputs for nodes with return type annotations. I
 
 ### Debugging
 
-Available debuggers:
+#### Computation trace
+
+Available computation trace visualizers:
 
 1. `graphviz.computation_trace`
 1. `mermaid.computation_trace`
 1. `ascii.computation_trace`
 
-To use, replace `to_callable` with `run.to_callable_with_side_effect` with your selected debugger as the first argument.
+To use, replace `to_callable` with `run.to_callable_with_side_effect` with your selected style as the first argument.
 
 #### Graphviz debugger
 

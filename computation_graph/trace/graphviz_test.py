@@ -4,7 +4,7 @@ import pathlib
 import pygraphviz as pgv
 
 from computation_graph import composers, graph, run
-from computation_graph.debug import graphviz
+from computation_graph.trace import graphviz
 
 
 def test_computation_trace(tmp_path: pathlib.Path):

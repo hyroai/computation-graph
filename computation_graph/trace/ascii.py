@@ -3,7 +3,7 @@ from typing import Callable, Iterable, Tuple
 import gamla
 
 from computation_graph import base_types, graph
-from computation_graph.debug import trace_utils
+from computation_graph.trace import trace_utils
 
 _NodeTree = Tuple[base_types.ComputationNode, Tuple["_NodeTree", ...]]  # type: ignore
 _NodeAndResultTree = Tuple[  # type: ignore

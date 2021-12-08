@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any, Callable, Optional, Sequence, Union
+from typing import Any, Callable, Dict, Iterable, Optional, Sequence, Union
 
 import gamla
 from gamla.optimized import sync as opt_gamla
@@ -64,7 +64,7 @@ def make_optional(
 
 
 def make_and(
-    funcs: Sequence[_ComposersInputType], merge_fn: _ComposersInputType
+    funcs: Iterable[_ComposersInputType], merge_fn: _ComposersInputType
 ) -> base_types.GraphType:
     def args_to_tuple(*args):
         return args
@@ -171,6 +171,10 @@ def make_first(*funcs: _ComposersInputType) -> base_types.GraphType:
     )
 
 
+def last(*args) -> base_types.GraphType:
+    return make_first(*reversed(args))
+
+
 @gamla.curry
 def _infer_composition_edges(
     key: Optional[str],
@@ -246,7 +250,76 @@ def make_compose(
     return _make_compose_inner(*funcs, key=key, is_future=False)
 
 
+def compose_unary(*funcs: _ComposersInputType) -> base_types.GraphType:
+    return _make_compose_inner(*funcs, key=None, is_future=False)
+
+
 def make_compose_future(
     destination: _ComposersInputType, source: _ComposersInputType, key: str
 ) -> base_types.GraphType:
     return _make_compose_inner(destination, source, key=key, is_future=True)
+
+
+def compose_left(*args, key: Optional[str] = None) -> base_types.GraphType:
+    return make_compose(*reversed(args), key=key)
+
+
+def compose_left_future(
+    source: base_types.GraphOrCallable,
+    destination: base_types.GraphOrCallable,
+    key: str,
+) -> base_types.GraphType:
+    return make_compose_future(destination, source, key)
+
+
+def compose_left_unary(*args) -> base_types.GraphType:
+    return compose_unary(*reversed(args))
+
+
+@gamla.curry
+def compose_dict(f: base_types.GraphOrCallable, d: Dict) -> base_types.GraphType:
+    return gamla.pipe(
+        d,
+        dict.items,
+        gamla.map(gamla.star(lambda key, fn: make_compose(f, fn, key=key))),
+        gamla.star(base_types.merge_graphs),
+    )
+
+
+@gamla.curry
+def compose_left_dict(d: Dict, f: base_types.GraphOrCallable) -> base_types.GraphType:
+    return compose_dict(f, d)
+
+
+def make_raise_exception(exception):
+    def inner():
+        raise exception
+
+    return inner
+
+
+def side_effect(f):
+    def side_effect(g):
+        return compose_left_unary(g, gamla.side_effect(f))
+
+    return side_effect
+
+
+@gamla.curry
+def compose_many_to_one(
+    aggregation: Callable, graphs: Iterable[base_types.GraphOrCallable]
+):
+    return make_and(graphs, aggregation)
+
+
+@gamla.curry
+def aggregation(
+    aggregation: Callable[[Iterable], Any], graphs: Iterable[base_types.GraphOrCallable]
+) -> base_types.GraphType:
+    """Same as `compose_many_to_one`, but takes care to duplicate `aggregation`, and allows it to have any arg name."""
+    return make_and(
+        graphs,
+        # It is important that `aggregation` is duplicated here.
+        # If it weren't for the `compose_left` we would need to do it explcitly.
+        gamla.compose_left(lambda args: args, aggregation),
+    )

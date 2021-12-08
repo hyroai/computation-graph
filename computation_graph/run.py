@@ -653,7 +653,7 @@ def _make_runner(
             _process_node(is_async, _incoming_edge_options(edges)),
             _lift_single_runner_to_run_on_many_options(is_async),
             gamla.excepts(
-                (*handled_exceptions, _NotCoherent),
+                (*handled_exceptions, _NotCoherent, base_types.SkipComputationError),
                 opt_gamla.compose_left(type, _log_handled_exception, gamla.just(None)),
             ),
             single_node_runner,
