@@ -283,7 +283,7 @@ def compose_dict(f: base_types.GraphOrCallable, d: Dict) -> base_types.GraphType
         dict.items,
         gamla.map(gamla.star(lambda key, fn: make_compose(f, fn, key=key))),
         gamla.star(base_types.merge_graphs),
-    )
+    ) or compose_left_unary(f, lambda x: x)
 
 
 @gamla.curry
