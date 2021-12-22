@@ -76,17 +76,17 @@ def make_and(
         gamla.map(_callable_or_graph_type_to_node_or_graph_type),
         tuple,
         gamla.juxtcat(
-            gamla.mapcat(_get_edges_from_node_or_graph),
+            gamla.map(_get_edges_from_node_or_graph),
             gamla.compose_left(
                 gamla.map(_infer_sink),
                 tuple,
                 lambda nodes: (
-                    graph.make_standard_edge(source=nodes, destination=merge_node),
-                    *make_compose(merge_fn, merge_node, key="args"),
+                    (graph.make_standard_edge(source=nodes, destination=merge_node),),
+                    make_compose(merge_fn, merge_node, key="args"),
                 ),
             ),
         ),
-        tuple,
+        gamla.star(base_types.merge_graphs),
     )
 
 
@@ -104,18 +104,18 @@ def make_or(
         funcs,
         gamla.map(make_optional(default_value=_ComputationError())),
         tuple,
-        gamla.juxtcat(
-            gamla.concat,
+        gamla.pair_with(
             gamla.compose_left(
                 gamla.map(_infer_sink),
                 tuple,
                 lambda sinks: (
-                    graph.make_standard_edge(source=sinks, destination=filter_node),
-                    *make_compose(merge_fn, filter_node, key="args"),
+                    (graph.make_standard_edge(source=sinks, destination=filter_node),),
+                    make_compose(merge_fn, filter_node, key="args"),
                 ),
-            ),
+            )
         ),
-        tuple,
+        gamla.concat,
+        gamla.star(base_types.merge_graphs),
     )
 
 
@@ -133,15 +133,17 @@ def _add_first_edge(
     key: str,
     priority: int,
 ) -> base_types.GraphType:
-    return (
-        graph.make_edge(
-            is_future=False,
-            priority=priority,
-            source=_infer_sink(source),
-            destination=destination,
-            key=key,
+    return base_types.merge_graphs(
+        (
+            graph.make_edge(
+                is_future=False,
+                priority=priority,
+                source=_infer_sink(source),
+                destination=destination,
+                key=key,
+            ),
         ),
-        *_get_edges_from_node_or_graph(source),
+        _get_edges_from_node_or_graph(source),
     )
 
 
@@ -157,7 +159,7 @@ def make_first(*funcs: _ComposersInputType) -> base_types.GraphType:
         funcs,
         gamla.map(_callable_or_graph_type_to_node_or_graph_type),
         enumerate,
-        gamla.mapcat(
+        gamla.map(
             gamla.star(
                 lambda priority, node: _add_first_edge(
                     destination=first_node,
@@ -167,7 +169,7 @@ def make_first(*funcs: _ComposersInputType) -> base_types.GraphType:
                 )
             )
         ),
-        tuple,
+        gamla.star(base_types.merge_graphs),
     )
 
 
@@ -187,12 +189,12 @@ def _infer_composition_edges(
             key is None or key in destination.signature.kwargs
         ), f"Cannot compose, destination signature does not contain key '{key}'"
 
-        return (
-            graph.make_edge(is_future, 0, _infer_sink(source), destination, key),
-            *_get_edges_from_node_or_graph(source),
+        return base_types.merge_graphs(
+            (graph.make_edge(is_future, 0, _infer_sink(source), destination, key),),
+            _get_edges_from_node_or_graph(source),
         )
 
-    return (
+    return base_types.merge_graphs(
         gamla.pipe(
             destination,
             gamla.mapcat(graph.get_edge_nodes),
@@ -222,9 +224,9 @@ def _infer_composition_edges(
                     f"Cannot compose, destination signature does not contain key '{key}'"
                 ),
             ),
-        )
-        + destination
-        + _get_edges_from_node_or_graph(source)
+        ),
+        destination,
+        _get_edges_from_node_or_graph(source),
     )
 
 
@@ -239,8 +241,8 @@ def _make_compose_inner(
         reversed,
         gamla.map(_callable_or_graph_type_to_node_or_graph_type),
         gamla.sliding_window(2),
-        gamla.mapcat(gamla.star(_infer_composition_edges(key, is_future))),
-        tuple,
+        gamla.map(gamla.star(_infer_composition_edges(key, is_future))),
+        gamla.star(base_types.merge_graphs),
     )
 
 

@@ -96,7 +96,7 @@ class ComputationEdge:
 GraphType = Tuple[ComputationEdge, ...]
 GraphOrCallable = Union[Callable, GraphType]
 
-merge_graphs = gamla.compose_left(gamla.pack, gamla.concat, tuple)
+merge_graphs = gamla.compose_left(gamla.pack, gamla.concat, gamla.unique, tuple)
 
 
 @dataclasses.dataclass(frozen=True)
