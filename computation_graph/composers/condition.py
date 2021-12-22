@@ -51,26 +51,22 @@ def if_then_else(
     if_truthy: base_types.GraphOrCallable,
     if_falsy: base_types.GraphOrCallable,
 ) -> base_types.GraphType:
-    def if_then_else(args):
-        if args[0]:
-            return args[1]
-        return args[2]
+    def if_then_else(condition_value, true_value, false_value):
+        if condition_value:
+            return true_value
+        return false_value
 
-    return composers.make_and((condition, if_truthy, if_falsy), merge_fn=if_then_else)
+    return composers.compose_dict(
+        if_then_else,
+        {
+            "condition_value": condition,
+            "true_value": if_truthy,
+            "false_value": if_falsy,
+        },
+    )
 
 
 def require_or_default(default_value):
     return lambda condition, value: if_then_else(
         condition, value, lift.always(default_value)
-    )
-
-
-def lazy_if_else(
-    condition: base_types.GraphOrCallable,
-    do_if: base_types.GraphOrCallable,
-    do_else: base_types.GraphOrCallable,
-) -> base_types.GraphOrCallable:
-    """Guarantees an exception is thrown on exactly one path, to avoid increasing ambiguity."""
-    return composers.make_first(
-        require(condition, do_if), require(logic.complement(condition), do_else)
     )
