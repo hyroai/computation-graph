@@ -63,6 +63,16 @@ def make_optional(
     return make_first(func, graph.make_computation_node(return_default_value))
 
 
+@gamla.curry
+def _make_optional_ambig(
+    func: _ComposersInputType, default_value: Any
+) -> base_types.GraphType:
+    def return_default_value():
+        return default_value
+
+    return _ambig_first(func, graph.make_computation_node(return_default_value))
+
+
 def make_and(
     funcs: Iterable[_ComposersInputType], merge_fn: _ComposersInputType
 ) -> base_types.GraphType:
@@ -102,7 +112,7 @@ def make_or(
 
     return gamla.pipe(
         funcs,
-        gamla.map(make_optional(default_value=_ComputationError())),
+        gamla.map(_make_optional_ambig(default_value=_ComputationError())),
         tuple,
         gamla.pair_with(
             gamla.compose_left(
@@ -147,7 +157,38 @@ def _add_first_edge(
     )
 
 
-def make_first(*funcs: _ComposersInputType) -> base_types.GraphType:
+# DO NOT SUBMIT - duplicated
+def _require(
+    condition: base_types.GraphOrCallable, result: base_types.GraphOrCallable
+) -> base_types.GraphType:
+    def check(x):
+        if x:
+            return None
+        raise base_types.SkipComputationError
+
+    return make_and(
+        (compose_unary(check, condition), result), merge_fn=lambda args: args[1]
+    )
+
+
+def make_first(*graphs):
+    return gamla.pipe(
+        graphs,
+        enumerate,
+        gamla.map(
+            gamla.star(
+                lambda i, graph: _require(
+                    make_or(graphs[:i], lambda args: not args), graph
+                )
+                if i
+                else graph
+            )
+        ),
+        gamla.star(_ambig_first),
+    )
+
+
+def _ambig_first(*funcs: _ComposersInputType) -> base_types.GraphType:
     def first(first_input):
         return first_input
 
