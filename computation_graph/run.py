@@ -580,6 +580,7 @@ def _lift_single_runner_to_run_on_many_options(is_async: bool, f):
         _create_node_run_options,
         (opt_async_gamla.map if is_async else opt_gamla.map)(f),
         opt_gamla.filter(gamla.identity),
+        gamla.take(1),
         dict,
     )
 

@@ -81,7 +81,6 @@ _CallableOrNode = Union[Callable, base_types.ComputationNode]
 
 
 def make_computation_node(func: _CallableOrNode) -> base_types.ComputationNode:
-    assert func is not base_types.ComputationNode
     if isinstance(func, base_types.ComputationNode):
         return func
 
