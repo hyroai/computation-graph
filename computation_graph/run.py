@@ -3,9 +3,6 @@ import collections
 import dataclasses
 import itertools
 import logging
-import pathlib
-import sys
-import traceback
 import typing
 from typing import Any, Callable, Dict, FrozenSet, Iterable, Set, Tuple, Type
 
@@ -580,6 +577,7 @@ def _lift_single_runner_to_run_on_many_options(is_async: bool, f):
         _create_node_run_options,
         (opt_async_gamla.map if is_async else opt_gamla.map)(f),
         opt_gamla.filter(gamla.identity),
+        gamla.take(1),
         dict,
     )
 
@@ -654,7 +652,7 @@ def _make_runner(
             _lift_single_runner_to_run_on_many_options(is_async),
             gamla.excepts(
                 (*handled_exceptions, _NotCoherent, base_types.SkipComputationError),
-                opt_gamla.compose_left(type, _log_handled_exception, gamla.just(None)),
+                opt_gamla.compose_left(type, gamla.just(None)),
             ),
             single_node_runner,
             gamla.before(edges_to_node_id),
@@ -710,13 +708,3 @@ to_callable_with_side_effect = gamla.curry(
 # Use the second line if you want to see the winning path in the computation graph (a little slower).
 to_callable = to_callable_with_side_effect(gamla.just(gamla.just(None)))
 # to_callable = to_callable_with_side_effect(graphviz.computation_trace('utterance_computation.dot'))
-
-
-def _log_handled_exception(exception_type: Type[Exception]):
-    _, exception, exception_traceback = sys.exc_info()
-    filename, line_num, func_name, _ = traceback.extract_tb(exception_traceback)[-1]
-    reason = ""
-    if str(exception):
-        reason = f": {exception}"
-    code_location = f"{pathlib.Path(filename).name}:{line_num}"
-    logging.debug(f"'{func_name.strip('_')}' {exception_type}@{code_location}{reason}")

@@ -57,10 +57,7 @@ def _get_unbound_signature_for_single_node(
 def make_optional(
     func: _ComposersInputType, default_value: Any
 ) -> base_types.GraphType:
-    def return_default_value():
-        return default_value
-
-    return make_first(func, graph.make_computation_node(return_default_value))
+    return make_first(func, lambda: default_value)
 
 
 def make_and(
@@ -127,49 +124,31 @@ def _infer_sink(
     return graph.infer_graph_sink_excluding_terminals(graph_or_node)
 
 
-def _add_first_edge(
-    source: _ComputationNodeOrGraphType,
-    destination: base_types.ComputationNode,
-    key: str,
-    priority: int,
-) -> base_types.GraphType:
+def make_first(*graphs: _ComposersInputType) -> base_types.GraphType:
+    graph_or_nodes = tuple(map(_callable_or_graph_type_to_node_or_graph_type, graphs))
+
+    def first_sink(x):
+        return x
+
     return base_types.merge_graphs(
-        (
-            graph.make_edge(
-                is_future=False,
-                priority=priority,
-                source=_infer_sink(source),
-                destination=destination,
-                key=key,
-            ),
-        ),
-        _get_edges_from_node_or_graph(source),
-    )
-
-
-def make_first(*funcs: _ComposersInputType) -> base_types.GraphType:
-    def first(first_input):
-        return first_input
-
-    assert funcs, "Expected at least one function."
-
-    first_node = graph.make_computation_node(first)
-
-    return gamla.pipe(
-        funcs,
-        gamla.map(_callable_or_graph_type_to_node_or_graph_type),
-        enumerate,
-        gamla.map(
-            gamla.star(
-                lambda priority, node: _add_first_edge(
-                    destination=first_node,
-                    key="first_input",
-                    priority=priority,
-                    source=node,
+        *map(_get_edges_from_node_or_graph, graph_or_nodes),
+        gamla.pipe(
+            graph_or_nodes,
+            gamla.map(_infer_sink),
+            enumerate,
+            gamla.map(
+                gamla.star(
+                    lambda i, g: graph.make_edge(
+                        is_future=False,
+                        priority=i,
+                        source=g,
+                        destination=first_sink,
+                        key="x",
+                    )
                 )
-            )
+            ),
+            tuple,
         ),
-        gamla.star(base_types.merge_graphs),
     )
 
 
