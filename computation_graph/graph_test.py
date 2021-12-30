@@ -906,5 +906,8 @@ def test_unwanted_ambiguity_asserted():
     g = graph.make_standard_edge(
         source=_node1, destination=_node2, key="arg1"
     ), graph.make_standard_edge(source=_node1, destination=_node2)
-    with pytest.raises(AssertionError):
+    with pytest.raises(
+        AssertionError,
+        match="There are multiple edges with the same source, destination, and priority in the computation graph!",
+    ):
         _runner(g, arg1=_ROOT_VALUE)

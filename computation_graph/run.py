@@ -635,7 +635,6 @@ _is_graph_async = opt_gamla.compose_left(
 )
 
 
-# Check that there are no two edges with the same source, destination and args.
 _assert_no_unwanted_ambiguity = gamla.compose_left(
     gamla.groupby(
         gamla.juxt(
@@ -644,7 +643,12 @@ _assert_no_unwanted_ambiguity = gamla.compose_left(
             gamla.attrgetter("priority"),
         )
     ),
-    gamla.valmap(gamla.assert_that(gamla.len_smaller(2))),
+    gamla.valmap(
+        gamla.assert_that_with_message(
+            gamla.len_equals(1),
+            "There are multiple edges with the same source, destination, and priority in the computation graph!",
+        )
+    ),
 )
 
 
