@@ -635,6 +635,23 @@ _is_graph_async = opt_gamla.compose_left(
 )
 
 
+_assert_no_unwanted_ambiguity = gamla.compose_left(
+    gamla.groupby(
+        gamla.juxt(
+            _get_edge_sources,
+            gamla.attrgetter("destination"),
+            gamla.attrgetter("priority"),
+        )
+    ),
+    gamla.valmap(
+        gamla.assert_that_with_message(
+            gamla.len_equals(1),
+            "There are multiple edges with the same source, destination, and priority in the computation graph!",
+        )
+    ),
+)
+
+
 def _make_runner(
     single_node_runner,
     is_async,
@@ -671,7 +688,9 @@ def _to_callable_with_side_effect_for_single_and_multiple(
     edges: base_types.GraphType,
     handled_exceptions: FrozenSet[Type[Exception]],
 ) -> Callable:
-    edges = gamla.pipe(edges, gamla.unique, tuple)
+    edges = gamla.pipe(
+        edges, gamla.unique, tuple, gamla.side_effect(_assert_no_unwanted_ambiguity)
+    )
     edges_to_node_id = graph.edges_to_node_id_map(edges).__getitem__
     return gamla.compose_left(
         _make_outer_computation_input,
