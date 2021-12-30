@@ -635,10 +635,15 @@ _is_graph_async = opt_gamla.compose_left(
 )
 
 
-# Check that there are no two edges with the same destination and args.
+# Check that there are no two edges with the same source, destination and args.
 _assert_no_unwanted_ambiguity = gamla.compose_left(
-    gamla.filter(gamla.attrgetter("args")),
-    gamla.groupby(gamla.attrgetter("destination")),
+    gamla.groupby(
+        gamla.juxt(
+            _get_edge_sources,
+            gamla.attrgetter("destination"),
+            gamla.attrgetter("priority"),
+        )
+    ),
     gamla.valmap(gamla.assert_that(gamla.len_smaller(2))),
 )
 
