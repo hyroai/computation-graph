@@ -905,6 +905,6 @@ def test_compose_future():
 def test_unwanted_ambiguity_asserted():
     g = graph.make_standard_edge(
         source=_node1, destination=_node2, key="arg1"
-    ), graph.make_standard_edge(source=_node1, destination=_node2)
+    ), graph.make_standard_edge(source=_node3, destination=_node2, key="arg1")
     with pytest.raises(AssertionError):
-        _runner(g, arg1=_ROOT_VALUE)
+        _runner(g, arg1=_ROOT_VALUE, arg2=_ROOT_VALUE)

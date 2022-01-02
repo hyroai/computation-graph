@@ -638,15 +638,17 @@ _is_graph_async = opt_gamla.compose_left(
 _assert_no_unwanted_ambiguity = gamla.compose_left(
     gamla.groupby(
         gamla.juxt(
-            _get_edge_sources,
             gamla.attrgetter("destination"),
             gamla.attrgetter("priority"),
+            gamla.attrgetter("key"),
         )
     ),
     gamla.valmap(
         gamla.assert_that_with_message(
+            gamla.wrap_str(
+                "There are multiple edges with the same source, destination, and priority in the computation graph! {}"
+            ),
             gamla.len_equals(1),
-            "There are multiple edges with the same source, destination, and priority in the computation graph!",
         )
     ),
 )
