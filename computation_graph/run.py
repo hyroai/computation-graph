@@ -646,7 +646,9 @@ _assert_no_unwanted_ambiguity = gamla.compose_left(
     gamla.valmap(
         gamla.assert_that_with_message(
             gamla.len_equals(1),
-            "There are multiple edges with the same source, destination, and priority in the computation graph!",
+            gamla.just(
+                "There are multiple edges with the same source, destination, and priority in the computation graph!"
+            ),
         )
     ),
 )

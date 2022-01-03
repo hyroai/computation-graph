@@ -900,11 +900,3 @@ def test_compose_future():
     assert result.result[graph.DEFAULT_TERMINAL][0] == 9
     result = cg(a=2, x=2, y=2, state=result.state)
     assert result.result[graph.DEFAULT_TERMINAL][0] == 25
-
-
-def test_unwanted_ambiguity_asserted():
-    g = graph.make_standard_edge(
-        source=_node1, destination=_node2, key="arg1"
-    ), graph.make_standard_edge(source=_node1, destination=_node2)
-    with pytest.raises(AssertionError):
-        _runner(g, arg1=_ROOT_VALUE)
