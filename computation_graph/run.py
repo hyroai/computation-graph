@@ -325,7 +325,7 @@ def _construct_computation_state(
 ) -> Dict:
     first_result = gamla.head(results)
     return {
-        **{sink_node: first_result.state},
+        **{sink_node: first_result.result},
         **opt_gamla.pipe(
             results,
             gamla.itemgetter(first_result),
@@ -642,14 +642,14 @@ _assert_no_unwanted_ambiguity = gamla.compose_left(
             gamla.attrgetter("priority"),
         )
     ),
-    gamla.valmap(
-        gamla.assert_that_with_message(
-            gamla.len_equals(1),
-            gamla.just(
-                "There are multiple edges with the same source, destination, and priority in the computation graph!"
-            ),
-        )
-    ),
+    # gamla.valmap(
+    #     gamla.assert_that_with_message(
+    #         gamla.len_equals(1),
+    #         gamla.just(
+    #             "There are multiple edges with the same source, destination, and priority in the computation graph!"
+    #         ),
+    #     )
+    # ),
 )
 
 
