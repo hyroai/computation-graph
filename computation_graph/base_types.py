@@ -134,6 +134,11 @@ class NodeSignature:
 edge_destination = gamla.attrgetter("destination")
 edge_key = gamla.attrgetter("key")
 
+
+def edge_sources(edge: ComputationEdge) -> Tuple[ComputationNode, ...]:
+    return (edge.source and (edge.source,)) or edge.args
+
+
 is_computation_graph = gamla.alljuxt(
     # Note that this cannot be set to `GraphType` (due to `is_instance` limitation).
     gamla.is_instance(tuple),

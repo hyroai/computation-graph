@@ -28,14 +28,10 @@ def _transpose_graph(
     )
 
 
-def _get_edge_sources(edge: base_types.ComputationEdge):
-    return edge.args or (edge.source,)
-
-
 _toposort_nodes: Callable[
     [base_types.GraphType], Tuple[FrozenSet[base_types.ComputationNode], ...]
 ] = opt_gamla.compose_left(
-    opt_gamla.groupby_many(_get_edge_sources),
+    opt_gamla.groupby_many(base_types.edge_sources),
     opt_gamla.valmap(
         opt_gamla.compose_left(opt_gamla.map(base_types.edge_destination), set)
     ),
@@ -382,6 +378,7 @@ def _get_results_from_terminals(
             )
         ),
         dict,
+        opt_gamla.valfilter(gamla.identity),  # Only return terminals with results
     )
 
 
@@ -527,7 +524,7 @@ def _edge_to_value_options(
         gamla.unless(
             gamla.attrgetter("is_future"),
             opt_gamla.compose_left(
-                _get_edge_sources,
+                base_types.edge_sources,
                 opt_gamla.mapduct(
                     opt_gamla.compose_left(
                         opt_gamla.pair_left(
@@ -637,19 +634,19 @@ _is_graph_async = opt_gamla.compose_left(
 _assert_no_unwanted_ambiguity = gamla.compose_left(
     gamla.groupby(
         gamla.juxt(
-            _get_edge_sources,
+            base_types.edge_sources,
             gamla.attrgetter("destination"),
             gamla.attrgetter("priority"),
         )
     ),
-    # gamla.valmap(
-    #     gamla.assert_that_with_message(
-    #         gamla.len_equals(1),
-    #         gamla.just(
-    #             "There are multiple edges with the same source, destination, and priority in the computation graph!"
-    #         ),
-    #     )
-    # ),
+    gamla.valmap(
+        gamla.assert_that_with_message(
+            gamla.len_equals(1),
+            gamla.just(
+                "There are multiple edges with the same source, destination, and priority in the computation graph!"
+            ),
+        )
+    ),
 )
 
 
