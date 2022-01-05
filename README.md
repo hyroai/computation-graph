@@ -1,6 +1,6 @@
 [![Build Status](https://travis-ci.com/hyroai/computation-graph.svg?branch=master)](https://travis-ci.com/hyroai/computation-graph)
 
-A functional composition framework that supports:
+A function composition framework that supports:
 
 1. State - functions which retain state for their next turn of action.
 2. Prioritized paths - lazily attempt overloaded composition paths according to priorities.
