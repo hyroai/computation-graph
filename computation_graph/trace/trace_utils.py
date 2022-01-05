@@ -5,6 +5,7 @@ import gamla
 from computation_graph import base_types
 
 
+@gamla.curry
 def node_computation_trace(
     node_to_results: Callable, node: base_types.ComputationNode
 ) -> FrozenSet[Tuple[base_types.ComputationNode, base_types.ComputationResult]]:

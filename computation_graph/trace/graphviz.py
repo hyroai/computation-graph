@@ -125,10 +125,15 @@ def computation_trace(
     gviz = union_graphviz(
         [
             computation_graph_to_graphviz(graph_instance),
-            computation_trace_to_graphviz(
-                trace_utils.node_computation_trace(
-                    node_to_results, graph.infer_graph_sink(graph_instance)
-                )
+            *gamla.pipe(
+                graph_instance,
+                graph.get_leaves,
+                gamla.map(
+                    gamla.compose_left(
+                        trace_utils.node_computation_trace(node_to_results),
+                        computation_trace_to_graphviz,
+                    )
+                ),
             ),
         ]
     )
