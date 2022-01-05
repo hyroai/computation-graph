@@ -134,7 +134,6 @@ def computation_trace(
                         computation_trace_to_graphviz,
                     )
                 ),
-                list,
             ),
         ]
     )
