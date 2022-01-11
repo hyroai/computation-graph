@@ -166,6 +166,7 @@ get_incoming_edges_for_node = gamla.compose_left(
 )
 
 
+@gamla.curry
 def make_terminal(name: str, func: Callable):
     return base_types.ComputationNode(
         name=name,

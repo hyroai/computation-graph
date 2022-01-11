@@ -382,7 +382,6 @@ def _get_results_from_terminals(
             )
         ),
         dict,
-        opt_gamla.valfilter(gamla.identity),  # Only return terminals with results
     )
 
 
