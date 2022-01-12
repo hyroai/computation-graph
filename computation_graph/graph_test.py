@@ -228,8 +228,9 @@ def test_empty_result():
             ),
         )
     )
-    result = run.to_callable(edges, frozenset([_GraphTestError]))(arg1=_ROOT_VALUE)
-    assert not result.result
+    assert run.to_callable(edges, frozenset([_GraphTestError]))(
+        arg1=_ROOT_VALUE
+    ).result == {graph.DEFAULT_TERMINAL: {}}
 
 
 def test_external_input_and_future_edge():
@@ -336,7 +337,7 @@ def test_first_all_unactionable():
         frozenset([_GraphTestError]),
     )
     result = cg(arg1=_ROOT_VALUE)
-    assert not result.result
+    assert result.result == {graph.DEFAULT_TERMINAL: {}}
 
 
 def test_first_with_future_edge():
@@ -410,8 +411,9 @@ def test_and_with_unactionable():
             graph.make_future_edge(source=_next_int, destination=_next_int),
         )
     )
-    result = run.to_callable(edges, frozenset([_GraphTestError]))(arg1=_ROOT_VALUE)
-    assert not result.result
+    assert run.to_callable(edges, frozenset([_GraphTestError]))(
+        arg1=_ROOT_VALUE
+    ).result == {graph.DEFAULT_TERMINAL: {}}
 
 
 def test_or():
