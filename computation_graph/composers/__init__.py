@@ -183,7 +183,7 @@ def _infer_composition_edges(
                     _get_unbound_signature_for_single_node(
                         graph.get_incoming_edges_for_node(destination)
                     ),
-                    lambda signature: key in signature.kwargs,
+                    lambda signature: key in signature.kwargs or key is None and len(signature.kwargs) == 1,
                 )
             ),
             # Do not add edges to nodes from source that are already present in destination (cycle).
