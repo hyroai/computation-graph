@@ -114,7 +114,7 @@ def _unary_graph_with_state(
         prev = {}
         for turn in turns:
             prev = f({real_source: turn, **prev})
-        return prev[sink]
+        return prev[graph.make_computation_node(sink)]
 
     return inner
 
@@ -182,7 +182,7 @@ def test_state():
         _node1,
         _node2,
     )
-    assert f(_ROOT_VALUE, _ROOT_VALUE, _ROOT_VALUE) == 3
+    assert f(_ROOT_VALUE, _ROOT_VALUE, _ROOT_VALUE) == "node2(node1(root) state=3)"
 
 
 def test_self_future_edge():
