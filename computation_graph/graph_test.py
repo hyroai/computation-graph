@@ -94,7 +94,7 @@ def _sometimes_unactionable_reducer_node(arg1, cur_int):
     return arg1 + f" state={cur_int + 1}"
 
 
-def _helper(g, source, sink):
+def _unary_graph(g, source, sink):
     real_source = graph.make_source()
     return gamla.compose(
         gamla.itemgetter(graph.make_computation_node(sink)),
@@ -107,17 +107,27 @@ def _helper(g, source, sink):
     )
 
 
+def _nullary_graph(g, sink):
+    return gamla.compose(
+        gamla.itemgetter(graph.make_computation_node(sink)),
+        run.to_callable_strict(g),
+        gamla.just({}),
+    )()
+
+
 def test_simple():
     for v in ["root", None]:
         assert (
-            _helper(composers.compose_left_unary(_node1, _node2), _node1, _node2)(v)
+            _unary_graph(composers.compose_left_unary(_node1, _node2), _node1, _node2)(
+                v
+            )
             == f"node2(node1({v}))"
         )
 
 
 async def test_simple_async():
     assert (
-        await _helper(
+        await _unary_graph(
             composers.compose_left_unary(_node1_async, _node2), _node1_async, _node2
         )("hi")
         == "node2(node1(hi))"
@@ -773,23 +783,20 @@ def test_two_paths_succeed():
 
 
 def test_double_star_signature_considered_unary():
-    assert _helper(
-        composers.make_compose(
-            gamla.juxt(
-                lambda some_argname: some_argname + 1,
-                lambda different_argname: different_argname * 2,
-            ),
-            lambda: 3,
-        ),
-        arg1=_ROOT_VALUE,
-    ) == (4, 6)
+    sink = gamla.juxt(
+        lambda some_argname: some_argname + 1,
+        lambda different_argname: different_argname * 2,
+    )
+    assert _nullary_graph(composers.make_compose(sink, lambda: 3), sink) == (4, 6)
 
 
 def test_type_safety_messages(caplog):
     def f(x) -> int:  # Bad typing!
         return "hello " + x
 
-    assert _helper(composers.make_compose(f, lambda: "world")) == "hello world"
+    assert (
+        _nullary_graph(composers.make_compose(f, lambda: "world"), f) == "hello world"
+    )
     assert "TypeError" in caplog.text
 
 
@@ -797,7 +804,9 @@ def test_type_safety_messages_no_overtrigger(caplog):
     def f(x) -> str:
         return "hello " + x
 
-    assert _helper(composers.make_compose(f, lambda: "world")) == "hello world"
+    assert (
+        _nullary_graph(composers.make_compose(f, lambda: "world"), f) == "hello world"
+    )
     assert "TypeError" not in caplog.text
 
 
@@ -878,7 +887,7 @@ def test_sink_with_incoming_future_edge():
         graph.make_future_edge(source=g, destination=g, key="y"),
     )
     assert graph.infer_graph_sink(edges) == graph.make_computation_node(g)
-    assert _helper(edges, x=3) == "x=3, y=4"
+    assert _unary_graph(edges, x=3) == "x=3, y=4"
 
 
 def test_compose_future():
