@@ -131,11 +131,25 @@ class NodeSignature:
     is_kwargs: bool = False
 
 
+edge_args = gamla.attrgetter("args")
 edge_destination = gamla.attrgetter("destination")
 edge_key = gamla.attrgetter("key")
+edge_priority = gamla.attrgetter("priority")
+edge_source = gamla.attrgetter("source")
 
 is_computation_graph = gamla.alljuxt(
     # Note that this cannot be set to `GraphType` (due to `is_instance` limitation).
     gamla.is_instance(tuple),
     gamla.allmap(gamla.is_instance(ComputationEdge)),
 )
+
+
+ambiguity_groups = gamla.compose(
+    frozenset,
+    gamla.filter(gamla.len_greater(1)),
+    dict.values,
+    gamla.groupby(gamla.juxt(edge_destination, edge_key, edge_priority)),
+)
+
+
+EMPTY_GRAPH = ()
