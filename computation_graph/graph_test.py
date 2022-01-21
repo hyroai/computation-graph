@@ -5,7 +5,7 @@ import json
 import gamla
 import pytest
 
-from computation_graph import base_types, composers, graph, run
+from computation_graph import base_types, composers, graph, legacy, run
 
 pytestmark = pytest.mark.asyncio
 
@@ -68,14 +68,6 @@ def _merger_that_raises_when_empty(args):
 
 def _node_with_optional_param(optional_param: int = 5):
     return f"node_with_optional_param(optional_param={optional_param})"
-
-
-def _node_with_state_as_arg(arg1, state):
-    if state is None:
-        state = 0
-    return base_types.ComputationResult(
-        result=arg1 + f" state={state + 1}", state=state + 1
-    )
 
 
 def _next_int(x):
@@ -153,32 +145,27 @@ def test_kwargs():
     )
 
 
+@legacy.handle_state
+def _node_with_state_as_arg(x, state):
+    if state is None:
+        state = 0
+    return legacy.LegacyComputationResult(
+        result=x + f" state={state + 1}", state=state + 1
+    )
+
+
 def test_state():
     edges = graph.connect_default_terminal(
-        (
-            graph.make_standard_edge(
-                source=_node1, destination=_node_with_state_as_arg, key="arg1"
-            ),
-            graph.make_standard_edge(
-                source=_node_with_state_as_arg, destination=_node2, key="arg1"
-            ),
+        base_types.merge_graphs(
+            composers.compose_left(_node1, _node_with_state_as_arg, key="x"),
+            composers.compose_left_unary(_node_with_state_as_arg, _node2),
         )
     )
     cg = run.to_callable(edges, frozenset([_GraphTestError]))
-
     result = cg(arg1=_ROOT_VALUE)
     result = cg(arg1=_ROOT_VALUE, state=result.state)
     result = cg(arg1=_ROOT_VALUE, state=result.state)
-
-    assert isinstance(result, base_types.ComputationResult)
-    assert (
-        dict(result.state)[
-            graph.edges_to_node_id_map(edges)[
-                graph.make_computation_node(_node_with_state_as_arg)
-            ]
-        ]
-        == 3
-    )
+    assert result.result[graph.DEFAULT_TERMINAL][0] == "node2(node1(root)) state=3"
 
 
 def test_self_future_edge():

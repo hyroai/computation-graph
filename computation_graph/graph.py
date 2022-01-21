@@ -192,7 +192,8 @@ DEFAULT_TERMINAL = make_terminal("DEFAULT_TERMINAL", _aggregator_for_terminal)
 def connect_default_terminal(edges: base_types.GraphType) -> base_types.GraphType:
     return edges + (
         make_standard_edge(
-            source=(infer_graph_sink(edges),), destination=DEFAULT_TERMINAL
+            source=(infer_graph_sink_excluding_terminals(edges),),
+            destination=DEFAULT_TERMINAL,
         ),
     )
 
