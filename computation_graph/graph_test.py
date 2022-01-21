@@ -146,12 +146,10 @@ def test_kwargs():
 
 
 @legacy.handle_state
-def _node_with_state_as_arg(x, state):
-    if state is None:
-        state = 0
-    return legacy.LegacyComputationResult(
-        result=x + f" state={state + 1}", state=state + 1
-    )
+def _node_with_state_as_arg(x, s):
+    if s is None:
+        s = 0
+    return legacy.LegacyComputationResult(result=x + f" state={s + 1}", state=s + 1)
 
 
 def test_state():
