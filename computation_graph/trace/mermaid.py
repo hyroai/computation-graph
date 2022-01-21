@@ -14,9 +14,7 @@ def _clean_for_mermaid_name(obj):
 @gamla.star
 def _render_mermaid_node(node, result):
     node_id = hash(node)
-    pretty_name = " ".join(
-        map(_clean_for_mermaid_name, [node, result.result, result.state])
-    )[:100]
+    pretty_name = " ".join(map(_clean_for_mermaid_name, [node, result]))[:100]
     return f'{node_id}("{pretty_name}")'
 
 

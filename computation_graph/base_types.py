@@ -3,15 +3,11 @@ from __future__ import annotations
 import dataclasses
 import functools
 import typing
-from typing import Any, Callable, Dict, Optional, Tuple, Union
+from typing import Any, Callable, Dict, Hashable, Optional, Tuple, Union
 
 import gamla
 
-
-@dataclasses.dataclass(frozen=True)
-class ComputationResult:
-    result: Any
-    state: Any
+Result = Hashable
 
 
 def pretty_print_function_name(f: Callable) -> str:
@@ -61,9 +57,6 @@ class ComputationEdge:
     is_future: bool
 
     def __post_init__(self):
-        assert not (
-            self.is_future and self.source.is_stateful
-        ), "A future edge's source cannot be stateful, connect the source to itself with a future edge instead"
         assert (
             not (self.args) or not self.key
         ), f"Edge with `args` cannot have a `key`: {self.args} {self.key}"
@@ -75,9 +68,6 @@ class ComputationEdge:
             # TODO(uri): doesn't support `functools.partial`, suggested to drop support for it entirely.
             and not isinstance(self.source.func, functools.partial)
             and not isinstance(self.destination.func, functools.partial)
-            # TODO(uri): Remove `ComputationResult` for more powerful type checks.
-            and typing.get_type_hints(self.source.func).get("return")
-            is not ComputationResult
         ):
             if not gamla.composable(self.destination.func, self.source.func, self.key):
                 raise ComputationGraphTypeError(
@@ -104,8 +94,7 @@ class ComputationNode:
     name: str
     func: Callable
     signature: NodeSignature
-    is_stateful: bool
-    is_terminal: bool
+    is_terminal: bool  # TODO(uri): remove
 
     def __hash__(self):
         if self.is_terminal:
@@ -119,7 +108,6 @@ class ComputationNode:
 @dataclasses.dataclass(frozen=True)
 class ComputationInput:
     kwargs: Dict[str, Any]
-    state: Any = None
     args: Tuple[Any, ...] = ()
 
 

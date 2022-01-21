@@ -94,26 +94,16 @@ def _sometimes_unactionable_reducer_node(arg1, cur_int):
     return arg1 + f" state={cur_int + 1}"
 
 
-def _runner(edges: base_types.GraphType, **kwargs):
-    return run.to_callable(
-        graph.connect_default_terminal(edges), frozenset([_GraphTestError])
-    )(**kwargs).result[graph.DEFAULT_TERMINAL][0]
-
-
 def test_simple():
-    result = _runner(
-        (graph.make_standard_edge(source=_node1, destination=_node2, key="arg1"),),
-        arg1=_ROOT_VALUE,
-    )
-    assert result == f"node2(node1({_ROOT_VALUE}))"
-
-
-def test_none_as_input():
-    result = _runner(
-        (graph.make_standard_edge(source=_node1, destination=_node2, key="arg1"),),
-        arg1=None,
-    )
-    assert result == "node2(node1(None))"
+    for v in ["root", None]:
+        source = graph.make_source()
+        result = run.to_callable_strict(
+            base_types.merge_graphs(
+                composers.compose_left_unary(_node1, _node2),
+                composers.compose_left_future(source, _node1, "arg1"),
+            )
+        )({source: v})
+        assert result[graph.make_computation_node(_node2)] == f"node2(node1({v}))"
 
 
 async def test_simple_async():

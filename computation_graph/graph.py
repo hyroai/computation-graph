@@ -13,10 +13,6 @@ def get_all_nodes(edges: base_types.GraphType) -> FrozenSet[base_types.Computati
     return gamla.pipe(edges, gamla.mapcat(get_edge_nodes), gamla.unique, frozenset)
 
 
-def _is_reducer_type(node: Callable) -> bool:
-    return "state" in inspect.signature(node).parameters
-
-
 def _is_star(parameter) -> bool:
     return "*" + parameter.name == str(parameter)
 
@@ -87,7 +83,6 @@ def make_computation_node(func: _CallableOrNode) -> base_types.ComputationNode:
     return base_types.ComputationNode(
         name=_infer_callable_name(func),
         func=func,
-        is_stateful=_is_reducer_type(func),
         signature=_infer_callable_signature(func),
         is_terminal=False,
     )
@@ -166,35 +161,16 @@ get_incoming_edges_for_node = gamla.compose_left(
 )
 
 
-@gamla.curry
-def make_terminal(name: str, func: Callable):
-    return base_types.ComputationNode(
-        name=name,
-        func=func,
-        signature=_infer_callable_signature(func),
-        is_stateful=False,
-        is_terminal=True,
-    )
-
-
 get_terminals = gamla.compose_left(
     get_all_nodes, gamla.filter(gamla.attrgetter("is_terminal")), tuple
 )
 
 
-def _aggregator_for_terminal(*args):
-    return tuple(args)
-
-
-DEFAULT_TERMINAL = make_terminal("DEFAULT_TERMINAL", _aggregator_for_terminal)
-
-
-def connect_default_terminal(edges: base_types.GraphType) -> base_types.GraphType:
-    return edges + (
-        make_standard_edge(
-            source=(infer_graph_sink(edges),), destination=DEFAULT_TERMINAL
-        ),
-    )
-
-
 remove_future_edges = opt_gamla.remove(gamla.attrgetter("is_future"))
+
+
+def make_source():
+    def source():
+        raise NotImplementedError
+
+    return make_computation_node(source)

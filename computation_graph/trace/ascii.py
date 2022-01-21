@@ -8,14 +8,14 @@ from computation_graph.trace import trace_utils
 _NodeTree = Tuple[base_types.ComputationNode, Tuple["_NodeTree", ...]]  # type: ignore
 _NodeAndResultTree = Tuple[  # type: ignore
     base_types.ComputationNode,
-    base_types.ComputationResult,
+    base_types.Result,
     Tuple["_NodeAndResultTree", ...],  # type: ignore
 ]
 
 
 @gamla.curry
 def _process_node(
-    node_to_result: Callable[[_NodeTree], base_types.ComputationResult],
+    node_to_result: Callable[[_NodeTree], base_types.Result],
     source_and_destination_to_edges: Callable[
         [Tuple[base_types.ComputationNode, base_types.ComputationNode]],
         Iterable[base_types.ComputationEdge],
@@ -110,11 +110,7 @@ def computation_trace(graph_instance: base_types.GraphType):
             gamla.tree_reduce(
                 gamla.nth(1),
                 _process_node(
-                    gamla.compose_left(
-                        gamla.head,
-                        node_to_result,
-                        gamla.unless(gamla.equals(None), gamla.attrgetter("result")),
-                    ),
+                    gamla.compose_left(gamla.head, node_to_result),
                     source_and_destination_to_edges,
                 ),
             ),

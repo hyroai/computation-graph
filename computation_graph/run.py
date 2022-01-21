@@ -1,6 +1,4 @@
 import asyncio
-import collections
-import dataclasses
 import itertools
 import logging
 import typing
@@ -14,10 +12,6 @@ from gamla.optimized import async_functions as opt_async_gamla
 from gamla.optimized import sync as opt_gamla
 
 from computation_graph import base_types, graph
-
-
-class _ComputationGraphException(Exception):
-    pass
 
 
 def _transpose_graph(
@@ -35,6 +29,7 @@ def _get_edge_sources(edge: base_types.ComputationEdge):
 _toposort_nodes: Callable[
     [base_types.GraphType], Tuple[FrozenSet[base_types.ComputationNode], ...]
 ] = opt_gamla.compose_left(
+    graph.remove_future_edges,
     opt_gamla.groupby_many(_get_edge_sources),
     opt_gamla.valmap(
         opt_gamla.compose_left(opt_gamla.map(base_types.edge_destination), set)
@@ -44,17 +39,6 @@ _toposort_nodes: Callable[
     opt_gamla.map(frozenset),
     tuple,
 )
-
-
-def _make_outer_computation_input(*args, **kwargs) -> base_types.ComputationInput:
-    if "state" in kwargs:
-        return base_types.ComputationInput(
-            args=args,
-            kwargs=gamla.remove_key("state")(kwargs),
-            state=dict(kwargs["state"] or {}),
-        )
-
-    return base_types.ComputationInput(args=args, kwargs=kwargs)
 
 
 _incoming_edge_options = opt_gamla.compose_left(
@@ -70,179 +54,48 @@ _incoming_edge_options = opt_gamla.compose_left(
     ),
 )
 
-_get_args_helper = opt_gamla.compose_left(
-    opt_gamla.keyfilter(gamla.attrgetter("args")),
-    dict.values,
-    gamla.head,
-    opt_gamla.maptuple(gamla.attrgetter("result")),
-)
-
 
 def _get_args(
-    edges_to_results: Dict[
-        base_types.ComputationEdge, Tuple[base_types.ComputationResult, ...],
-    ],
-    unbound_signature: base_types.NodeSignature,
-    bound_signature: base_types.NodeSignature,
-    unbound_input: base_types.ComputationInput,
-) -> Tuple[base_types.ComputationResult, ...]:
-    if unbound_signature.is_args:
-        return unbound_input.args
-    if bound_signature.is_args:
-        return _get_args_helper(edges_to_results)
-    return ()
-
-
-def _get_unary_computation_input(
-    kwargs: Tuple[str, ...],
-    value: base_types.ComputationResult,
-    unbound_signature: base_types.NodeSignature,
-) -> Dict[str, Any]:
+    edges_to_results: Dict[base_types.ComputationEdge, Tuple[base_types.Result, ...]]
+) -> Tuple[base_types.Result, ...]:
     return opt_gamla.pipe(
-        unbound_signature.kwargs,
-        opt_gamla.remove(
-            opt_gamla.anyjuxt(
-                gamla.contains(unbound_signature.optional_kwargs), gamla.equals("state")
-            )
-        ),
-        tuple,
-        opt_gamla.check(
-            opt_gamla.anyjuxt(gamla.len_equals(1), gamla.len_equals(0)),
-            _ComputationGraphException(
-                f"got a single input function with more than 1 unbound arguments. cannot bind function. {unbound_signature}"
-            ),
-        ),
-        opt_gamla.ternary(gamla.len_equals(1), gamla.identity, gamla.just(kwargs)),
+        edges_to_results,
+        opt_gamla.keyfilter(gamla.attrgetter("args")),
+        dict.values,
         gamla.head,
-        lambda first_kwarg: {first_kwarg: value.result},
     )
-
-
-def _get_outer_kwargs(
-    unbound_signature: base_types.NodeSignature,
-    unbound_input: base_types.ComputationInput,
-) -> Dict[str, Any]:
-    # Optimized because being called a lot.
-    d = {}
-    for kwarg in unbound_signature.kwargs:
-        if kwarg != "state" and kwarg in unbound_input.kwargs:
-            d[kwarg] = unbound_input.kwargs[kwarg]
-    return d
 
 
 _get_inner_kwargs = opt_gamla.compose_left(
     opt_gamla.keyfilter(base_types.edge_key),
-    dict.items,
-    opt_gamla.groupby(opt_gamla.compose_left(gamla.head, base_types.edge_key)),
-    opt_gamla.valmap(
-        opt_gamla.compose_left(
-            gamla.head, gamla.second, gamla.head, gamla.attrgetter("result")
-        )
-    ),
+    opt_gamla.keymap(base_types.edge_key),
+    opt_gamla.valmap(gamla.head),
 )
 
 
-_DecisionsType = Dict[base_types.ComputationNode, base_types.ComputationResult]
-_ResultToDecisionsType = Dict[base_types.ComputationResult, _DecisionsType]
-_IntermediaryResults = Dict[base_types.ComputationNode, _ResultToDecisionsType]
+_IntermediaryResults = Dict[base_types.ComputationNode, base_types.Result]
 
 
 class _NotCoherent(Exception):
     """This exception signals that for a specific set of incoming
-    node edges not all paths agree on the ComputationResult"""
+    node edges not all paths agree on the result"""
 
 
-def _check_equal_and_take_one(x, y):
-    if x == y:
-        return x
-    raise _NotCoherent
+NodeToResults = Callable[[base_types.ComputationNode], base_types.Result]
 
 
-NodeToResults = Callable[[base_types.ComputationNode], _ResultToDecisionsType]
-
-
-def _signature_difference(
-    sig_a: base_types.NodeSignature, sig_b: base_types.NodeSignature
-) -> base_types.NodeSignature:
-    return base_types.NodeSignature(
-        is_args=(sig_a.is_args != sig_b.is_args),
-        # Difference must save the order of the left signature.
-        kwargs=tuple(filter(lambda x: x not in sig_b.kwargs, sig_a.kwargs)),
-        optional_kwargs=tuple(
-            filter(lambda x: x not in sig_b.optional_kwargs, sig_a.optional_kwargs)
-        ),
-    )
-
-
-_get_kwargs_from_edges = opt_gamla.compose_left(
-    opt_gamla.map(base_types.edge_key), opt_gamla.remove(gamla.equals(None)), tuple
-)
-
-
-def _get_bound_signature(
-    is_args: bool, incoming_edges: base_types.GraphType
-) -> base_types.NodeSignature:
-    return base_types.NodeSignature(
-        is_args=is_args and any(edge.args for edge in incoming_edges),
-        kwargs=_get_kwargs_from_edges(incoming_edges),
-        optional_kwargs=(),
-    )
-
-
-_ChoiceOfOutputForNode = Tuple[
-    Tuple[base_types.ComputationResult, _DecisionsType], base_types.ComputationNode,
-]
-
-
-@gamla.curry
 def _get_computation_input(
-    unbound_input: Callable[[base_types.ComputationNode], base_types.ComputationInput],
     node: base_types.ComputationNode,
     incoming_edges: base_types.GraphType,
-    # For each edge, there are multiple values options, each having its own trace.
-    values_for_edges_choice: Iterable[Iterable[_ChoiceOfOutputForNode]],
+    results: Tuple[Tuple[base_types.Result, ...], ...],
 ) -> base_types.ComputationInput:
-    incoming_edges_no_future = tuple(graph.remove_future_edges(incoming_edges))
-    bound_signature = _get_bound_signature(
-        node.signature.is_args, incoming_edges_no_future
-    )
-    unbound_signature = _signature_difference(node.signature, bound_signature)
-    results = gamla.pipe(
-        values_for_edges_choice,
-        opt_gamla.maptuple(opt_gamla.maptuple(_choice_to_value)),
-    )
-
-    future_edges_kwargs = opt_gamla.pipe(
-        incoming_edges,
-        opt_gamla.filter(gamla.attrgetter("is_future")),
-        opt_gamla.map(
-            opt_gamla.juxt(
-                lambda edge: edge.key or edge.source.signature.kwargs[0],
-                opt_gamla.compose_left(
-                    gamla.attrgetter("source"), unbound_input, gamla.attrgetter("state")
-                ),
-            )
-        ),
-        dict,
-    )
-
     if node.signature.is_kwargs:
         assert (
             len(results) == 1
-        ), f"signature for {base_types.pretty_print_function_name(node.func)} contains `**kwargs`. This is considered unary, meaning one incoming edge, but we got more than one: {incoming_edges_no_future}."
-        return base_types.ComputationInput(
-            args=opt_gamla.pipe(
-                results,
-                gamla.head,
-                gamla.head,
-                gamla.attrgetter("result"),
-                gamla.wrap_tuple,
-            ),
-            kwargs={},
-            state=None,
-        )
+        ), f"signature for {base_types.pretty_print_function_name(node.func)} contains `**kwargs`. This is considered unary, meaning one incoming edge, but we got more than one: {incoming_edges}."
+        return base_types.ComputationInput(args=gamla.head(results), kwargs={})
     if (
-        not (unbound_signature.is_args or bound_signature.is_args)
+        not node.signature.is_args
         and sum(
             map(
                 opt_gamla.compose_left(base_types.edge_key, gamla.equals(None)),
@@ -252,182 +105,13 @@ def _get_computation_input(
         == 1
     ):
         return base_types.ComputationInput(
-            args=(),
-            kwargs=future_edges_kwargs
-            or _get_unary_computation_input(
-                node.signature.kwargs,
-                gamla.head(gamla.head(results)),
-                unbound_signature,
-            ),
-            state=unbound_input(node).state,
+            args=(), kwargs={node.signature.kwargs[0]: gamla.head(gamla.head(results))}
         )
-    edges_to_results = dict(zip(incoming_edges_no_future, results))
+    edges_to_results = dict(zip(incoming_edges, results))
     return base_types.ComputationInput(
-        args=_get_args(
-            edges_to_results, unbound_signature, bound_signature, unbound_input(node)
-        ),
-        kwargs={
-            **_get_outer_kwargs(unbound_signature, unbound_input(node)),
-            **_get_inner_kwargs(edges_to_results),
-            **future_edges_kwargs,
-        },
-        state=unbound_input(node).state,
+        args=_get_args(edges_to_results) if node.signature.is_args else (),
+        kwargs=_get_inner_kwargs(edges_to_results),
     )
-
-
-def _wrap_in_result_if_needed(node: base_types.ComputationNode, result):
-    if isinstance(result, base_types.ComputationResult):
-        return result
-    if node.is_stateful:
-        return base_types.ComputationResult(result, result)
-    return base_types.ComputationResult(result, None)
-
-
-def _inject_state(unbound_input: base_types.ComputationInput):
-    def inject_state(node_id: int):
-        if unbound_input.state is None:
-            return unbound_input
-        return dataclasses.replace(
-            unbound_input,
-            state=unbound_input.state[node_id]
-            if node_id in unbound_input.state
-            else None,
-        )
-
-    return inject_state
-
-
-_choice_to_value: Callable[
-    [_ChoiceOfOutputForNode], base_types.ComputationResult
-] = opt_gamla.compose_left(gamla.head, gamla.head)
-
-_decisions_from_value_choices = opt_gamla.compose_left(
-    gamla.concat,
-    gamla.bifurcate(
-        opt_gamla.compose_left(
-            opt_gamla.map(opt_gamla.compose_left(gamla.head, gamla.second)),
-            opt_gamla.reduce(
-                opt_gamla.merge_with_reducer(_check_equal_and_take_one),
-                immutables.Map(),
-            ),
-        ),
-        opt_gamla.mapdict(opt_gamla.juxt(gamla.second, _choice_to_value)),
-    ),
-    opt_gamla.merge,
-)
-
-
-@gamla.curry
-def _construct_computation_state(
-    edges: base_types.GraphType,
-    results: _ResultToDecisionsType,
-    sink_node: base_types.ComputationNode,
-) -> Dict:
-    first_result = gamla.head(results)
-    return {
-        **{sink_node: first_result.state},
-        **opt_gamla.pipe(
-            results,
-            gamla.itemgetter(first_result),
-            opt_gamla.juxt(
-                opt_gamla.valmap(gamla.attrgetter("state")),
-                gamla.compose_left(
-                    opt_gamla.valmap(gamla.attrgetter("result")),
-                    opt_gamla.keyfilter(
-                        gamla.contains(
-                            opt_gamla.pipe(
-                                edges,
-                                opt_gamla.filter(gamla.attrgetter("is_future")),
-                                gamla.map(gamla.attrgetter("source")),
-                                frozenset,
-                            )
-                        )
-                    ),
-                ),
-            ),
-            opt_gamla.merge,
-        ),
-    }
-
-
-def _merge_with_previous_state(
-    previous_state: Dict, result: base_types.ComputationResult, state: Dict
-) -> base_types.ComputationResult:
-    return base_types.ComputationResult(
-        result=result,
-        # Convert to tuples (node id, state) so this would be hashable.
-        state=tuple({**(previous_state or {}), **state}.items()),
-    )
-
-
-def _get_results_from_terminals(
-    result_to_dependencies: Callable,
-) -> Callable[[Iterable[base_types.ComputationNode]], _DecisionsType]:
-    return opt_gamla.compose_left(
-        opt_gamla.map(
-            opt_gamla.pair_right(
-                opt_gamla.compose_left(
-                    result_to_dependencies,
-                    opt_gamla.ternary(
-                        gamla.identity,
-                        opt_gamla.compose_left(
-                            dict.items,
-                            gamla.head,
-                            gamla.head,  # Take results, not dependencies
-                            gamla.attrgetter("result"),
-                        ),
-                        gamla.just({}),
-                    ),
-                )
-            )
-        ),
-        dict,
-    )
-
-
-def _get_computation_state_from_terminals(
-    result_to_dependencies: Callable,
-    edges_to_node_id: Callable,
-    edges: base_types.GraphType,
-) -> Callable[[Iterable[base_types.ComputationNode]], Dict]:
-    return opt_gamla.compose_left(
-        opt_gamla.map(
-            opt_gamla.compose_left(
-                opt_gamla.pair_left(result_to_dependencies),
-                opt_gamla.ternary(
-                    opt_gamla.compose_left(gamla.head, gamla.nonempty),
-                    opt_gamla.compose_left(
-                        opt_gamla.star(_construct_computation_state(edges)),
-                        opt_gamla.keymap(edges_to_node_id),
-                    ),
-                    gamla.just({}),
-                ),
-            )
-        ),
-        opt_gamla.merge,
-    )
-
-
-def _construct_computation_result(edges: base_types.GraphType, edges_to_node_id):
-    def construct_computation_result(
-        result_to_dependencies: Callable[
-            [base_types.ComputationNode], _ResultToDecisionsType
-        ]
-    ):
-        return opt_gamla.pipe(
-            edges,
-            graph.get_leaves,
-            opt_gamla.filter(gamla.attrgetter("is_terminal")),
-            frozenset,
-            opt_gamla.juxt(
-                _get_results_from_terminals(result_to_dependencies),
-                _get_computation_state_from_terminals(
-                    result_to_dependencies, edges_to_node_id, edges
-                ),
-            ),
-        )
-
-    return construct_computation_result
 
 
 def _type_check(node: base_types.ComputationNode, result):
@@ -443,13 +127,8 @@ def _type_check(node: base_types.ComputationNode, result):
             logging.error([node.func.__code__, e])
 
 
-def _apply(node: base_types.ComputationNode, node_input: base_types.ComputationInput):
-    return node.func(
-        *node_input.args,
-        **gamla.add_key_value("state", node_input.state)(node_input.kwargs)
-        if node.is_stateful
-        else node_input.kwargs,
-    )
+def _apply(f: Callable, node_input: base_types.ComputationInput) -> base_types.Result:
+    return f(*node_input.args, **node_input.kwargs)
 
 
 _SingleNodeSideEffect = Callable[[base_types.ComputationNode, Any], None]
@@ -458,31 +137,26 @@ _SingleNodeSideEffect = Callable[[base_types.ComputationNode, Any], None]
 def _run_keeping_choices(
     is_async: bool, side_effect: _SingleNodeSideEffect
 ) -> Callable:
-    def run_keeping_choices(node_to_external_input):
-        input_maker = opt_gamla.star(_get_computation_input(node_to_external_input))
+    if is_async:
 
-        if is_async:
+        @opt_async_gamla.star
+        async def run_keeping_choices(node, edges_leading_to_node, values):
+            result = _apply(
+                node.func, _get_computation_input(node, edges_leading_to_node, values)
+            )
+            result = await gamla.to_awaitable(result)
+            side_effect(node, result)
+            return result
 
-            async def run_keeping_choices(params):
-                result = _apply(params[0], input_maker(params))
-                result = await gamla.to_awaitable(result)
-                side_effect(params[0], result)
-                return (
-                    _wrap_in_result_if_needed(params[0], result),
-                    _decisions_from_value_choices(params[2]),
-                )
+    else:
 
-        else:
-
-            def run_keeping_choices(params):
-                result = _apply(params[0], input_maker(params))
-                side_effect(params[0], result)
-                return (
-                    _wrap_in_result_if_needed(params[0], result),
-                    _decisions_from_value_choices(params[2]),
-                )
-
-        return run_keeping_choices
+        @opt_gamla.star
+        def run_keeping_choices(node, edges_leading_to_node, values):
+            result = _apply(
+                node.func, _get_computation_input(node, edges_leading_to_node, values)
+            )
+            side_effect(node, result)
+            return result
 
     return run_keeping_choices
 
@@ -506,64 +180,44 @@ def _process_layer_in_parallel(
     )
 
 
-def _dag_layer_reduce(
-    f: Callable[
-        [_IntermediaryResults, FrozenSet[base_types.ComputationNode]],
-        _IntermediaryResults,
-    ]
-) -> Callable[[base_types.GraphType], _IntermediaryResults]:
+def _dag_layer_reduce(is_async, edges):
     """Directed acyclic graph reduction."""
-    return gamla.compose_left(
-        graph.remove_future_edges,
-        _toposort_nodes,
-        gamla.reduce_curried(f, immutables.Map()),
-    )
+
+    layers = _toposort_nodes(edges)
+
+    def inner(
+        f: Callable[
+            [_IntermediaryResults, FrozenSet[base_types.ComputationNode]],
+            _IntermediaryResults,
+        ]
+    ):
+        if is_async:
+
+            async def inner(source_to_value):
+                return await gamla.pipe(
+                    layers, gamla.reduce_curried(f, source_to_value)
+                )
+
+        else:
+
+            def inner(source_to_value):
+                return gamla.pipe(layers, gamla.reduce_curried(f, source_to_value))
+
+        return inner
+
+    return inner
 
 
-def _edge_to_value_options(
+def _edges_to_values(
     accumulated_outputs,
-) -> Callable[[Iterable[base_types.ComputationEdge]], Iterable[Any]]:
-    return opt_gamla.mapduct(
-        gamla.unless(
-            gamla.attrgetter("is_future"),
-            opt_gamla.compose_left(
-                _get_edge_sources,
-                opt_gamla.mapduct(
-                    opt_gamla.compose_left(
-                        opt_gamla.pair_left(
-                            opt_gamla.compose_left(
-                                gamla.dict_to_getter_with_default(
-                                    immutables.Map(), accumulated_outputs
-                                ),
-                                collections.abc.Mapping.items,
-                            )
-                        ),
-                        gamla.explode(0),
-                    )
-                ),
-            ),
+) -> Callable[
+    [Iterable[base_types.ComputationEdge]], Tuple[Tuple[base_types.Result, ...], ...]
+]:
+    return opt_gamla.maptuple(
+        opt_gamla.compose_left(
+            _get_edge_sources, opt_gamla.maptuple(accumulated_outputs.__getitem__)
         )
     )
-
-
-_create_node_run_options = opt_gamla.compose_left(
-    gamla.pack,
-    gamla.explode(1),
-    opt_gamla.mapcat(
-        opt_gamla.compose_left(
-            gamla.bifurcate(
-                gamla.head,
-                gamla.second,
-                opt_gamla.star(
-                    lambda _, edges, edge_to_value_options: opt_gamla.pipe(
-                        edges, graph.remove_future_edges, edge_to_value_options
-                    )
-                ),
-            ),
-            gamla.explode(2),
-        )
-    ),
-)
 
 
 def _assoc_immutable(d, k, v):
@@ -573,11 +227,31 @@ def _assoc_immutable(d, k, v):
 @gamla.curry
 def _lift_single_runner_to_run_on_many_options(is_async: bool, f):
     return (opt_async_gamla.compose_left if is_async else opt_gamla.compose_left)(
-        _create_node_run_options,
-        (opt_async_gamla.map if is_async else opt_gamla.map)(f),
-        opt_gamla.filter(gamla.identity),
-        gamla.take(1),
-        dict,
+        # Node, edges_options, edge_to_value.
+        gamla.pack,
+        gamla.explode(1),
+        # iterable of (node, edge_option, edge_to_value)
+        opt_gamla.map(
+            opt_gamla.compose_left(
+                gamla.bifurcate(
+                    gamla.head,
+                    gamla.second,
+                    opt_gamla.star(
+                        lambda _, edges, edges_to_values: edges_to_values(edges)
+                    ),
+                )
+            )
+        ),
+        # iterable of (node, edge_option, tuple[tuple[result]])
+        opt_gamla.remove(
+            opt_gamla.compose(
+                opt_gamla.anymap(gamla.inside(_COULD_NOT_COMPUTE)), gamla.nth(2)
+            )
+        ),
+        tuple,
+        gamla.assert_that(gamla.len_equals(1)),
+        gamla.head,
+        f,
     )
 
 
@@ -598,7 +272,7 @@ def _process_node(
                     await f(
                         node,
                         get_edge_options(node),
-                        _edge_to_value_options(accumulated_results),
+                        _edges_to_values(accumulated_results),
                     ),
                 )
 
@@ -617,7 +291,7 @@ def _process_node(
                     f(
                         node,
                         get_edge_options(node),
-                        _edge_to_value_options(accumulated_results),
+                        _edges_to_values(accumulated_results),
                     ),
                 )
 
@@ -653,34 +327,24 @@ _assert_no_unwanted_ambiguity = gamla.compose_left(
 )
 
 
-def _make_runner(
-    single_node_runner,
-    is_async,
-    async_decoration,
-    edges,
-    handled_exceptions,
-    edges_to_node_id,
-):
-    return gamla.compose_left(
-        # Higher order pipeline that constructs a graph runner.
-        opt_gamla.compose(
-            _dag_layer_reduce,
-            _process_layer_in_parallel,
-            _process_node(is_async, _incoming_edge_options(edges)),
-            _lift_single_runner_to_run_on_many_options(is_async),
-            gamla.excepts(
-                (*handled_exceptions, _NotCoherent, base_types.SkipComputationError),
-                opt_gamla.compose_left(type, gamla.just(None)),
-            ),
-            single_node_runner,
-            gamla.before(edges_to_node_id),
-            _inject_state,
+class _CouldNotCompute:
+    pass
+
+
+_COULD_NOT_COMPUTE = _CouldNotCompute()
+
+
+def _make_runner(single_node_runner, is_async, edges, handled_exceptions):
+    return opt_gamla.compose(
+        _dag_layer_reduce(is_async, edges),
+        _process_layer_in_parallel,
+        _process_node(is_async, _incoming_edge_options(edges)),
+        _lift_single_runner_to_run_on_many_options(is_async),
+        gamla.excepts(
+            (*handled_exceptions, _NotCoherent, base_types.SkipComputationError),
+            gamla.just(_COULD_NOT_COMPUTE),
         ),
-        # gamla.profileit,  # Enable to get a read on slow functions.
-        # At this point we move to a regular pipeline of values.
-        async_decoration(gamla.apply(edges)),
-        gamla.attrgetter("__getitem__"),
-    )
+    )(single_node_runner)
 
 
 def _to_callable_with_side_effect_for_single_and_multiple(
@@ -692,32 +356,14 @@ def _to_callable_with_side_effect_for_single_and_multiple(
     edges = gamla.pipe(
         edges, gamla.unique, tuple, gamla.side_effect(_assert_no_unwanted_ambiguity)
     )
-    edges_to_node_id = graph.edges_to_node_id_map(edges).__getitem__
     return gamla.compose_left(
-        _make_outer_computation_input,
-        gamla.pair_with(
-            gamla.compose_left(
-                _make_runner(
-                    _run_keeping_choices(
-                        _is_graph_async(edges), single_node_side_effect
-                    ),
-                    _is_graph_async(edges),
-                    gamla.after(gamla.to_awaitable)
-                    if _is_graph_async(edges)
-                    else gamla.identity,
-                    edges,
-                    handled_exceptions,
-                    edges_to_node_id,
-                ),
-                gamla.side_effect(all_nodes_side_effect(edges)),
-                _construct_computation_result(edges, edges_to_node_id),
-            )
+        _make_runner(
+            _run_keeping_choices(_is_graph_async(edges), single_node_side_effect),
+            _is_graph_async(edges),
+            edges,
+            handled_exceptions,
         ),
-        opt_gamla.star(
-            lambda result_and_state, computation_input: _merge_with_previous_state(
-                computation_input.state, *result_and_state
-            )
-        ),
+        gamla.side_effect(all_nodes_side_effect(edges)),
     )
 
 
@@ -728,3 +374,7 @@ to_callable_with_side_effect = gamla.curry(
 # Use the second line if you want to see the winning path in the computation graph (a little slower).
 to_callable = to_callable_with_side_effect(gamla.just(gamla.just(None)))
 # to_callable = to_callable_with_side_effect(graphviz.computation_trace('utterance_computation.dot'))
+
+
+def to_callable_strict(g):
+    return gamla.compose(to_callable(g, frozenset()), immutables.Map)

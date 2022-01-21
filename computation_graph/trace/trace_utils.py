@@ -8,7 +8,7 @@ from computation_graph import base_types
 @gamla.curry
 def node_computation_trace(
     node_to_results: Callable, node: base_types.ComputationNode
-) -> FrozenSet[Tuple[base_types.ComputationNode, base_types.ComputationResult]]:
+) -> FrozenSet[Tuple[base_types.ComputationNode, base_types.Result]]:
     results = node_to_results(node)
     try:
         first_result = gamla.head(results)
