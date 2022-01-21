@@ -186,27 +186,18 @@ def test_state():
 
 
 def test_self_future_edge():
-    edges = graph.connect_default_terminal(
-        (
-            graph.make_standard_edge(
-                source=_node1, destination=_reducer_node, key="arg1"
+    f = _unary_graph_with_state(
+        base_types.merge_graphs(
+            composers.compose_dict(
+                _reducer_node, {"arg1": _node1, "cur_int": _next_int}
             ),
-            graph.make_standard_edge(
-                source=_reducer_node, destination=_node2, key="arg1"
-            ),
-            graph.make_standard_edge(
-                source=_next_int, destination=_reducer_node, key="cur_int"
-            ),
-            graph.make_future_edge(source=_next_int, destination=_next_int, key="x"),
-        )
+            composers.compose_unary(_node2, _reducer_node),
+            composers.compose_left_future(_next_int, _next_int, "x", None),
+        ),
+        _node1,
+        _node2,
     )
-    cg = run.to_callable(edges, frozenset([_GraphTestError]))
-
-    result = cg(arg1=_ROOT_VALUE)
-    result = cg(arg1=_ROOT_VALUE, state=result.state)
-    result = cg(arg1=_ROOT_VALUE, state=result.state)
-    assert isinstance(result, base_types.ComputationResult)
-    assert result.result[graph.DEFAULT_TERMINAL][0] == "node2(node1(root) cur_int=3)"
+    assert f(_ROOT_VALUE, _ROOT_VALUE, _ROOT_VALUE) == "node2(node1(root) cur_int=3)"
 
 
 def test_multiple_inputs():
