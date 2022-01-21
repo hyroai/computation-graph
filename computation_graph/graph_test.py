@@ -135,21 +135,19 @@ async def test_simple_async():
 
 
 def test_kwargs():
-    cg = run.to_callable(
-        graph.connect_default_terminal(
-            (
-                graph.make_standard_edge(source=_node1, destination=_node3, key="arg1"),
-                graph.make_standard_edge(source=_node2, destination=_node3, key="arg2"),
-            )
-        ),
-        frozenset([_GraphTestError]),
-    )
+    def source(x):
+        return x
 
-    result = cg(arg1=_ROOT_VALUE)
-
-    assert isinstance(result, base_types.ComputationResult)
     assert (
-        result.result[graph.DEFAULT_TERMINAL][0]
+        _unary_graph(
+            base_types.merge_graphs(
+                composers.compose_unary(_node1, source),
+                composers.compose_unary(_node2, source),
+                composers.compose_dict(_node3, {"arg1": _node1, "arg2": _node2}),
+            ),
+            source,
+            _node3,
+        )(_ROOT_VALUE)
         == f"node3(arg1=node1({_ROOT_VALUE}), arg2=node2({_ROOT_VALUE}))"
     )
 
