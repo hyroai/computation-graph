@@ -94,33 +94,34 @@ def _sometimes_unactionable_reducer_node(arg1, cur_int):
     return arg1 + f" state={cur_int + 1}"
 
 
+def _helper(g, source, sink):
+    real_source = graph.make_source()
+    return gamla.compose(
+        gamla.itemgetter(graph.make_computation_node(sink)),
+        run.to_callable_strict(
+            base_types.merge_graphs(
+                g, composers.compose_left_future(real_source, source, None)
+            )
+        ),
+        gamla.wrap_dict(real_source),
+    )
+
+
 def test_simple():
     for v in ["root", None]:
-        source = graph.make_source()
-        result = run.to_callable_strict(
-            base_types.merge_graphs(
-                composers.compose_left_unary(_node1, _node2),
-                composers.compose_left_future(source, _node1, "arg1"),
-            )
-        )({source: v})
-        assert result[graph.make_computation_node(_node2)] == f"node2(node1({v}))"
+        assert (
+            _helper(composers.compose_left_unary(_node1, _node2), _node1, _node2)(v)
+            == f"node2(node1({v}))"
+        )
 
 
 async def test_simple_async():
-    cg = run.to_callable(
-        graph.connect_default_terminal(
-            (
-                graph.make_standard_edge(
-                    source=_node1_async, destination=_node2, key="arg1"
-                ),
-            )
-        ),
-        frozenset([_GraphTestError]),
+    assert (
+        await _helper(
+            composers.compose_left_unary(_node1_async, _node2), _node1_async, _node2
+        )("hi")
+        == "node2(node1(hi))"
     )
-    result = await cg(arg1=_ROOT_VALUE)
-
-    assert isinstance(result, base_types.ComputationResult)
-    assert result.result[graph.DEFAULT_TERMINAL][0] == f"node2(node1({_ROOT_VALUE}))"
 
 
 def test_kwargs():
@@ -772,7 +773,7 @@ def test_two_paths_succeed():
 
 
 def test_double_star_signature_considered_unary():
-    assert _runner(
+    assert _helper(
         composers.make_compose(
             gamla.juxt(
                 lambda some_argname: some_argname + 1,
@@ -788,7 +789,7 @@ def test_type_safety_messages(caplog):
     def f(x) -> int:  # Bad typing!
         return "hello " + x
 
-    assert _runner(composers.make_compose(f, lambda: "world")) == "hello world"
+    assert _helper(composers.make_compose(f, lambda: "world")) == "hello world"
     assert "TypeError" in caplog.text
 
 
@@ -796,7 +797,7 @@ def test_type_safety_messages_no_overtrigger(caplog):
     def f(x) -> str:
         return "hello " + x
 
-    assert _runner(composers.make_compose(f, lambda: "world")) == "hello world"
+    assert _helper(composers.make_compose(f, lambda: "world")) == "hello world"
     assert "TypeError" not in caplog.text
 
 
@@ -877,7 +878,7 @@ def test_sink_with_incoming_future_edge():
         graph.make_future_edge(source=g, destination=g, key="y"),
     )
     assert graph.infer_graph_sink(edges) == graph.make_computation_node(g)
-    assert _runner(edges, x=3) == "x=3, y=4"
+    assert _helper(edges, x=3) == "x=3, y=4"
 
 
 def test_compose_future():
