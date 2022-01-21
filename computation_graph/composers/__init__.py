@@ -236,7 +236,7 @@ def compose_unary(*funcs: _ComposersInputType) -> base_types.GraphType:
 
 
 def make_compose_future(
-    destination: _ComposersInputType, source: _ComposersInputType, key: str
+    destination: _ComposersInputType, source: _ComposersInputType, key: Optional[str]
 ) -> base_types.GraphType:
     return _make_compose_inner(destination, source, key=key, is_future=True)
 
@@ -248,7 +248,7 @@ def compose_left(*args, key: Optional[str] = None) -> base_types.GraphType:
 def compose_left_future(
     source: base_types.GraphOrCallable,
     destination: base_types.GraphOrCallable,
-    key: str,
+    key: Optional[str],
 ) -> base_types.GraphType:
     return make_compose_future(destination, source, key)
 

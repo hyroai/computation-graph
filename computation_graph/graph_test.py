@@ -1,11 +1,12 @@
 import asyncio
 import functools
 import json
+from typing import Callable
 
 import gamla
 import pytest
 
-from computation_graph import base_types, composers, graph, run
+from computation_graph import base_types, composers, graph, legacy, run
 
 pytestmark = pytest.mark.asyncio
 
@@ -70,14 +71,6 @@ def _node_with_optional_param(optional_param: int = 5):
     return f"node_with_optional_param(optional_param={optional_param})"
 
 
-def _node_with_state_as_arg(arg1, state):
-    if state is None:
-        state = 0
-    return base_types.ComputationResult(
-        result=arg1 + f" state={state + 1}", state=state + 1
-    )
-
-
 def _next_int(x):
     if x is None:
         return 0
@@ -94,7 +87,7 @@ def _sometimes_unactionable_reducer_node(arg1, cur_int):
     return arg1 + f" state={cur_int + 1}"
 
 
-def _unary_graph(g, source, sink):
+def _unary_graph(g: base_types.GraphType, source: Callable, sink: Callable) -> Callable:
     real_source = graph.make_source()
     return gamla.compose(
         gamla.itemgetter(graph.make_computation_node(sink)),
@@ -105,6 +98,25 @@ def _unary_graph(g, source, sink):
         ),
         gamla.wrap_dict(real_source),
     )
+
+
+def _unary_graph_with_state(
+    g: base_types.GraphType, source: Callable, sink: Callable
+) -> Callable:
+    real_source = graph.make_source()
+    f = run.to_callable_strict(
+        base_types.merge_graphs(
+            g, composers.compose_left_future(real_source, source, None)
+        )
+    )
+
+    def inner(*turns):
+        prev = {}
+        for turn in turns:
+            prev = f({real_source: turn, **prev})
+        return prev[real_source]
+
+    return inner
 
 
 def _nullary_graph(g, sink):
@@ -152,32 +164,25 @@ def test_kwargs():
     )
 
 
+@legacy.handle_state
+def _node_with_state_as_arg(arg1, state):
+    if state is None:
+        state = 0
+    return base_types.ComputationResult(
+        result=arg1 + f" state={state + 1}", state=state + 1
+    )
+
+
 def test_state():
-    edges = graph.connect_default_terminal(
-        (
-            graph.make_standard_edge(
-                source=_node1, destination=_node_with_state_as_arg, key="arg1"
-            ),
-            graph.make_standard_edge(
-                source=_node_with_state_as_arg, destination=_node2, key="arg1"
-            ),
-        )
+    f = _unary_graph_with_state(
+        base_types.merge_graphs(
+            composers.compose_left(_node1, _node_with_state_as_arg, key="arg1"),
+            composers.compose_left_unary(_node_with_state_as_arg, _node2),
+        ),
+        _node1,
+        _node2,
     )
-    cg = run.to_callable(edges, frozenset([_GraphTestError]))
-
-    result = cg(arg1=_ROOT_VALUE)
-    result = cg(arg1=_ROOT_VALUE, state=result.state)
-    result = cg(arg1=_ROOT_VALUE, state=result.state)
-
-    assert isinstance(result, base_types.ComputationResult)
-    assert (
-        dict(result.state)[
-            graph.edges_to_node_id_map(edges)[
-                graph.make_computation_node(_node_with_state_as_arg)
-            ]
-        ]
-        == 3
-    )
+    assert f(_ROOT_VALUE, _ROOT_VALUE, _ROOT_VALUE) == 3
 
 
 def test_self_future_edge():

@@ -9,10 +9,6 @@ from gamla.optimized import sync as opt_gamla
 from computation_graph import base_types
 
 
-def get_all_nodes(edges: base_types.GraphType) -> FrozenSet[base_types.ComputationNode]:
-    return gamla.pipe(edges, gamla.mapcat(get_edge_nodes), gamla.unique, frozenset)
-
-
 def _is_star(parameter) -> bool:
     return "*" + parameter.name == str(parameter)
 
@@ -63,10 +59,12 @@ def _infer_callable_name(func: Callable) -> str:
 
 
 get_edge_nodes = gamla.ternary(
-    gamla.attrgetter("args"),
+    base_types.edge_args,
     lambda edge: edge.args + (edge.destination,),
     lambda edge: (edge.source, edge.destination),
 )
+
+get_all_nodes = gamla.compose_left(gamla.mapcat(get_edge_nodes), frozenset)
 
 
 edges_to_node_id_map = gamla.compose_left(
@@ -128,7 +126,6 @@ def get_leaves(edges: base_types.GraphType) -> FrozenSet[base_types.ComputationN
         gamla.remove(
             gamla.pipe(
                 edges,
-                remove_future_edges,
                 gamla.mapcat(lambda edge: (edge.source, *edge.args)),
                 frozenset,
                 gamla.contains,
@@ -148,9 +145,24 @@ def infer_graph_sink_excluding_terminals(
     edges: base_types.GraphType,
 ) -> base_types.ComputationNode:
     leaves = gamla.pipe(
-        edges, get_leaves, gamla.remove(gamla.attrgetter("is_terminal")), tuple
+        edges,
+        remove_future_edges,
+        tuple,
+        get_leaves,
+        gamla.remove(
+            gamla.pipe(
+                edges,
+                gamla.filter(gamla.attrgetter("is_future")),
+                gamla.map(base_types.edge_source),
+                frozenset,
+                gamla.contains,
+            )
+        ),
+        tuple,
     )
-    assert len(leaves) == 1, f"computation graph has more than one sink: {leaves}"
+    assert (
+        len(leaves) == 1
+    ), f"computation graph {edges} has more than one sink: {leaves}"
     return gamla.head(leaves)
 
 
