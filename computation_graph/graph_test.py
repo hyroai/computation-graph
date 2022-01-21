@@ -93,7 +93,7 @@ def _unary_graph(g: base_types.GraphType, source: Callable, sink: Callable) -> C
         gamla.itemgetter(graph.make_computation_node(sink)),
         run.to_callable_strict(
             base_types.merge_graphs(
-                g, composers.compose_left_future(real_source, source, None)
+                g, composers.compose_left_future(real_source, source, None, None)
             )
         ),
         gamla.wrap_dict(real_source),
@@ -106,7 +106,7 @@ def _unary_graph_with_state(
     real_source = graph.make_source()
     f = run.to_callable_strict(
         base_types.merge_graphs(
-            g, composers.compose_left_future(real_source, source, None)
+            g, composers.compose_left_future(real_source, source, None, None)
         )
     )
 
@@ -114,7 +114,7 @@ def _unary_graph_with_state(
         prev = {}
         for turn in turns:
             prev = f({real_source: turn, **prev})
-        return prev[real_source]
+        return prev[sink]
 
     return inner
 
@@ -164,11 +164,11 @@ def test_kwargs():
     )
 
 
-@legacy.handle_state
+@legacy.handle_state("state", None)
 def _node_with_state_as_arg(arg1, state):
     if state is None:
         state = 0
-    return base_types.ComputationResult(
+    return legacy.LegacyComputationResult(
         result=arg1 + f" state={state + 1}", state=state + 1
     )
 

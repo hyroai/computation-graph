@@ -158,6 +158,7 @@ def last(*args) -> base_types.GraphType:
 
 @gamla.curry
 def _infer_composition_edges(
+    priority: int,
     key: Optional[str],
     is_future: bool,
     source: _ComputationNodeOrGraphType,
@@ -169,7 +170,11 @@ def _infer_composition_edges(
         ), f"Cannot compose, destination signature does not contain key '{key}'"
 
         return base_types.merge_graphs(
-            (graph.make_edge(is_future, 0, _infer_sink(source), destination, key),),
+            (
+                graph.make_edge(
+                    is_future, priority, _infer_sink(source), destination, key
+                ),
+            ),
             _get_edges_from_node_or_graph(source),
         )
 
@@ -193,7 +198,7 @@ def _infer_composition_edges(
             ),
             gamla.map(
                 lambda node: graph.make_edge(
-                    is_future, 0, _infer_sink(source), node, key
+                    is_future, priority, _infer_sink(source), node, key
                 )
             ),
             tuple,
@@ -210,7 +215,7 @@ def _infer_composition_edges(
 
 
 def _make_compose_inner(
-    *funcs: _ComposersInputType, key: Optional[str], is_future
+    *funcs: _ComposersInputType, key: Optional[str], is_future, priority: int
 ) -> base_types.GraphType:
     assert (
         len(funcs) > 1
@@ -220,7 +225,7 @@ def _make_compose_inner(
         reversed,
         gamla.map(_callable_or_graph_type_to_node_or_graph_type),
         gamla.sliding_window(2),
-        gamla.map(gamla.star(_infer_composition_edges(key, is_future))),
+        gamla.map(gamla.star(_infer_composition_edges(priority, key, is_future))),
         gamla.star(base_types.merge_graphs),
     )
 
@@ -228,17 +233,25 @@ def _make_compose_inner(
 def make_compose(
     *funcs: _ComposersInputType, key: Optional[str] = None
 ) -> base_types.GraphType:
-    return _make_compose_inner(*funcs, key=key, is_future=False)
+    return _make_compose_inner(*funcs, key=key, is_future=False, priority=0)
 
 
 def compose_unary(*funcs: _ComposersInputType) -> base_types.GraphType:
-    return _make_compose_inner(*funcs, key=None, is_future=False)
+    return _make_compose_inner(*funcs, key=None, is_future=False, priority=0)
 
 
 def make_compose_future(
-    destination: _ComposersInputType, source: _ComposersInputType, key: Optional[str]
+    destination: _ComposersInputType,
+    source: _ComposersInputType,
+    key: Optional[str],
+    default: base_types.Result,
 ) -> base_types.GraphType:
-    return _make_compose_inner(destination, source, key=key, is_future=True)
+    return base_types.merge_graphs(
+        _make_compose_inner(destination, source, key=key, is_future=True, priority=0),
+        _make_compose_inner(
+            destination, lambda: default, key=key, is_future=False, priority=1
+        ),
+    )
 
 
 def compose_left(*args, key: Optional[str] = None) -> base_types.GraphType:
@@ -249,8 +262,9 @@ def compose_left_future(
     source: base_types.GraphOrCallable,
     destination: base_types.GraphOrCallable,
     key: Optional[str],
+    default: base_types.Result,
 ) -> base_types.GraphType:
-    return make_compose_future(destination, source, key)
+    return make_compose_future(destination, source, key, default)
 
 
 def compose_left_unary(*args) -> base_types.GraphType:
