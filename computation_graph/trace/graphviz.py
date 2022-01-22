@@ -17,7 +17,7 @@ def _get_node_shape(node: base_types.ComputationNode):
 def _add_computation_node(pgv_graph: pgv.AGraph, node: base_types.ComputationNode):
     node_id = hash(node)
     pgv_graph.add_node(
-        node_id, label=saxutils.quoteattr(str(node)), shape=_get_node_shape(node)
+        node_id, label=saxutils.quoteattr(str(node))[1:-1], shape=_get_node_shape(node)
     )
 
 
