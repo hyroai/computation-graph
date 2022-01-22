@@ -48,11 +48,6 @@ def _curried_node(arg1, arg2):
     return f"curried_node(arg1={arg1}, arg2={arg2})"
 
 
-@gamla.curry
-def _curried_stateful_node(arg1, arg2, cur_int):
-    return f"curried_stateful_node(arg1={arg1}, arg2={arg2}, cur_int={cur_int + 1})"
-
-
 def _unactionable_node(arg1):
     raise _GraphTestError
 
@@ -123,16 +118,25 @@ def _unary_graph_with_state_and_expectations(
     g: base_types.GraphType, source: Callable, sink: Callable
 ) -> Callable:
     real_source = graph.make_source()
-    f = run.to_callable_strict(
-        base_types.merge_graphs(
-            g, composers.compose_left_future(real_source, source, None, None)
-        )
+    return gamla.compose(
+        _variadic_with_state_and_expectations(
+            base_types.merge_graphs(
+                g, composers.compose_left_future(real_source, source, None, None)
+            ),
+            sink,
+        ),
+        tuple,
+        gamla.map(lambda t: ({real_source: t[0]}, t[1])),
     )
 
-    def inner(*turns):
+
+def _variadic_with_state_and_expectations(g, sink):
+    f = run.to_callable_strict(g)
+
+    def inner(turns):
         prev = {}
         for turn, expectation in turns:
-            prev = f({real_source: turn, **prev})
+            prev = f({**turn, **prev})
             assert prev[graph.make_computation_node(sink)] == expectation
 
     return inner
@@ -544,50 +548,6 @@ def test_compose_with_future_edge():
     assert result.result[graph.DEFAULT_TERMINAL][0] == "node1(node2(root)) cur_int=3"
 
 
-def test_compose_with_partial():
-    cg = run.to_callable(
-        graph.connect_default_terminal(
-            composers.make_compose(
-                functools.partial(_node3, arg2="arg2_partial"), _node1, _node2
-            )
-        ),
-        frozenset([_GraphTestError]),
-    )
-
-    result = cg(arg1=_ROOT_VALUE)
-
-    assert (
-        result.result[graph.DEFAULT_TERMINAL][0]
-        == f"node3(arg1=node1(node2({_ROOT_VALUE})), arg2=arg2_partial)"
-    )
-
-
-def test_partial():
-    edges = graph.connect_default_terminal(
-        composers.make_first(functools.partial(_node3, arg2="arg2_partial"))
-    )
-
-    result = run.to_callable(edges, frozenset([_GraphTestError]))(arg1=_ROOT_VALUE)
-
-    assert (
-        result.result[graph.DEFAULT_TERMINAL][0]
-        == "node3(arg1=root, arg2=arg2_partial)"
-    )
-
-
-def test_curry():
-    edges = graph.connect_default_terminal(
-        composers.make_first(_curried_node(arg2="arg2_curried"))
-    )
-
-    result = run.to_callable(edges, frozenset([_GraphTestError]))(arg1=_ROOT_VALUE)
-
-    assert (
-        result.result[graph.DEFAULT_TERMINAL][0]
-        == "curried_node(arg1=root, arg2=arg2_curried)"
-    )
-
-
 def test_compose_when_all_arguments_have_a_default():
     edges = graph.connect_default_terminal(
         composers.make_compose(_node_with_optional_param, _node1)
@@ -629,28 +589,6 @@ def test_unary_graph_composition():
     result = run.to_callable(edges, frozenset([_GraphTestError]))(y=_ROOT_VALUE, z=10)
 
     assert result.result[graph.DEFAULT_TERMINAL][0] == "node1(node4(root, z=10))"
-
-
-def test_curry_with_future_edge():
-    edges = graph.connect_default_terminal(
-        composers.make_first(_curried_stateful_node)
-        + (
-            graph.make_standard_edge(
-                source=_next_int, destination=_curried_stateful_node, key="cur_int"
-            ),
-            graph.make_future_edge(source=_next_int, destination=_next_int),
-        )
-    )
-
-    cg = run.to_callable(edges, frozenset([_GraphTestError]))
-    result = cg(arg1=_ROOT_VALUE, arg2="arg2")
-    result = cg(arg1=_ROOT_VALUE, arg2="arg2", state=result.state)
-    result = cg(arg1=_ROOT_VALUE, arg2="arg2", state=result.state)
-
-    assert (
-        result.result[graph.DEFAULT_TERMINAL][0]
-        == "curried_stateful_node(arg1=root, arg2=arg2, cur_int=3)"
-    )
 
 
 def test_state_is_serializable():
@@ -866,24 +804,30 @@ def _sum(args):
 def test_future_edges():
     _unary_graph_with_state_and_expectations(
         base_types.merge_graphs(
-            composers.make_compose(_plus_1, _times_2),
+            composers.compose_unary(_plus_1, _times_2),
             composers.make_compose(_multiply, _plus_1, key="a"),
             composers.make_compose_future(_multiply, _times_2, "b", None),
         ),
         _times_2,
         _multiply,
-    )([3, 7], [3, 42])
+    )([[3, 7], [3, 42]])
 
 
 def test_future_edges_with_circuit():
-    edges = graph.connect_default_terminal(
-        composers.make_compose(_plus_1, _multiply)
-        + composers.make_compose(_times_2, _plus_1)
-        + (graph.make_future_edge(source=_times_2, destination=_multiply, key="b"),)
+    def some_input(x):
+        return x
+
+    f = _unary_graph_with_state(
+        base_types.merge_graphs(
+            composers.make_compose(_plus_1, _multiply),
+            composers.make_compose(_times_2, _plus_1),
+            composers.make_compose(_multiply, some_input, key="a"),
+            composers.make_compose_future(_multiply, _times_2, "b", None),
+        ),
+        some_input,
+        _times_2,
     )
-    cg = run.to_callable(edges, frozenset([_GraphTestError]))
-    result = cg(a=3)
-    assert cg(a=3, state=result.state).result[graph.DEFAULT_TERMINAL][0] == 50
+    assert f(3, 3) == 50
 
 
 def test_sink_with_incoming_future_edge():
@@ -895,22 +839,32 @@ def test_sink_with_incoming_future_edge():
             y = 4
         return f"x={x}, y={y}"
 
-    edges = composers.make_compose(g, f, key="x") + (
-        graph.make_future_edge(source=g, destination=g, key="y"),
+    f = _unary_graph(
+        base_types.merge_graphs(
+            composers.make_compose(g, f, key="x"),
+            composers.make_compose_future(g, g, "y", None),
+        ),
+        f,
+        g,
     )
-    assert graph.infer_graph_sink(edges) == graph.make_computation_node(g)
-    assert _unary_graph(edges, x=3) == "x=3, y=4"
+    assert f(3) == "x=3, y=4"
 
 
 def test_compose_future():
-    edges = composers.make_compose_future(
-        _multiply,
-        composers.make_and([_plus_1, _times_2, _multiply], merge_fn=_sum),
-        key="b",
-    )
-    edges = graph.connect_default_terminal(edges)
-    cg = run.to_callable(edges, frozenset([_GraphTestError]))
-    result = cg(a=2, x=2, y=2)
-    assert result.result[graph.DEFAULT_TERMINAL][0] == 9
-    result = cg(a=2, x=2, y=2, state=result.state)
-    assert result.result[graph.DEFAULT_TERMINAL][0] == 25
+    a = graph.make_source()
+    x = graph.make_source()
+    y = graph.make_source()
+    _variadic_with_state_and_expectations(
+        base_types.merge_graphs(
+            composers.compose_source_unary(_plus_1, y),
+            composers.compose_source_unary(_times_2, x),
+            composers.compose_source(_multiply, a, "a"),
+            composers.make_compose_future(
+                _multiply,
+                composers.make_and([_plus_1, _times_2, _multiply], merge_fn=_sum),
+                "b",
+                None,
+            ),
+        ),
+        _sum,
+    )(([[{a: 2, x: 2, y: 2}, 9], [{a: 2, x: 2, y: 2}, 25]]))

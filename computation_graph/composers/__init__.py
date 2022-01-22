@@ -254,6 +254,20 @@ def make_compose_future(
     )
 
 
+def compose_source(
+    destination: _ComposersInputType, source: _ComposersInputType, key: Optional[str]
+) -> base_types.GraphType:
+    return _make_compose_inner(destination, source, key=key, is_future=True, priority=0)
+
+
+def compose_source_unary(
+    destination: _ComposersInputType, source: _ComposersInputType
+) -> base_types.GraphType:
+    return _make_compose_inner(
+        destination, source, key=None, is_future=True, priority=0
+    )
+
+
 def compose_left(*args, key: Optional[str] = None) -> base_types.GraphType:
     return make_compose(*reversed(args), key=key)
 
