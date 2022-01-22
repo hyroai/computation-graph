@@ -119,6 +119,25 @@ def _unary_graph_with_state(
     return inner
 
 
+def _unary_graph_with_state_and_expectations(
+    g: base_types.GraphType, source: Callable, sink: Callable
+) -> Callable:
+    real_source = graph.make_source()
+    f = run.to_callable_strict(
+        base_types.merge_graphs(
+            g, composers.compose_left_future(real_source, source, None, None)
+        )
+    )
+
+    def inner(*turns):
+        prev = {}
+        for turn, expectation in turns:
+            prev = f({real_source: turn, **prev})
+            assert prev[graph.make_computation_node(sink)] == expectation
+
+    return inner
+
+
 def _nullary_graph(g, sink):
     return gamla.compose(
         gamla.itemgetter(graph.make_computation_node(sink)),
@@ -845,16 +864,15 @@ def _sum(args):
 
 
 def test_future_edges():
-    edges = graph.connect_default_terminal(
-        composers.make_compose(_plus_1, _times_2)
-        + composers.make_compose(_multiply, _plus_1, key="a")
-        + (graph.make_future_edge(source=_times_2, destination=_multiply, key="b"),)
-    )
-    cg = run.to_callable(edges, frozenset([_GraphTestError]))
-
-    result = cg(x=3)
-    assert result.result[graph.DEFAULT_TERMINAL][0] == 7
-    assert cg(x=3, state=result.state).result[graph.DEFAULT_TERMINAL][0] == 42
+    _unary_graph_with_state_and_expectations(
+        base_types.merge_graphs(
+            composers.make_compose(_plus_1, _times_2),
+            composers.make_compose(_multiply, _plus_1, key="a"),
+            composers.make_compose_future(_multiply, _times_2, "b", None),
+        ),
+        _times_2,
+        _multiply,
+    )([3, 7], [3, 42])
 
 
 def test_future_edges_with_circuit():

@@ -167,7 +167,7 @@ def infer_graph_sink_excluding_terminals(
 
 
 get_incoming_edges_for_node = gamla.compose_left(
-    gamla.groupby(lambda edge: edge.destination),
+    gamla.groupby(base_types.edge_destination),
     gamla.valmap(frozenset),
     gamla.dict_to_getter_with_default(frozenset()),
 )

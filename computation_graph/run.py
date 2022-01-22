@@ -363,8 +363,9 @@ def _make_runner(single_node_runner, is_async, edges, handled_exceptions):
 def _combine_inputs_with_edges(edges, inputs: Dict):
     def replace_source(edge):
         assert edge.source, "only supports singular edges for now"
+
         if edge.source not in inputs:
-            return edge
+            return None
 
         def source():
             return inputs[edge.source]
@@ -374,6 +375,7 @@ def _combine_inputs_with_edges(edges, inputs: Dict):
     return opt_gamla.pipe(
         edges,
         gamla.map(gamla.when(gamla.attrgetter("is_future"), replace_source)),
+        gamla.remove(gamla.equals(None)),
         tuple,
     )
 
