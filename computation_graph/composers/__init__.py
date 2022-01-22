@@ -121,14 +121,33 @@ def _infer_sink(
 ) -> base_types.ComputationNode:
     if isinstance(graph_or_node, base_types.ComputationNode):
         return graph_or_node
-    return graph.infer_graph_sink_excluding_terminals(graph_or_node)
+    graph_without_future_edges = gamla.pipe(graph_or_node, graph.remove_future_edges)
+    if graph_without_future_edges:
+        try:
+            return graph.infer_graph_sink(graph_without_future_edges)
+        except AssertionError:
+            # If we reached here we can try again without sources of future edges.
+            sources_of_future_edges = gamla.pipe(
+                graph_or_node,
+                gamla.filter(gamla.attrgetter("is_future")),
+                gamla.map(base_types.edge_source),
+                frozenset,
+            )
+            result = (
+                graph.get_leaves(graph_without_future_edges) - sources_of_future_edges
+            )
+            assert len(result) == 1
+            return gamla.head(result)
+
+    assert len(graph_or_node) == 1, graph_without_future_edges
+    return graph_or_node[0].destination
 
 
 def make_first(*graphs: _ComposersInputType) -> base_types.GraphType:
     graph_or_nodes = tuple(map(_callable_or_graph_type_to_node_or_graph_type, graphs))
 
-    def first_sink(x):
-        return x
+    def first_sink(constituent_of_first):
+        return constituent_of_first
 
     return base_types.merge_graphs(
         *map(_get_edges_from_node_or_graph, graph_or_nodes),
@@ -143,7 +162,7 @@ def make_first(*graphs: _ComposersInputType) -> base_types.GraphType:
                         priority=i,
                         source=g,
                         destination=first_sink,
-                        key="x",
+                        key="constituent_of_first",
                     )
                 )
             ),
@@ -246,10 +265,13 @@ def make_compose_future(
     key: Optional[str],
     default: base_types.Result,
 ) -> base_types.GraphType:
+    def when_memory_unavailable():
+        return default
+
     return base_types.merge_graphs(
         _make_compose_inner(destination, source, key=key, is_future=True, priority=0),
         _make_compose_inner(
-            destination, lambda: default, key=key, is_future=False, priority=1
+            destination, when_memory_unavailable, key=key, is_future=False, priority=1
         ),
     )
 

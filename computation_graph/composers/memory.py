@@ -2,7 +2,7 @@ from typing import Any, Callable
 
 import gamla
 
-from computation_graph import base_types, composers, graph
+from computation_graph import base_types, composers, legacy
 
 
 def accumulate(f: base_types.GraphOrCallable) -> base_types.GraphType:
@@ -14,11 +14,19 @@ def accumulate(f: base_types.GraphOrCallable) -> base_types.GraphType:
     return composers.make_compose(accumulate, f, key="x")
 
 
-def changed(f: base_types.GraphOrCallable) -> base_types.GraphType:
-    def check_changed(state, x):
-        return base_types.ComputationResult(x != state, x)
+class _NoValueYet:
+    pass
 
-    return composers.make_compose(check_changed, f, key="x")
+
+_NO_VALUE_YET = _NoValueYet()
+
+
+def changed(f: base_types.GraphOrCallable) -> base_types.GraphType:
+    @legacy.handle_state("memory", _NO_VALUE_YET)
+    def check_changed(memory, value_to_watch):
+        return legacy.LegacyComputationResult(value_to_watch != memory, value_to_watch)
+
+    return composers.make_compose(check_changed, f, key="value_to_watch")
 
 
 def ever(bool_node):
@@ -31,8 +39,9 @@ def ever(bool_node):
 def reduce_with_past_result(
     reduce_with_past: Callable[[Any, Any], Any], f: base_types.GraphOrCallable
 ):
+    @legacy.handle_state("state", None)
     def lag(state, current):
-        return base_types.ComputationResult(state, current)
+        return legacy.LegacyComputationResult(state, current)
 
     return composers.compose_dict(
         reduce_with_past,
@@ -41,5 +50,5 @@ def reduce_with_past_result(
 
 
 @gamla.curry
-def with_state(key: str, f: Callable) -> base_types.GraphType:
-    return (graph.make_future_edge(source=f, destination=f, key=key),)
+def with_state(key: str, default, f: Callable) -> base_types.GraphType:
+    return composers.make_compose_future(f, f, key, default)

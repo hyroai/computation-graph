@@ -170,6 +170,11 @@ def _merge_immutable(x, y):
     return x.update(y)
 
 
+def _handle_node_not_processing(exception, inputs):
+    del exception, inputs
+    return immutables.Map()
+
+
 def _process_layer_in_parallel(
     f: Callable[
         [_IntermediaryResults, base_types.ComputationNode], _IntermediaryResults
@@ -181,7 +186,9 @@ def _process_layer_in_parallel(
         gamla.pack,
         gamla.explode(1),
         opt_gamla.map(opt_gamla.star(lambda x, y: (x, y[0]))),
-        gamla.map(gamla.excepts(_DepNotFoundError, lambda _: immutables.Map(), f)),
+        gamla.map(
+            gamla.try_and_excepts(_DepNotFoundError, _handle_node_not_processing, f)
+        ),
         opt_gamla.reduce(_merge_immutable, immutables.Map()),
     )
 
@@ -370,7 +377,9 @@ def _combine_inputs_with_edges(edges, inputs: Dict):
         def source():
             return inputs[edge.source]
 
-        return dataclasses.replace(edge, source=graph.make_computation_node(source))
+        return dataclasses.replace(
+            edge, is_future=False, source=graph.make_computation_node(source)
+        )
 
     return opt_gamla.pipe(
         edges,
