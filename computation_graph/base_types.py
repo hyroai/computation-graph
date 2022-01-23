@@ -3,7 +3,7 @@ from __future__ import annotations
 import dataclasses
 import functools
 import typing
-from typing import Any, Callable, Dict, Hashable, Optional, Tuple, Union
+from typing import Callable, Hashable, Optional, Tuple, Union
 
 import gamla
 
@@ -103,12 +103,6 @@ class ComputationNode:
 
     def __repr__(self):
         return self.name
-
-
-@dataclasses.dataclass(frozen=True)
-class ComputationInput:
-    kwargs: Dict[str, Any]
-    args: Tuple[Any, ...] = ()
 
 
 @dataclasses.dataclass(frozen=True)

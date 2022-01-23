@@ -72,17 +72,19 @@ _NodeToResultsDict = Dict[base_types.ComputationNode, base_types.Result]
 
 NodeToResults = Callable[[base_types.ComputationNode], base_types.Result]
 
+_ComputationInput = Tuple[Tuple[base_types.Result, ...], Dict[str, base_types.Result]]
+
 
 def _get_computation_input(
     node: base_types.ComputationNode,
     incoming_edges: base_types.GraphType,
     results: Tuple[Tuple[base_types.Result, ...], ...],
-) -> base_types.ComputationInput:
+) -> _ComputationInput:
     if node.signature.is_kwargs:
         assert (
             len(results) == 1
         ), f"signature for {base_types.pretty_print_function_name(node.func)} contains `**kwargs`. This is considered unary, meaning one incoming edge, but we got more than one: {incoming_edges}."
-        return base_types.ComputationInput(args=gamla.head(results), kwargs={})
+        return gamla.head(results), {}
     if (
         not node.signature.is_args
         and sum(
@@ -93,13 +95,11 @@ def _get_computation_input(
         )
         == 1
     ):
-        return base_types.ComputationInput(
-            args=(), kwargs={node.signature.kwargs[0]: gamla.head(gamla.head(results))}
-        )
+        return (), {node.signature.kwargs[0]: gamla.head(gamla.head(results))}
     edges_to_results = dict(zip(incoming_edges, results))
-    return base_types.ComputationInput(
-        args=_get_args(edges_to_results) if node.signature.is_args else (),
-        kwargs=_get_inner_kwargs(edges_to_results),
+    return (
+        _get_args(edges_to_results) if node.signature.is_args else (),
+        _get_inner_kwargs(edges_to_results),
     )
 
 
@@ -116,10 +116,6 @@ def _type_check(node: base_types.ComputationNode, result):
             logging.error([node.func.__code__, e])
 
 
-def _apply(f: Callable, node_input: base_types.ComputationInput) -> base_types.Result:
-    return f(*node_input.args, **node_input.kwargs)
-
-
 _SingleNodeSideEffect = Callable[[base_types.ComputationNode, Any], None]
 
 
@@ -130,9 +126,8 @@ def _run_keeping_choices(
 
         @opt_async_gamla.star
         async def run_keeping_choices(node, edges_leading_to_node, values):
-            result = _apply(
-                node.func, _get_computation_input(node, edges_leading_to_node, values)
-            )
+            args, kwargs = _get_computation_input(node, edges_leading_to_node, values)
+            result = node.func(*args, **kwargs)
             result = await gamla.to_awaitable(result)
             side_effect(node, result)
             return result
@@ -141,9 +136,8 @@ def _run_keeping_choices(
 
         @opt_gamla.star
         def run_keeping_choices(node, edges_leading_to_node, values):
-            result = _apply(
-                node.func, _get_computation_input(node, edges_leading_to_node, values)
-            )
+            args, kwargs = _get_computation_input(node, edges_leading_to_node, values)
+            result = node.func(*args, **kwargs)
             side_effect(node, result)
             return result
 
