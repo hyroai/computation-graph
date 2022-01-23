@@ -154,9 +154,7 @@ get_terminals = gamla.compose_left(
 )
 
 
-remove_future_edges = gamla.compose(
-    tuple, opt_gamla.remove(gamla.attrgetter("is_future"))
-)
+remove_future_edges = gamla.compose(tuple, opt_gamla.remove(base_types.edge_is_future))
 
 
 def make_source():

@@ -129,7 +129,7 @@ def _infer_sink(
             # If we reached here we can try again without sources of future edges.
             sources_of_future_edges = gamla.pipe(
                 graph_or_node,
-                gamla.filter(gamla.attrgetter("is_future")),
+                gamla.filter(base_types.edge_is_future),
                 gamla.map(base_types.edge_source),
                 frozenset,
             )

@@ -124,6 +124,7 @@ edge_destination = gamla.attrgetter("destination")
 edge_key = gamla.attrgetter("key")
 edge_priority = gamla.attrgetter("priority")
 edge_source = gamla.attrgetter("source")
+edge_is_future = gamla.attrgetter("is_future")
 
 is_computation_graph = gamla.alljuxt(
     # Note that this cannot be set to `GraphType` (due to `is_instance` limitation).

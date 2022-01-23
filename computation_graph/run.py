@@ -383,7 +383,7 @@ def _combine_inputs_with_edges(edges, inputs: Dict):
 
     return opt_gamla.pipe(
         edges,
-        gamla.map(gamla.when(gamla.attrgetter("is_future"), replace_source)),
+        gamla.map(gamla.when(base_types.edge_is_future, replace_source)),
         gamla.remove(gamla.equals(None)),
         tuple,
     )
@@ -439,5 +439,10 @@ to_callable = to_callable_with_side_effect(gamla.just(gamla.just(None)))
 # to_callable = to_callable_with_side_effect(graphviz.computation_trace('utterance_computation.dot'))
 
 
-def to_callable_strict(g):
+def to_callable_strict(
+    g: base_types.GraphType,
+) -> Callable[
+    [Dict[base_types.ComputationNode, base_types.Result]],
+    Dict[base_types.ComputationNode, base_types.Result],
+]:
     return gamla.compose(to_callable(g, frozenset()), immutables.Map)
