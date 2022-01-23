@@ -1,5 +1,4 @@
 import asyncio
-import functools
 import json
 
 import gamla
@@ -39,7 +38,7 @@ def _curried_node(arg1, arg2):
     return f"curried_node(arg1={arg1}, arg2={arg2})"
 
 
-def _unactionable_node(arg1):
+def _node_that_raises(arg1):
     raise base_types.SkipComputationError
 
 
@@ -149,8 +148,7 @@ def test_self_future_edge():
 def test_empty_result():
     with pytest.raises(KeyError):
         graph_runners.nullary(
-            composers.compose_unary(_unactionable_node, lambda: "hi"),
-            _unactionable_node,
+            composers.compose_unary(_node_that_raises, lambda: "hi"), _node_that_raises
         )
 
 
@@ -217,10 +215,10 @@ def test_first_with_future_edge():
 
     f = graph_runners.unary_with_state(
         base_types.merge_graphs(
-            composers.compose_unary(_unactionable_node, input_node),
+            composers.compose_unary(_node_that_raises, input_node),
             composers.make_compose(_reducer_node, input_node, key="arg1"),
             composers.make_compose(_node1, input_node, key="arg1"),
-            composers.make_first(_unactionable_node, _reducer_node, _node1),
+            composers.make_first(_node_that_raises, _reducer_node, _node1),
             composers.make_compose(_reducer_node, _next_int, key="cur_int"),
             composers.make_compose_future(_next_int, _next_int, "x", None),
         ),
@@ -252,48 +250,25 @@ def test_and_with_future():
     )
 
 
-def test_first_with_and():
-    edges = graph.connect_default_terminal(
-        composers.make_first(
-            _unactionable_node,
-            composers.make_and(
-                (_node1, _node2),
-                merge_fn=functools.partial(_merger, side_effects="side_effects"),
-            ),
-        )
-    )
-
-    result = run.to_callable(edges, frozenset([base_types.SkipComputationError]))(
-        arg1=_ROOT_VALUE
-    )
-
-    assert (
-        result.result[graph.DEFAULT_TERMINAL][0]
-        == "[node1(root),node2(root)], side_effects=side_effects"
-    )
-
-
 def test_and_with_unactionable():
-    edges = graph.connect_default_terminal(
-        composers.make_and(
-            funcs=(_reducer_node, _node2, _node1, _unactionable_node), merge_fn=_merger
-        )
-        + (
-            graph.make_standard_edge(
-                source=_next_int, destination=_reducer_node, key="cur_int"
-            ),
-            graph.make_future_edge(source=_next_int, destination=_next_int),
-        )
+    source1 = graph.make_source()
+    source2 = graph.make_source()
+    g = base_types.merge_graphs(
+        composers.make_and((_reducer_node, _node_that_raises), _merger),
+        composers.compose_source(_merger, source2, key="side_effects"),
+        composers.compose_source(_node_that_raises, source1, key="arg1"),
+        composers.compose_source(_reducer_node, source1, key="arg1"),
+        composers.make_compose(_reducer_node, _next_int, key="cur_int"),
+        composers.compose_unary_future(_next_int, _next_int, None),
     )
-    assert run.to_callable(edges, frozenset([base_types.SkipComputationError]))(
-        arg1=_ROOT_VALUE
-    ).result == {graph.DEFAULT_TERMINAL: {}}
+    with pytest.raises(KeyError):
+        graph_runners.variadic_infer_sink(g)({source1: "root", source2: "bla"})
 
 
 def test_or():
     edges = graph.connect_default_terminal(
         composers.make_or(
-            funcs=(_reducer_node, _node2, _node1, _unactionable_node), merge_fn=_merger
+            funcs=(_reducer_node, _node2, _node1, _node_that_raises), merge_fn=_merger
         )
         + (
             graph.make_standard_edge(
@@ -322,7 +297,7 @@ def test_or():
 def test_graph_wrapping():
     edges = graph.connect_default_terminal(
         composers.make_first(
-            _unactionable_node,
+            _node_that_raises,
             composers.make_and(funcs=(_node1, _node2, _node3), merge_fn=_merger),
             _node1,
         )
@@ -492,7 +467,7 @@ def test_compose_compose():
 def test_compose_after_first():
     edges = graph.connect_default_terminal(
         composers.make_compose(
-            composers.make_first(_unactionable_node, _node1, _node2), _node3, key="arg1"
+            composers.make_first(_node_that_raises, _node1, _node2), _node3, key="arg1"
         )
     )
     result = run.to_callable(edges, frozenset([base_types.SkipComputationError]))(
@@ -508,7 +483,7 @@ def test_first_after_compose():
 
     cg = run.to_callable(
         graph.connect_default_terminal(
-            composers.make_first(_unactionable_node, inner_edges, _node1)
+            composers.make_first(_node_that_raises, inner_edges, _node1)
         ),
         frozenset([base_types.SkipComputationError]),
     )
@@ -518,11 +493,11 @@ def test_first_after_compose():
 
 
 def test_first_first():
-    inner_first = composers.make_first(_unactionable_node, _node1, _node2)
+    inner_first = composers.make_first(_node_that_raises, _node1, _node2)
 
     cg = run.to_callable(
         graph.connect_default_terminal(
-            composers.make_first(_unactionable_node, inner_first, _node1)
+            composers.make_first(_node_that_raises, inner_first, _node1)
         ),
         frozenset([base_types.SkipComputationError]),
     )
@@ -550,7 +525,7 @@ def test_compose_with_node_already_in_graph():
 
 
 def test_first_with_subgraph_that_raises():
-    inner = composers.make_compose(_node2, _unactionable_node)
+    inner = composers.make_compose(_node2, _node_that_raises)
     edges = graph.connect_default_terminal(composers.make_first(inner, _node1))
     result = run.to_callable(edges, frozenset([base_types.SkipComputationError]))(
         arg1=_ROOT_VALUE
@@ -561,7 +536,7 @@ def test_first_with_subgraph_that_raises():
 def test_or_with_sink_that_raises():
     edges = graph.connect_default_terminal(
         composers.make_or(
-            (_unactionable_node, _node1), merge_fn=_merger_that_raises_when_empty
+            (_node_that_raises, _node1), merge_fn=_merger_that_raises_when_empty
         )
     )
     result = run.to_callable(edges, frozenset([base_types.SkipComputationError]))(

@@ -65,6 +65,18 @@ def variadic_with_state_and_expectations(g, sink):
     return inner
 
 
+def variadic_infer_sink(g):
+    f = run.to_callable_strict(g)
+
+    def inner(*turns):
+        prev = {}
+        for turn in turns:
+            prev = f({**turn, **prev})
+        return prev[graph.infer_graph_sink(g)]
+
+    return inner
+
+
 def variadic_stateful_infer_sink(g):
     f = run.to_callable_strict(g)
 
