@@ -146,34 +146,12 @@ def test_self_future_edge():
     assert f(_ROOT_VALUE, _ROOT_VALUE, _ROOT_VALUE) == "node2(node1(root) cur_int=3)"
 
 
-def test_multiple_inputs():
-    edges = graph.connect_default_terminal(
-        (
-            graph.make_standard_edge(source=_node1, destination=_node2, key="arg1"),
-            graph.make_standard_edge(source=_node1, destination=_node3, key="arg1"),
-            graph.make_standard_edge(source=_node2, destination=_node3, key="arg2"),
-        )
-    )
-    result = run.to_callable(edges, frozenset([base_types.SkipComputationError]))(
-        arg1=_ROOT_VALUE
-    )
-    assert (
-        result.result[graph.DEFAULT_TERMINAL][0]
-        == "node3(arg1=node1(root), arg2=node2(node1(root)))"
-    )
-
-
 def test_empty_result():
-    edges = graph.connect_default_terminal(
-        (
-            graph.make_standard_edge(
-                source=_node1, destination=_unactionable_node, key="arg1"
-            ),
+    with pytest.raises(KeyError):
+        graph_runners.nullary(
+            composers.compose_unary(_unactionable_node, lambda: "hi"),
+            _unactionable_node,
         )
-    )
-    assert run.to_callable(edges, frozenset([base_types.SkipComputationError]))(
-        arg1=_ROOT_VALUE
-    ).result == {graph.DEFAULT_TERMINAL: {}}
 
 
 def test_tuple_source_node():
