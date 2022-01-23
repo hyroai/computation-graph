@@ -146,16 +146,19 @@ def test_kwargs():
 
 
 @legacy.handle_state
-def _node_with_state_as_arg(x, s):
+def _node_with_state_as_arg(input, s):
     if s is None:
         s = 0
-    return legacy.LegacyComputationResult(result=x + f" state={s + 1}", state=s + 1)
+    return legacy.LegacyComputationResult(result=input + f" state={s + 1}", state=s + 1)
+
+
+import logging
 
 
 def test_state():
     edges = graph.connect_default_terminal(
         base_types.merge_graphs(
-            composers.compose_left(_node1, _node_with_state_as_arg, key="x"),
+            composers.compose_left(_node1, _node_with_state_as_arg, key="input"),
             composers.compose_left_unary(_node_with_state_as_arg, _node2),
         )
     )
@@ -163,7 +166,7 @@ def test_state():
     result = cg(arg1=_ROOT_VALUE)
     result = cg(arg1=_ROOT_VALUE, state=result.state)
     result = cg(arg1=_ROOT_VALUE, state=result.state)
-    assert result.result[graph.DEFAULT_TERMINAL][0] == "node2(node1(root)) state=3"
+    assert result.result[graph.DEFAULT_TERMINAL][0] == "node2(node1(root) state=3)"
 
 
 def test_self_future_edge():
