@@ -276,6 +276,14 @@ def make_compose_future(
     )
 
 
+def compose_unary_future(
+    destination: _ComposersInputType,
+    source: _ComposersInputType,
+    default: base_types.Result,
+) -> base_types.GraphType:
+    return make_compose_future(destination, source, None, default)
+
+
 def compose_source(
     destination: _ComposersInputType, source: _ComposersInputType, key: Optional[str]
 ) -> base_types.GraphType:

@@ -204,12 +204,11 @@ def test_first():
 
 
 def test_first_all_unactionable():
-    cg = run.to_callable(
-        graph.connect_default_terminal(composers.make_first(_unactionable_node)),
-        frozenset([base_types.SkipComputationError]),
-    )
-    result = cg(arg1=_ROOT_VALUE)
-    assert result.result == {graph.DEFAULT_TERMINAL: {}}
+    def raises():
+        raise base_types.SkipComputationError
+
+    with pytest.raises(KeyError):
+        graph_runners.nullary_infer_sink(composers.make_first(raises))
 
 
 def test_first_with_future_edge():
@@ -231,23 +230,25 @@ def test_first_with_future_edge():
     assert f(_ROOT_VALUE, _ROOT_VALUE, _ROOT_VALUE) == "root cur_int=3"
 
 
-def test_and():
-    edges = graph.connect_default_terminal(
-        composers.make_and(funcs=(_reducer_node, _node2, _node1), merge_fn=_merger)
-        + (
-            graph.make_standard_edge(
-                source=_next_int, destination=_reducer_node, key="cur_int"
-            ),
-            graph.make_future_edge(source=_next_int, destination=_next_int),
-        )
+def test_and_with_future():
+    source1 = graph.make_source()
+    source2 = graph.make_source()
+    g = base_types.merge_graphs(
+        composers.make_and((_reducer_node, _node2, _node1), _merger),
+        composers.compose_source(_merger, source2, key="side_effects"),
+        composers.compose_source(_node1, source1, key="arg1"),
+        composers.compose_source(_node2, source1, key="arg1"),
+        composers.compose_source(_reducer_node, source1, key="arg1"),
+        composers.make_compose(_reducer_node, _next_int, key="cur_int"),
+        composers.compose_unary_future(_next_int, _next_int, None),
     )
-    cg = run.to_callable(edges, frozenset([base_types.SkipComputationError]))
-    result = cg(arg1=_ROOT_VALUE, side_effects="side_effects")
-    result = cg(arg1=_ROOT_VALUE, state=result.state, side_effects="side_effects")
-    result = cg(arg1=_ROOT_VALUE, state=result.state, side_effects="side_effects")
     assert (
-        result.result[graph.DEFAULT_TERMINAL][0]
-        == "[root cur_int=3,node2(root),node1(root)], side_effects=side_effects"
+        graph_runners.variadic_stateful_infer_sink(g)(
+            {source1: "root", source2: "bla"},
+            {source1: "root", source2: "bla"},
+            {source1: "root", source2: "bla"},
+        )
+        == "[root cur_int=3,node2(root),node1(root)], side_effects=bla"
     )
 
 
