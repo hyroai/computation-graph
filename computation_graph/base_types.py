@@ -126,6 +126,11 @@ edge_priority = gamla.attrgetter("priority")
 edge_source = gamla.attrgetter("source")
 edge_is_future = gamla.attrgetter("is_future")
 
+
+def edge_sources(edge: ComputationEdge) -> Tuple[ComputationNode, ...]:
+    return edge.args or (edge.source,)  # type: ignore
+
+
 is_computation_graph = gamla.alljuxt(
     # Note that this cannot be set to `GraphType` (due to `is_instance` limitation).
     gamla.is_instance(tuple),

@@ -19,20 +19,13 @@ def _transpose_graph(
     graph: Dict[base_types.ComputationNode, Set[base_types.ComputationNode]]
 ) -> Dict[base_types.ComputationNode, Set[base_types.ComputationNode]]:
     return opt_gamla.pipe(
-        graph.keys(), opt_gamla.groupby_many(graph.get), opt_gamla.valmap(set)
+        graph, dict.keys, opt_gamla.groupby_many(graph.get), opt_gamla.valmap(set)
     )
 
 
-def _get_edge_sources(edge: base_types.ComputationEdge):
-    return edge.args or (edge.source,)
-
-
-def _get_edge_sources_for_toposrt(edge: base_types.ComputationEdge):
-    nodes = edge.args or (edge.source,)
-    return map(lambda n: (n, edge.is_future), nodes)
-
-
-def _get_edge_destination_for_toposort(edge: base_types.ComputationEdge):
+def _get_edge_destination_for_toposort(
+    edge: base_types.ComputationEdge,
+) -> Tuple[base_types.ComputationNode, bool]:
     return edge.destination, edge.is_future
 
 
@@ -40,7 +33,12 @@ _toposort_nodes: Callable[
     [base_types.GraphType],
     Tuple[FrozenSet[Tuple[base_types.ComputationNode, bool]], ...],
 ] = opt_gamla.compose_left(
-    opt_gamla.groupby_many(_get_edge_sources_for_toposrt),
+    opt_gamla.groupby_many(
+        gamla.compose(
+            gamla.explode(0),
+            gamla.juxt(base_types.edge_sources, base_types.edge_is_future),
+        )
+    ),
     opt_gamla.valmap(
         opt_gamla.compose_left(opt_gamla.map(_get_edge_destination_for_toposort), set)
     ),
@@ -230,7 +228,7 @@ def _edges_to_values(
 ]:
     return opt_gamla.maptuple(
         opt_gamla.compose_left(
-            _get_edge_sources,
+            base_types.edge_sources,
             opt_gamla.maptuple(
                 gamla.translate_exception(
                     accumulated_outputs.__getitem__, KeyError, _DepNotFoundError
@@ -338,7 +336,7 @@ _is_graph_async = opt_gamla.compose_left(
 _assert_no_unwanted_ambiguity = gamla.compose_left(
     gamla.groupby(
         gamla.juxt(
-            _get_edge_sources,
+            base_types.edge_sources,
             gamla.attrgetter("destination"),
             gamla.attrgetter("priority"),
         )
