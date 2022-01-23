@@ -350,12 +350,10 @@ def test_node_with_bound_optional_param():
 
 
 def test_compose():
-    result = run.to_callable(
-        graph.connect_default_terminal(composers.make_compose(_node1, _node2)),
-        frozenset([base_types.SkipComputationError]),
-    )(arg1=_ROOT_VALUE)
-
-    assert result.result[graph.DEFAULT_TERMINAL][0] == "node1(node2(root))"
+    assert (
+        graph_runners.nullary_infer_sink(composers.make_compose(_node1, lambda: "hi"))
+        == "node1(hi)"
+    )
 
 
 def test_compose_with_future_edge():
