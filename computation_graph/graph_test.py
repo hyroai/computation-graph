@@ -30,7 +30,7 @@ def _node3(arg1, arg2):
     return f"node3(arg1={arg1}, arg2={arg2})"
 
 
-def _node4(y, z=5):
+def _node4(y, z):
     return f"node4({y}, z={z})"
 
 
@@ -154,38 +154,19 @@ def test_empty_result():
         )
 
 
-def test_tuple_source_node():
-    edges = graph.connect_default_terminal(
-        (
-            graph.make_standard_edge(
-                source=(_node1, _node2),
-                destination=lambda *args, side_effects: "["
-                + ",".join(args)
-                + f"], side_effects={side_effects}",
-            ),
-        )
-    )
+def test_optional():
+    def raises():
+        raise base_types.SkipComputationError
 
-    result = run.to_callable(edges, frozenset([base_types.SkipComputationError]))(
-        arg1=_ROOT_VALUE, side_effects="side_effects"
-    )
+    def sink(x):
+        return x
 
     assert (
-        result.result[graph.DEFAULT_TERMINAL][0]
-        == f"[node1({_ROOT_VALUE}),node2({_ROOT_VALUE})], side_effects=side_effects"
+        graph_runners.nullary(
+            composers.compose_unary(sink, composers.make_optional(raises, None)), sink
+        )
+        is None
     )
-
-
-def test_optional():
-    edges = graph.connect_default_terminal(
-        composers.make_optional(_unactionable_node, default_value=None)
-    )
-
-    result = run.to_callable(edges, frozenset([base_types.SkipComputationError]))(
-        arg1=_ROOT_VALUE
-    )
-
-    assert result.result[graph.DEFAULT_TERMINAL][0] is None
 
 
 def test_optional_with_future_edge():
@@ -208,18 +189,6 @@ def test_optional_with_future_edge():
         output,
     )
     assert f(_ROOT_VALUE, _ROOT_VALUE, _ROOT_VALUE) == "root cur_int=3"
-
-
-def test_optional_default_value():
-    edges = graph.connect_default_terminal(
-        composers.make_optional(_unactionable_node, default_value="optional failed")
-    )
-
-    result = run.to_callable(edges, frozenset([base_types.SkipComputationError]))(
-        arg1=_ROOT_VALUE
-    )
-
-    assert result.result[graph.DEFAULT_TERMINAL][0] == "optional failed"
 
 
 def test_first():

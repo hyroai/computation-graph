@@ -74,6 +74,12 @@ edges_to_node_id_map = gamla.compose_left(
 _CallableOrNode = Union[Callable, base_types.ComputationNode]
 
 
+def _supported_signature(signature: base_types.NodeSignature):
+    return not signature.optional_kwargs and not (
+        signature.kwargs and signature.is_args
+    )
+
+
 def make_computation_node(func: _CallableOrNode) -> base_types.ComputationNode:
     if isinstance(func, base_types.ComputationNode):
         return func
@@ -81,7 +87,9 @@ def make_computation_node(func: _CallableOrNode) -> base_types.ComputationNode:
     return base_types.ComputationNode(
         name=_infer_callable_name(func),
         func=func,
-        signature=_infer_callable_signature(func),
+        signature=gamla.pipe(
+            func, _infer_callable_signature, gamla.assert_that(_supported_signature)
+        ),
         is_terminal=False,
     )
 
