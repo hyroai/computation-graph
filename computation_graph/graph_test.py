@@ -1,12 +1,11 @@
 import asyncio
 import functools
 import json
-from typing import Callable
 
 import gamla
 import pytest
 
-from computation_graph import base_types, composers, graph, legacy, run
+from computation_graph import base_types, composers, graph, graph_runners, legacy, run
 
 pytestmark = pytest.mark.asyncio
 
@@ -74,87 +73,19 @@ def _sometimes_unactionable_reducer_node(arg1, cur_int):
     return arg1 + f" state={cur_int + 1}"
 
 
-def _unary_graph(g: base_types.GraphType, source: Callable, sink: Callable) -> Callable:
-    real_source = graph.make_source()
-    return gamla.compose(
-        gamla.itemgetter(graph.make_computation_node(sink)),
-        run.to_callable_strict(
-            base_types.merge_graphs(
-                g, composers.compose_left_future(real_source, source, None, None)
-            )
-        ),
-        gamla.wrap_dict(real_source),
-    )
-
-
-def _unary_graph_with_state(
-    g: base_types.GraphType, source: Callable, sink: Callable
-) -> Callable:
-    real_source = graph.make_source()
-    f = run.to_callable_strict(
-        base_types.merge_graphs(
-            g, composers.compose_left_future(real_source, source, None, None)
-        )
-    )
-
-    def inner(*turns):
-        prev = {}
-        for turn in turns:
-            prev = f({real_source: turn, **prev})
-        return prev[graph.make_computation_node(sink)]
-
-    return inner
-
-
-def _unary_graph_with_state_and_expectations(
-    g: base_types.GraphType, source: Callable, sink: Callable
-) -> Callable:
-    real_source = graph.make_source()
-    return gamla.compose(
-        _variadic_with_state_and_expectations(
-            base_types.merge_graphs(
-                g, composers.compose_left_future(real_source, source, None, None)
-            ),
-            sink,
-        ),
-        tuple,
-        gamla.map(lambda t: ({real_source: t[0]}, t[1])),
-    )
-
-
-def _variadic_with_state_and_expectations(g, sink):
-    f = run.to_callable_strict(g)
-
-    def inner(turns):
-        prev = {}
-        for turn, expectation in turns:
-            prev = f({**turn, **prev})
-            assert prev[graph.make_computation_node(sink)] == expectation
-
-    return inner
-
-
-def _nullary_graph(g, sink):
-    return gamla.compose(
-        gamla.itemgetter(graph.make_computation_node(sink)),
-        run.to_callable_strict(g),
-        gamla.just({}),
-    )()
-
-
 def test_simple():
     for v in ["root", None]:
         assert (
-            _unary_graph(composers.compose_left_unary(_node1, _node2), _node1, _node2)(
-                v
-            )
+            graph_runners.unary(
+                composers.compose_left_unary(_node1, _node2), _node1, _node2
+            )(v)
             == f"node2(node1({v}))"
         )
 
 
 async def test_simple_async():
     assert (
-        await _unary_graph(
+        await graph_runners.unary(
             composers.compose_left_unary(_node1_async, _node2), _node1_async, _node2
         )("hi")
         == "node2(node1(hi))"
@@ -166,7 +97,7 @@ def test_kwargs():
         return x
 
     assert (
-        _unary_graph(
+        graph_runners.unary(
             base_types.merge_graphs(
                 composers.compose_unary(_node1, source),
                 composers.compose_unary(_node2, source),
@@ -189,7 +120,7 @@ def _node_with_state_as_arg(arg1, state):
 
 
 def test_state():
-    f = _unary_graph_with_state(
+    f = graph_runners.unary_with_state(
         base_types.merge_graphs(
             composers.compose_left(_node1, _node_with_state_as_arg, key="arg1"),
             composers.compose_left_unary(_node_with_state_as_arg, _node2),
@@ -201,7 +132,7 @@ def test_state():
 
 
 def test_self_future_edge():
-    f = _unary_graph_with_state(
+    f = graph_runners.unary_with_state(
         base_types.merge_graphs(
             composers.compose_dict(
                 _reducer_node, {"arg1": _node1, "cur_int": _next_int}
@@ -286,7 +217,7 @@ def test_optional_with_future_edge():
     def input(x):
         return x
 
-    f = _unary_graph_with_state(
+    f = graph_runners.unary_with_state(
         base_types.merge_graphs(
             composers.make_compose(_reducer_node, input, key="arg1"),
             composers.compose_unary(
@@ -338,7 +269,7 @@ def test_first_with_future_edge():
     def input_node(x):
         return x
 
-    f = _unary_graph_with_state(
+    f = graph_runners.unary_with_state(
         base_types.merge_graphs(
             composers.compose_unary(_unactionable_node, input_node),
             composers.make_compose(_reducer_node, input_node, key="arg1"),
@@ -505,7 +436,7 @@ def test_compose():
 
 
 def test_compose_with_future_edge():
-    f = _unary_graph_with_state(
+    f = graph_runners.unary_with_state(
         base_types.merge_graphs(
             composers.make_compose(_node1, _node2),
             composers.make_compose(_reducer_node, _node1, key="arg1"),
@@ -720,7 +651,10 @@ def test_double_star_signature_considered_unary():
         lambda some_argname: some_argname + 1,
         lambda different_argname: different_argname * 2,
     )
-    assert _nullary_graph(composers.make_compose(sink, lambda: 3), sink) == (4, 6)
+    assert graph_runners.nullary(composers.make_compose(sink, lambda: 3), sink) == (
+        4,
+        6,
+    )
 
 
 def test_type_safety_messages(caplog):
@@ -728,7 +662,8 @@ def test_type_safety_messages(caplog):
         return "hello " + x
 
     assert (
-        _nullary_graph(composers.make_compose(f, lambda: "world"), f) == "hello world"
+        graph_runners.nullary(composers.make_compose(f, lambda: "world"), f)
+        == "hello world"
     )
     assert "TypeError" in caplog.text
 
@@ -738,7 +673,8 @@ def test_type_safety_messages_no_overtrigger(caplog):
         return "hello " + x
 
     assert (
-        _nullary_graph(composers.make_compose(f, lambda: "world"), f) == "hello world"
+        graph_runners.nullary(composers.make_compose(f, lambda: "world"), f)
+        == "hello world"
     )
     assert "TypeError" not in caplog.text
 
@@ -784,7 +720,7 @@ def _sum(args):
 
 
 def test_future_edges():
-    _unary_graph_with_state_and_expectations(
+    graph_runners.unary_with_state_and_expectations(
         base_types.merge_graphs(
             composers.compose_unary(_plus_1, _times_2),
             composers.make_compose(_multiply, _plus_1, key="a"),
@@ -799,7 +735,7 @@ def test_future_edges_with_circuit():
     def some_input(x):
         return x
 
-    f = _unary_graph_with_state(
+    f = graph_runners.unary_with_state(
         base_types.merge_graphs(
             composers.make_compose(_plus_1, _multiply),
             composers.make_compose(_times_2, _plus_1),
@@ -821,7 +757,7 @@ def test_sink_with_incoming_future_edge():
             y = 4
         return f"x={x}, y={y}"
 
-    f = _unary_graph(
+    f = graph_runners.unary(
         base_types.merge_graphs(
             composers.make_compose(g, f, key="x"),
             composers.make_compose_future(g, g, "y", None),
@@ -836,7 +772,7 @@ def test_compose_future():
     a = graph.make_source()
     x = graph.make_source()
     y = graph.make_source()
-    _variadic_with_state_and_expectations(
+    graph_runners.variadic_with_state_and_expectations(
         base_types.merge_graphs(
             composers.compose_source_unary(_plus_1, y),
             composers.compose_source_unary(_times_2, x),
