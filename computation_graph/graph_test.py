@@ -38,7 +38,7 @@ def _curried_node(arg1, arg2):
     return f"curried_node(arg1={arg1}, arg2={arg2})"
 
 
-def _node_that_raises(arg1):
+def _node_that_raises():
     raise base_types.SkipComputationError
 
 
@@ -215,7 +215,6 @@ def test_first_with_future_edge():
 
     f = graph_runners.unary_with_state(
         base_types.merge_graphs(
-            composers.compose_unary(_node_that_raises, input_node),
             composers.make_compose(_reducer_node, input_node, key="arg1"),
             composers.make_compose(_node1, input_node, key="arg1"),
             composers.make_first(_node_that_raises, _reducer_node, _node1),
@@ -256,7 +255,6 @@ def test_and_with_unactionable():
     g = base_types.merge_graphs(
         composers.make_and((_reducer_node, _node_that_raises), _merger),
         composers.compose_source(_merger, source2, key="side_effects"),
-        composers.compose_source(_node_that_raises, source1, key="arg1"),
         composers.compose_source(_reducer_node, source1, key="arg1"),
         composers.make_compose(_reducer_node, _next_int, key="cur_int"),
         composers.compose_unary_future(_next_int, _next_int, None),
@@ -266,32 +264,17 @@ def test_and_with_unactionable():
 
 
 def test_or():
-    edges = graph.connect_default_terminal(
-        composers.make_or(
-            funcs=(_reducer_node, _node2, _node1, _node_that_raises), merge_fn=_merger
-        )
-        + (
-            graph.make_standard_edge(
-                source=_next_int, destination=_reducer_node, key="cur_int"
-            ),
-            graph.make_future_edge(source=_next_int, destination=_next_int),
+    def merger(args):
+        return " ".join(map(str, args))
+
+    f = graph_runners.variadic_stateful_infer_sink(
+        base_types.merge_graphs(
+            composers.make_or((_next_int, lambda: "node1", _node_that_raises), merger),
+            composers.compose_unary_future(_next_int, _next_int, 0),
         )
     )
 
-    result = run.to_callable(edges, frozenset([base_types.SkipComputationError]))(
-        arg1=_ROOT_VALUE, side_effects="side_effects"
-    )
-    result = run.to_callable(edges, frozenset([base_types.SkipComputationError]))(
-        arg1=_ROOT_VALUE, state=result.state, side_effects="side_effects"
-    )
-    result = run.to_callable(edges, frozenset([base_types.SkipComputationError]))(
-        arg1=_ROOT_VALUE, state=result.state, side_effects="side_effects"
-    )
-
-    assert (
-        result.result[graph.DEFAULT_TERMINAL][0]
-        == "[root cur_int=3,node2(root),node1(root)], side_effects=side_effects"
-    )
+    assert f({}, {}, {}) == "3 node1"
 
 
 def test_graph_wrapping():
