@@ -71,3 +71,7 @@ def nullary(g, sink):
         run.to_callable_strict(g),
         gamla.just({}),
     )()
+
+
+def nullary_infer_sink(g):
+    return nullary(g, graph.infer_graph_sink(g))

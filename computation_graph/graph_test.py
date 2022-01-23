@@ -192,15 +192,15 @@ def test_optional_with_future_edge():
 
 
 def test_first():
-    cg = run.to_callable(
-        graph.connect_default_terminal(
-            composers.make_first(_unactionable_node, _node2, _node1)
-        ),
-        frozenset([base_types.SkipComputationError]),
-    )
+    def raises():
+        raise base_types.SkipComputationError
 
-    result = cg(arg1=_ROOT_VALUE)
-    assert result.result[graph.DEFAULT_TERMINAL][0] == "node2(root)"
+    assert (
+        graph_runners.nullary_infer_sink(
+            composers.make_first(raises, lambda: 1, lambda: 2)
+        )
+        == 1
+    )
 
 
 def test_first_all_unactionable():
