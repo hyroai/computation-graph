@@ -23,15 +23,17 @@ def _transpose_graph(
     )
 
 
+_ToposortKey = Tuple[base_types.ComputationNode, bool]
+
+
 def _get_edge_destination_for_toposort(
     edge: base_types.ComputationEdge,
-) -> Tuple[base_types.ComputationNode, bool]:
+) -> _ToposortKey:
     return edge.destination, edge.is_future
 
 
 _toposort_nodes: Callable[
-    [base_types.GraphType],
-    Tuple[FrozenSet[Tuple[base_types.ComputationNode, bool]], ...],
+    [base_types.GraphType], Tuple[FrozenSet[base_types.ComputationNode], ...],
 ] = opt_gamla.compose_left(
     opt_gamla.groupby_many(
         gamla.compose_left(
@@ -44,8 +46,7 @@ _toposort_nodes: Callable[
     ),
     _transpose_graph,
     toposort.toposort,
-    opt_gamla.map(frozenset),
-    tuple,
+    opt_gamla.maptuple(gamla.compose(frozenset, opt_gamla.map(gamla.head))),
 )
 
 
@@ -173,7 +174,7 @@ def _handle_node_not_processing(exception, inputs):
     return immutables.Map()
 
 
-def _process_layer_in_parallel(
+def _process_single_layer(
     f: Callable[
         [_IntermediaryResults, base_types.ComputationNode], _IntermediaryResults
     ]
@@ -183,7 +184,6 @@ def _process_layer_in_parallel(
     return gamla.compose_left(
         gamla.pack,
         gamla.explode(1),
-        opt_gamla.map(opt_gamla.star(lambda x, y: (x, y[0]))),
         gamla.map(
             gamla.try_and_excepts(_DepNotFoundError, _handle_node_not_processing, f)
         ),
@@ -355,7 +355,7 @@ _assert_no_unwanted_ambiguity = gamla.compose_left(
 def _make_runner(single_node_runner, is_async, edges, handled_exceptions):
     return opt_gamla.compose(
         _dag_layer_reduce(is_async, edges),
-        _process_layer_in_parallel,
+        _process_single_layer,
         _process_node(
             (*handled_exceptions, base_types.SkipComputationError),
             is_async,
