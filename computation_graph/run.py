@@ -283,7 +283,7 @@ def _process_node(
                     return _assoc_immutable(
                         accumulated_results,
                         node,
-                        await f( # type: ignore
+                        await f(  # type: ignore
                             node,
                             incoming_edges_opts(node),
                             _edges_to_values(accumulated_results),
