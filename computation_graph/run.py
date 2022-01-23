@@ -23,30 +23,15 @@ def _transpose_graph(
     )
 
 
-_ToposortKey = Tuple[base_types.ComputationNode, bool]
-
-
-def _get_edge_destination_for_toposort(
-    edge: base_types.ComputationEdge,
-) -> _ToposortKey:
-    return edge.destination, edge.is_future
-
-
 _toposort_nodes: Callable[
     [base_types.GraphType], Tuple[FrozenSet[base_types.ComputationNode], ...],
 ] = opt_gamla.compose_left(
-    opt_gamla.groupby_many(
-        gamla.compose_left(
-            gamla.juxt(base_types.edge_sources, base_types.edge_is_future),
-            gamla.explode(0),
-        )
-    ),
+    opt_gamla.groupby_many(base_types.edge_sources),
     opt_gamla.valmap(
-        opt_gamla.compose_left(opt_gamla.map(_get_edge_destination_for_toposort), set)
+        opt_gamla.compose_left(opt_gamla.map(base_types.edge_destination), set)
     ),
     _transpose_graph,
     toposort.toposort,
-    opt_gamla.maptuple(gamla.compose(frozenset, opt_gamla.map(gamla.head))),
 )
 
 
@@ -365,7 +350,9 @@ def _make_runner(single_node_runner, is_async, edges, handled_exceptions):
     )
 
 
-def _combine_inputs_with_edges(edges, inputs: Dict):
+def _combine_inputs_with_edges(
+    inputs: _NodeToResultsDict,
+) -> Callable[[base_types.GraphType], base_types.GraphType]:
     def replace_source(edge):
         assert edge.source, "only supports singular edges for now"
 
@@ -379,8 +366,7 @@ def _combine_inputs_with_edges(edges, inputs: Dict):
             edge, is_future=False, source=graph.make_computation_node(source)
         )
 
-    return opt_gamla.pipe(
-        edges,
+    return opt_gamla.compose_left(
         gamla.map(gamla.when(base_types.edge_is_future, replace_source)),
         gamla.remove(gamla.equals(None)),
         tuple,
@@ -400,7 +386,7 @@ def _to_callable_with_side_effect_for_single_and_multiple(
     if is_async:
 
         async def runner(inputs):
-            edges_with_inputs = _combine_inputs_with_edges(edges, inputs)
+            edges_with_inputs = _combine_inputs_with_edges(inputs)(edges)
             return await gamla.compose_left(
                 _make_runner(
                     _run_keeping_choices(is_async, single_node_side_effect),
@@ -414,7 +400,7 @@ def _to_callable_with_side_effect_for_single_and_multiple(
     else:
 
         def runner(inputs):
-            edges_with_inputs = _combine_inputs_with_edges(edges, inputs)
+            edges_with_inputs = _combine_inputs_with_edges(inputs)(edges)
             return gamla.compose_left(
                 _make_runner(
                     _run_keeping_choices(is_async, single_node_side_effect),
