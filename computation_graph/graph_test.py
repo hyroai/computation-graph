@@ -147,8 +147,8 @@ def test_self_future_edge():
 
 def test_empty_result():
     def raises(x):
+        del x
         raise base_types.SkipComputationError
-        return x
 
     with pytest.raises(KeyError):
         graph_runners.nullary(composers.compose_unary(raises, lambda: "hi"), raises)
