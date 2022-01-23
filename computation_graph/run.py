@@ -34,9 +34,9 @@ _toposort_nodes: Callable[
     Tuple[FrozenSet[Tuple[base_types.ComputationNode, bool]], ...],
 ] = opt_gamla.compose_left(
     opt_gamla.groupby_many(
-        gamla.compose(
-            gamla.explode(0),
+        gamla.compose_left(
             gamla.juxt(base_types.edge_sources, base_types.edge_is_future),
+            gamla.explode(0),
         )
     ),
     opt_gamla.valmap(
