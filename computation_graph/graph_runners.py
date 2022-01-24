@@ -105,3 +105,15 @@ def nullary(g, sink):
 
 def nullary_infer_sink(g):
     return nullary(g, graph.infer_graph_sink(g))
+
+
+def nullary_infer_sink_with_state_and_expectations(g):
+    f = run.to_callable_strict(g)
+
+    def inner(*expectations):
+        prev = {}
+        for expectation in expectations:
+            prev = f(prev)
+            assert prev[graph.infer_graph_sink(g)] == expectation
+
+    return inner

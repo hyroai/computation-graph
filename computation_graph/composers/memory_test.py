@@ -1,16 +1,12 @@
-from computation_graph import base_types
+from computation_graph import graph_runners
 from computation_graph.composers import memory
 
 
-def _nullary_with_state_and_expectations():
-    raise NotImplementedError
-
-
 def test_changed():
-    _nullary_with_state_and_expectations(
+    graph_runners.nullary_infer_sink_with_state_and_expectations(
         memory.changed(
-            lambda state: base_types.ComputationResult(
-                state, 0 if state is None else state + 1
+            memory.with_state(
+                "state", 0, lambda state: state + 1 if state < 2 else state
             )
         )
-    )(False, True)
+    )(True, True, False)
