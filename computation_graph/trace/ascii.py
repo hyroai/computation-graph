@@ -84,10 +84,7 @@ def computation_trace(graph_instance: base_types.GraphType):
     source_and_destination_to_edges = _index_by_source_and_destination(graph_instance)
     sink = graph.infer_graph_sink(graph_instance)
 
-    def computation_trace(node_to_results: Callable):
-        trace = trace_utils.node_computation_trace(
-            node_to_results, graph.infer_graph_sink(graph_instance)
-        )
+    def computation_trace(trace):
         # We set a default here so we don't get a `KeyError`.
         # This happens when there isn't a working path, and the runner will raise outside.
         node_to_result = gamla.dict_to_getter_with_default(None, dict(trace))
@@ -116,4 +113,4 @@ def computation_trace(graph_instance: base_types.GraphType):
             ),
         )
 
-    return gamla.compose_left(computation_trace, gamla.debug)
+    return gamla.compose_left(frozenset, dict.items, computation_trace, gamla.debug)

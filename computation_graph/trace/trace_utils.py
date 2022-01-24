@@ -1,25 +1,6 @@
-from typing import Callable, FrozenSet, Tuple
-
 import gamla
 
 from computation_graph import base_types
-
-
-@gamla.curry
-def node_computation_trace(
-    node_to_results: Callable, node: base_types.ComputationNode
-) -> FrozenSet[Tuple[base_types.ComputationNode, base_types.Result]]:
-    results = node_to_results(node)
-    try:
-        first_result = gamla.head(results)
-    except StopIteration:
-        return frozenset()
-    return frozenset(
-        [
-            (node, first_result),
-            *gamla.pipe(results, dict.values, gamla.head, dict.items),
-        ]
-    )
 
 
 def is_edge_participating(in_trace_nodes):

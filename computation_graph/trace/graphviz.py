@@ -4,7 +4,7 @@ from xml.sax import saxutils
 import gamla
 import pygraphviz as pgv
 
-from computation_graph import base_types, graph
+from computation_graph import base_types
 from computation_graph.trace import trace_utils
 
 
@@ -115,20 +115,13 @@ visualize_graph = gamla.compose_left(
 
 @gamla.curry
 def computation_trace(
-    filename: str, graph_instance: base_types.GraphType, node_to_results: Callable
+    filename: str, graph_instance: base_types.GraphType, node_to_results
 ):
     gviz = union_graphviz(
         [
             computation_graph_to_graphviz(graph_instance),
-            *gamla.pipe(
-                graph_instance,
-                graph.get_leaves,
-                gamla.map(
-                    gamla.compose_left(
-                        trace_utils.node_computation_trace(node_to_results),
-                        computation_trace_to_graphviz,
-                    )
-                ),
+            computation_trace_to_graphviz(
+                gamla.pipe(node_to_results, dict.items, frozenset)
             ),
         ]
     )

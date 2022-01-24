@@ -379,7 +379,7 @@ def _to_callable_with_side_effect_for_single_and_multiple(
     all_nodes_side_effect: Callable,
     edges: base_types.GraphType,
     handled_exceptions: FrozenSet[Type[Exception]],
-) -> Callable:
+) -> Callable[[_NodeToResultsDict], _NodeToResultsDict]:
     edges = gamla.pipe(
         edges, gamla.unique, tuple, gamla.side_effect(_assert_no_unwanted_ambiguity)
     )
@@ -395,6 +395,7 @@ def _to_callable_with_side_effect_for_single_and_multiple(
                     edges_with_inputs,
                     handled_exceptions,
                 ),
+                dict,
                 gamla.side_effect(all_nodes_side_effect(edges_with_inputs)),
             )()
 
@@ -409,6 +410,7 @@ def _to_callable_with_side_effect_for_single_and_multiple(
                     edges_with_inputs,
                     handled_exceptions,
                 ),
+                dict,
                 gamla.side_effect(all_nodes_side_effect(edges_with_inputs)),
             )()
 
