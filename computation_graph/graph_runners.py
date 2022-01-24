@@ -1,4 +1,4 @@
-from typing import Callable
+from typing import Callable, Union
 
 import gamla
 
@@ -19,7 +19,9 @@ def unary(g: base_types.GraphType, source: Callable, sink: Callable) -> Callable
 
 
 def unary_with_state(
-    g: base_types.GraphType, source: Callable, sink: Callable
+    g: base_types.GraphType,
+    source: Callable,
+    sink: Union[Callable, base_types.ComputationNode],
 ) -> Callable:
     real_source = graph.make_source()
     f = run.to_callable_strict(
@@ -35,6 +37,10 @@ def unary_with_state(
         return prev[graph.make_computation_node(sink)]
 
     return inner
+
+
+def unary_with_state_infer_sink(g: base_types.GraphType, source: Callable) -> Callable:
+    return unary_with_state(g, source, graph.infer_graph_sink(g))
 
 
 def unary_with_state_and_expectations(
