@@ -16,5 +16,5 @@ def test_ambiguity_does_not_blow_up():
             composers.compose_left_unary(g, lambda x: increment() or x + "a"),
             composers.compose_left_unary(g, lambda x: increment() or x + "b"),
         )
-    graph_runners.nullary(g)
+    graph_runners.nullary_infer_sink(g)
     assert counter == 30
