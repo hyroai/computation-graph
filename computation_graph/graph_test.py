@@ -36,12 +36,6 @@ def _merger(args, side_effects):
     return "[" + ",".join(args) + f"], side_effects={side_effects}"
 
 
-def _merger_that_raises_when_empty(args):
-    if not args:
-        raise base_types.SkipComputationError
-    return "[" + ",".join(args) + "]"
-
-
 def _next_int(x):
     if x is None:
         return 0
@@ -340,24 +334,34 @@ def test_compose_with_node_already_in_graph():
 
 
 def test_first_with_subgraph_that_raises():
-    inner = composers.make_compose(_node2, _node_that_raises)
-    edges = graph.connect_default_terminal(composers.make_first(inner, _node1))
-    result = run.to_callable(edges, frozenset([base_types.SkipComputationError]))(
-        arg1=_ROOT_VALUE
+    def raises():
+        raise base_types.SkipComputationError
+
+    assert (
+        graph_runners.nullary_infer_sink(
+            composers.make_first(
+                composers.compose_unary(lambda _: "node2", raises), lambda: "node1"
+            )
+        )
+        == "node1"
     )
-    assert result.result[graph.DEFAULT_TERMINAL][0] == "node1(root)"
 
 
 def test_or_with_sink_that_raises():
-    edges = graph.connect_default_terminal(
-        composers.make_or(
-            (_node_that_raises, _node1), merge_fn=_merger_that_raises_when_empty
+    def raises():
+        raise base_types.SkipComputationError
+
+    def merge(args):
+        if not args:
+            raise base_types.SkipComputationError
+        return "[" + ",".join(args) + "]"
+
+    assert (
+        graph_runners.nullary_infer_sink(
+            composers.make_or((raises, lambda: "node1"), merge_fn=merge)
         )
+        == "node1"
     )
-    result = run.to_callable(edges, frozenset([base_types.SkipComputationError]))(
-        arg1=_ROOT_VALUE
-    )
-    assert result.result[graph.DEFAULT_TERMINAL][0] == "[node1(root)]"
 
 
 def test_two_terminals():
