@@ -318,19 +318,24 @@ def test_first_first():
 
 
 def test_compose_with_node_already_in_graph():
-    inner_edges1 = composers.make_and((_node2, _node1), merge_fn=_merger)
-    inner_edges2 = composers.make_compose(_node3, _node1, key="arg1")
-    edges = graph.connect_default_terminal(
-        composers.make_compose(inner_edges1, inner_edges2, key="arg1")
-    )
+    def node1():
+        return "node1"
 
-    result = run.to_callable(edges, frozenset([base_types.SkipComputationError]))(
-        arg1=_ROOT_VALUE, arg2="arg2", side_effects="side_effects"
-    )
+    def sink(x, y):
+        return f"x={x} y={y}"
+
+    def merger(args):
+        return " ".join(args)
 
     assert (
-        result.result[graph.DEFAULT_TERMINAL][0]
-        == "[node2(node3(arg1=node1(root), arg2=arg2)),node1(root)], side_effects=side_effects"
+        graph_runners.nullary_infer_sink(
+            composers.make_compose(
+                composers.make_compose(sink, node1, key="x"),
+                composers.make_and((lambda: "node2", node1), merge_fn=merger),
+                key="y",
+            )
+        )
+        == "x=node1 y=node2 node1"
     )
 
 
