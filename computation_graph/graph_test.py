@@ -509,12 +509,12 @@ def test_sink_with_incoming_future_edge():
 
 def test_compose_future():
     a = graph.make_source()
-    x = graph.make_source()
-    y = graph.make_source()
+    b = graph.make_source()
+    c = graph.make_source()
     graph_runners.variadic_with_state_and_expectations(
         base_types.merge_graphs(
-            composers.compose_source_unary(_plus_1, y),
-            composers.compose_source_unary(_times_2, x),
+            composers.compose_source_unary(_plus_1, c),
+            composers.compose_source_unary(_times_2, b),
             composers.compose_source(_multiply, a, "a"),
             composers.make_compose_future(
                 _multiply,
@@ -524,4 +524,4 @@ def test_compose_future():
             ),
         ),
         _sum,
-    )(([[{a: 2, x: 2, y: 2}, 9], [{a: 2, x: 2, y: 2}, 25]]))
+    )(([[{a: 2, b: 2, c: 2}, 9], [{a: 2, b: 2, c: 2}, 25]]))
