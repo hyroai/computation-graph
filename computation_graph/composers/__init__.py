@@ -46,6 +46,7 @@ def _get_unbound_signature_for_single_node(
     )
 
     return base_types.NodeSignature(
+        is_kwargs=False,
         is_args=node.signature.is_args
         and not any(edge.args for edge in incoming_edges),
         kwargs=tuple(keep_not_in_bound_kwargs(node.signature.kwargs)),

@@ -94,7 +94,7 @@ class ComputationNode:
     name: str
     func: Callable
     signature: NodeSignature
-    is_terminal: bool  # TODO(uri): remove
+    is_terminal: bool
 
     def __hash__(self):
         if self.is_terminal:
@@ -110,7 +110,7 @@ class NodeSignature:
     is_args: bool
     kwargs: Tuple[str, ...]
     optional_kwargs: Tuple[str, ...]
-    is_kwargs: bool = False
+    is_kwargs: bool
 
 
 edge_args = gamla.attrgetter("args")
