@@ -366,27 +366,31 @@ def test_or_with_sink_that_raises():
 
 
 def test_two_terminals():
-    """graph = node1 --> node2 --> DEFAULT_TERMINAL, node1 --> TERMINAL2"""
-    edges = graph.connect_default_terminal(composers.make_compose(_node2, _node1))
+    def node1():
+        return "node1"
+
     terminal2 = graph.make_terminal("TERMINAL2", gamla.wrap_tuple)
-    edges += (graph.make_standard_edge(source=_node1, destination=terminal2),)
-    result = run.to_callable(edges, frozenset([base_types.SkipComputationError]))(
-        arg1="hi"
+    g = base_types.merge_graphs(
+        composers.make_compose(lambda x: f"node2({x})", node1),
+        composers.compose_unary(source=node1, destination=terminal2),
     )
-    assert result.result[graph.DEFAULT_TERMINAL][0] == "node2(node1(hi))"
-    assert result.result[terminal2][0] == "node1(hi)"
+    f = run.to_callable_strict(g)
+    assert f()[graph.infer_graph_sink(g)] == "node2(node1)"
+    assert f()[terminal2] == "node1"
 
 
 def test_two_paths_succeed():
-    edges = graph.connect_default_terminal(composers.make_first(_node2, _node1))
-    terminal2 = graph.make_terminal("TERMINAL2", gamla.wrap_tuple)
-    edges += (graph.make_standard_edge(source=_node1, destination=terminal2),)
-    result = run.to_callable(edges, frozenset([base_types.SkipComputationError]))(
-        arg1="hi"
-    )
+    def node1():
+        return "node1"
 
-    assert result.result[graph.DEFAULT_TERMINAL][0] == "node2(hi)"
-    assert result.result[terminal2][0] == "node1(hi)"
+    terminal2 = graph.make_terminal("TERMINAL2", gamla.wrap_tuple)
+    g = base_types.merge_graphs(
+        composers.make_first(lambda: "node2", node1),
+        composers.compose_unary(terminal2, node1),
+    )
+    f = run.to_callable_strict(g)
+    assert f()[graph.infer_graph_sink(g)] == "node2"
+    assert f()[terminal2] == "node1"
 
 
 def test_double_star_signature_considered_unary():
