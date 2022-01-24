@@ -355,7 +355,7 @@ def test_or_with_sink_that_raises():
     def merge(args):
         if not args:
             raise base_types.SkipComputationError
-        return "[" + ",".join(args) + "]"
+        return ",".join(args)
 
     assert (
         graph_runners.nullary_infer_sink(
