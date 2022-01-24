@@ -1,5 +1,4 @@
 import asyncio
-import json
 
 import gamla
 import pytest
@@ -27,15 +26,6 @@ def _node2(arg1):
 
 def _node3(arg1, arg2):
     return f"node3(arg1={arg1}, arg2={arg2})"
-
-
-def _node4(y, z):
-    return f"node4({y}, z={z})"
-
-
-@gamla.curry
-def _curried_node(arg1, arg2):
-    return f"curried_node(arg1={arg1}, arg2={arg2})"
 
 
 def _node_that_raises():
@@ -311,102 +301,20 @@ def test_optional_memory_sometimes_raises():
     assert f("hi", "fail", "hi") == "hi state=3"
 
 
-def test_unary_graph_composition():
-    inner = composers.make_compose(_node1, _node4)
-    edges = graph.connect_default_terminal(composers.make_first(inner))
-    result = run.to_callable(edges, frozenset([base_types.SkipComputationError]))(
-        y=_ROOT_VALUE, z=10
-    )
-
-    assert result.result[graph.DEFAULT_TERMINAL][0] == "node1(node4(root, z=10))"
-
-
-def test_state_is_serializable():
-    edges = graph.connect_default_terminal(
-        (
-            graph.make_standard_edge(
-                source=_node1, destination=_reducer_node, key="arg1"
-            ),
-            graph.make_standard_edge(
-                source=_reducer_node, destination=_node2, key="arg1"
-            ),
-            graph.make_standard_edge(
-                source=_next_int, destination=_reducer_node, key="cur_int"
-            ),
-            graph.make_future_edge(source=_next_int, destination=_next_int),
-        )
-    )
-
-    cg = run.to_callable(edges, frozenset([base_types.SkipComputationError]))
-    result = cg(arg1=_ROOT_VALUE)
-    result = cg(arg1=_ROOT_VALUE, state=result.state)
-    result = cg(arg1=_ROOT_VALUE, state=result.state)
-    json.dumps(result.state)
-
-
-def test_compose_compose():
-
-    inner_graph = composers.make_compose(
-        _curried_node, _node1, _node3, _node2, key="arg1"
-    )
-    assert len(inner_graph) == 3
-
-    edges = graph.connect_default_terminal(
-        composers.make_compose(inner_graph, _node4, key="arg2")
-    )
-
-    result = run.to_callable(edges, frozenset([base_types.SkipComputationError]))(
-        y="y", z="z", arg1="arg1"
-    )
-
-    assert len(edges) == 6
-    assert (
-        result.result[graph.DEFAULT_TERMINAL][0]
-        == "curried_node(arg1=node1(node3(arg1=node2(arg1), arg2=node4(y, z=z))), arg2=node4(y, z=z))"
-    )
-
-
-def test_compose_after_first():
-    edges = graph.connect_default_terminal(
-        composers.make_compose(
-            composers.make_first(_node_that_raises, _node1, _node2), _node3, key="arg1"
-        )
-    )
-    result = run.to_callable(edges, frozenset([base_types.SkipComputationError]))(
-        arg1="arg1", arg2="arg2"
-    )
-    assert (
-        result.result[graph.DEFAULT_TERMINAL][0] == "node1(node3(arg1=arg1, arg2=arg2))"
-    )
-
-
-def test_first_after_compose():
-    inner_edges = composers.make_compose(_node1, _node2)
-
-    cg = run.to_callable(
-        graph.connect_default_terminal(
-            composers.make_first(_node_that_raises, inner_edges, _node1)
-        ),
-        frozenset([base_types.SkipComputationError]),
-    )
-
-    result = cg(arg1="arg1")
-    assert result.result[graph.DEFAULT_TERMINAL][0] == "node1(node2(arg1))"
-
-
 def test_first_first():
-    inner_first = composers.make_first(_node_that_raises, _node1, _node2)
+    def node1():
+        return "node1"
 
-    cg = run.to_callable(
-        graph.connect_default_terminal(
-            composers.make_first(_node_that_raises, inner_first, _node1)
-        ),
-        frozenset([base_types.SkipComputationError]),
+    assert (
+        graph_runners.nullary_infer_sink(
+            composers.make_first(
+                _node_that_raises,
+                composers.make_first(_node_that_raises, node1, lambda: "node2"),
+                node1,
+            )
+        )
+        == "node1"
     )
-
-    result = cg(arg1=_ROOT_VALUE)
-
-    assert result.result[graph.DEFAULT_TERMINAL][0] == f"node1({_ROOT_VALUE})"
 
 
 def test_compose_with_node_already_in_graph():
