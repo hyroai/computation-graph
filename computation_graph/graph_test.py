@@ -334,11 +334,15 @@ def test_first_with_subgraph_that_raises():
     def raises():
         raise base_types.SkipComputationError
 
+    def node2(x):
+        return x
+
+    def node1():
+        return "node1"
+
     assert (
         graph_runners.nullary_infer_sink(
-            composers.make_first(
-                composers.compose_unary(lambda _: "node2", raises), lambda: "node1"
-            )
+            composers.make_first(composers.compose_unary(node2, raises), node1)
         )
         == "node1"
     )

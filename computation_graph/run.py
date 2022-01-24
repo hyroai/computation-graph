@@ -149,8 +149,8 @@ def _merge_immutable(x, y):
 
 
 def _handle_node_not_processing(exception, inputs):
-    del exception, inputs
-    return immutables.Map()
+    del exception
+    return inputs[0]
 
 
 def _process_single_layer(
@@ -197,18 +197,13 @@ class _DepNotFoundError(Exception):
 
 
 def _edges_to_values(
-    accumulated_outputs,
+    node_to_result: Callable[[base_types.ComputationNode], base_types.Result]
 ) -> Callable[
     [Iterable[base_types.ComputationEdge]], Tuple[Tuple[base_types.Result, ...], ...]
 ]:
     return opt_gamla.maptuple(
         opt_gamla.compose_left(
-            base_types.edge_sources,
-            opt_gamla.maptuple(
-                gamla.translate_exception(
-                    accumulated_outputs.__getitem__, KeyError, _DepNotFoundError
-                )
-            ),
+            base_types.edge_sources, opt_gamla.maptuple(node_to_result)
         )
     )
 
@@ -265,7 +260,13 @@ def _process_node(
                         await f(  # type: ignore
                             node,
                             incoming_edges_opts(node),
-                            _edges_to_values(accumulated_results),
+                            _edges_to_values(
+                                gamla.translate_exception(
+                                    accumulated_results.__getitem__,
+                                    KeyError,
+                                    _DepNotFoundError,
+                                )
+                            ),
                         ),
                     )
                 except handled_exceptions:
@@ -287,7 +288,13 @@ def _process_node(
                         f(
                             node,
                             incoming_edges_opts(node),
-                            _edges_to_values(accumulated_results),
+                            _edges_to_values(
+                                gamla.translate_exception(
+                                    accumulated_results.__getitem__,
+                                    KeyError,
+                                    _DepNotFoundError,
+                                )
+                            ),
                         ),
                     )
                 except handled_exceptions:
