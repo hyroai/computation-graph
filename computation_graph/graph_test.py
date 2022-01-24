@@ -8,9 +8,6 @@ from computation_graph import base_types, composers, graph, graph_runners, legac
 pytestmark = pytest.mark.asyncio
 
 
-_ROOT_VALUE = "root"
-
-
 def _node1(arg1):
     return f"node1({arg1})"
 
@@ -78,8 +75,8 @@ def test_kwargs():
             ),
             source,
             _node3,
-        )(_ROOT_VALUE)
-        == f"node3(arg1=node1({_ROOT_VALUE}), arg2=node2({_ROOT_VALUE}))"
+        )("hi")
+        == "node3(arg1=node1(hi), arg2=node2(hi))"
     )
 
 
@@ -101,7 +98,7 @@ def test_state():
         _node1,
         _node2,
     )
-    assert f(_ROOT_VALUE, _ROOT_VALUE, _ROOT_VALUE) == "node2(node1(root) state=3)"
+    assert f("x", "y", "z") == "node2(node1(z) state=3)"
 
 
 def test_self_future_edge():
@@ -116,7 +113,7 @@ def test_self_future_edge():
         _node1,
         _node2,
     )
-    assert f(_ROOT_VALUE, _ROOT_VALUE, _ROOT_VALUE) == "node2(node1(root) cur_int=3)"
+    assert f("x", "y", "z") == "node2(node1(z) cur_int=3)"
 
 
 def test_empty_result():
@@ -162,7 +159,7 @@ def test_optional_with_future_edge():
         input,
         output,
     )
-    assert f(_ROOT_VALUE, _ROOT_VALUE, _ROOT_VALUE) == "root cur_int=3"
+    assert f("x", "y", "z") == "z cur_int=3"
 
 
 def test_first():
@@ -200,7 +197,7 @@ def test_first_with_future_edge():
         input_node,
         _reducer_node,
     )
-    assert f(_ROOT_VALUE, _ROOT_VALUE, _ROOT_VALUE) == "root cur_int=3"
+    assert f("x", "y", "z") == "z cur_int=3"
 
 
 def test_and_with_future():
@@ -370,10 +367,10 @@ def test_two_terminals():
     terminal2 = graph.make_terminal("TERMINAL2", gamla.wrap_tuple)
     edges += (graph.make_standard_edge(source=_node1, destination=terminal2),)
     result = run.to_callable(edges, frozenset([base_types.SkipComputationError]))(
-        arg1=_ROOT_VALUE
+        arg1="hi"
     )
-    assert result.result[graph.DEFAULT_TERMINAL][0] == "node2(node1(root))"
-    assert result.result[terminal2][0] == "node1(root)"
+    assert result.result[graph.DEFAULT_TERMINAL][0] == "node2(node1(hi))"
+    assert result.result[terminal2][0] == "node1(hi)"
 
 
 def test_two_paths_succeed():
@@ -381,11 +378,11 @@ def test_two_paths_succeed():
     terminal2 = graph.make_terminal("TERMINAL2", gamla.wrap_tuple)
     edges += (graph.make_standard_edge(source=_node1, destination=terminal2),)
     result = run.to_callable(edges, frozenset([base_types.SkipComputationError]))(
-        arg1=_ROOT_VALUE
+        arg1="hi"
     )
 
-    assert result.result[graph.DEFAULT_TERMINAL][0] == "node2(root)"
-    assert result.result[terminal2][0] == "node1(root)"
+    assert result.result[graph.DEFAULT_TERMINAL][0] == "node2(hi)"
+    assert result.result[terminal2][0] == "node1(hi)"
 
 
 def test_double_star_signature_considered_unary():
