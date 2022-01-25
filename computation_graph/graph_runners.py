@@ -6,9 +6,14 @@ from computation_graph import base_types, composers, graph, run
 
 
 def unary(g: base_types.GraphType, source: Callable, sink: Callable) -> Callable:
-    real_source = graph.make_source()
     return gamla.compose(
-        gamla.itemgetter(graph.make_computation_node(sink)),
+        gamla.itemgetter(graph.make_computation_node(sink)), unary_bare(g, source)
+    )
+
+
+def unary_bare(g, source):
+    real_source = graph.make_source()
+    compose = gamla.compose(
         run.to_callable_strict(
             base_types.merge_graphs(
                 g, composers.compose_left_future(real_source, source, None, None)
@@ -16,6 +21,7 @@ def unary(g: base_types.GraphType, source: Callable, sink: Callable) -> Callable
         ),
         gamla.wrap_dict(real_source),
     )
+    return compose
 
 
 def unary_with_state(
@@ -71,16 +77,22 @@ def variadic_with_state_and_expectations(g, sink):
     return inner
 
 
-def variadic_infer_sink(g):
+def variadic_bare(g):
     f = run.to_callable_strict(g)
 
     def inner(*turns):
         prev = {}
         for turn in turns:
             prev = f({**turn, **prev})
-        return prev[graph.infer_graph_sink(g)]
+        return prev
 
     return inner
+
+
+def variadic_infer_sink(g):
+    return gamla.compose_left(
+        variadic_bare(g), gamla.itemgetter(graph.infer_graph_sink(g))
+    )
 
 
 def variadic_stateful_infer_sink(g):

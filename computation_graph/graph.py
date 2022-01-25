@@ -8,6 +8,8 @@ from gamla.optimized import sync as opt_gamla
 
 from computation_graph import base_types
 
+remove_future_edges = gamla.compose(tuple, opt_gamla.remove(base_types.edge_is_future))
+
 
 def _is_star(parameter) -> bool:
     return "*" + parameter.name == str(parameter)
@@ -150,6 +152,16 @@ def infer_graph_sink(edges: base_types.GraphType) -> base_types.ComputationNode:
     return gamla.head(leaves)
 
 
+def infer_graph_sink_excluding_terminals(
+    edges: base_types.GraphType,
+) -> base_types.ComputationNode:
+    leaves = gamla.pipe(
+        edges, get_leaves, gamla.remove(gamla.attrgetter("is_terminal")), tuple
+    )
+    assert len(leaves) == 1, f"computation graph has more than one sink: {leaves}"
+    return gamla.head(leaves)
+
+
 get_incoming_edges_for_node = gamla.compose_left(
     gamla.groupby(base_types.edge_destination),
     gamla.valmap(frozenset),
@@ -174,3 +186,28 @@ def make_source_with_name(name: str):
         raise NotImplementedError(f"pure source [{name}] should never run")
 
     return make_computation_node(source)
+
+
+@gamla.curry
+def make_terminal(name: str, func: Callable):
+    return base_types.ComputationNode(
+        name=name,
+        func=func,
+        signature=_infer_callable_signature(func),
+        is_terminal=True,
+    )
+
+
+def _aggregator_for_terminal(*args):
+    return tuple(args)
+
+
+DEFAULT_TERMINAL = make_terminal("DEFAULT_TERMINAL", _aggregator_for_terminal)
+
+
+def connect_default_terminal(edges: base_types.GraphType) -> base_types.GraphType:
+    return edges + (
+        make_standard_edge(
+            source=(infer_graph_sink(edges),), destination=DEFAULT_TERMINAL
+        ),
+    )

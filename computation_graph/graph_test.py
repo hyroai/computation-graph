@@ -3,7 +3,7 @@ import asyncio
 import gamla
 import pytest
 
-from computation_graph import base_types, composers, graph, graph_runners, legacy, run
+from computation_graph import base_types, composers, graph, graph_runners, legacy
 
 pytestmark = pytest.mark.asyncio
 
@@ -366,31 +366,35 @@ def test_or_with_sink_that_raises():
 
 
 def test_two_terminals():
-    def node1():
-        return "node1"
-
+    """graph = node1 --> node2 --> DEFAULT_TERMINAL, node1 --> TERMINAL2"""
+    edges = graph.connect_default_terminal(composers.make_compose(_node2, _node1))
     terminal2 = graph.make_terminal("TERMINAL2", gamla.wrap_tuple)
-    g = base_types.merge_graphs(
-        composers.make_compose(lambda x: f"node2({x})", node1),
-        composers.compose_unary(source=node1, destination=terminal2),
+    edges += (graph.make_standard_edge(source=_node1, destination=terminal2),)
+
+    result = graph_runners.unary_bare(edges, _node1)("hi")
+    assert (
+        result[graph.make_computation_node(graph.DEFAULT_TERMINAL)][0]
+        == "node2(node1(hi))"
     )
-    f = run.to_callable_strict(g)
-    assert f()[graph.infer_graph_sink(g)] == "node2(node1)"
-    assert f()[terminal2] == "node1"
+    assert result[graph.make_computation_node(terminal2)][0] == "node1(hi)"
 
 
 def test_two_paths_succeed():
-    def node1():
-        return "node1"
-
+    source = graph.make_source()
     terminal2 = graph.make_terminal("TERMINAL2", gamla.wrap_tuple)
-    g = base_types.merge_graphs(
-        composers.make_first(lambda: "node2", node1),
-        composers.compose_unary(terminal2, node1),
-    )
-    f = run.to_callable_strict(g)
-    assert f()[graph.infer_graph_sink(g)] == "node2"
-    assert f()[terminal2] == "node1"
+    result = graph_runners.variadic_bare(
+        base_types.merge_graphs(
+            composers.make_first(
+                composers.compose_source_unary(_node1, source),
+                graph.connect_default_terminal(
+                    composers.compose_source_unary(_node2, source)
+                ),
+            ),
+            (graph.make_standard_edge(source=_node1, destination=terminal2),),
+        )
+    )({source: "hi"})
+    assert result[graph.make_computation_node(graph.DEFAULT_TERMINAL)][0] == "node2(hi)"
+    assert result[graph.make_computation_node(terminal2)][0] == "node1(hi)"
 
 
 def test_double_star_signature_considered_unary():
