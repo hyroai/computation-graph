@@ -565,3 +565,10 @@ def test_compose_future():
         ),
         _sum,
     )(([[{a: 2, b: 2, c: 2}, 9], [{a: 2, b: 2, c: 2}, 25]]))
+
+
+def test_badly_composed_graph_raises():
+    with pytest.raises(AssertionError):
+        run.to_callable_strict(
+            composers.make_compose(lambda x, y: x + y, lambda: 1, key="x")
+        )

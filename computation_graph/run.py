@@ -381,7 +381,11 @@ def _to_callable_with_side_effect_for_single_and_multiple(
     handled_exceptions: FrozenSet[Type[Exception]],
 ) -> Callable[[_NodeToResultsDict], _NodeToResultsDict]:
     edges = gamla.pipe(
-        edges, gamla.unique, tuple, gamla.side_effect(_assert_no_unwanted_ambiguity)
+        edges,
+        gamla.unique,
+        tuple,
+        gamla.assert_that(_composition_is_valid),
+        gamla.side_effect(_assert_no_unwanted_ambiguity),
     )
     is_async = _is_graph_async(edges)
     if is_async:
@@ -424,6 +428,31 @@ to_callable_with_side_effect = gamla.curry(
 # Use the second line if you want to see the winning path in the computation graph (a little slower).
 to_callable = to_callable_with_side_effect(gamla.just(gamla.just(None)))
 # to_callable = to_callable_with_side_effect(graphviz.computation_trace('utterance_computation.dot'))
+
+
+@gamla.curry
+def _node_is_properly_composed(
+    g: base_types.GraphType, node: base_types.ComputationNode
+) -> bool:
+    unique_keys = gamla.pipe(
+        g,
+        gamla.filter(gamla.compose(gamla.equals(node), base_types.edge_destination)),
+        gamla.map(base_types.edge_key),
+        frozenset,
+    )
+    return any(
+        [
+            frozenset(node.signature.kwargs) == unique_keys,
+            unique_keys == frozenset([None])
+            and (len(node.signature.kwargs) == 1 or node.signature.is_args),
+        ]
+    )
+
+
+def _composition_is_valid(g):
+    return gamla.pipe(
+        g, graph.get_all_nodes, gamla.allmap(_node_is_properly_composed(g))
+    )
 
 
 def to_callable_strict(
