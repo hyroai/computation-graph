@@ -82,10 +82,6 @@ class ComputationEdge:
         return source_str + line + (self.key or "") + line + ">" + str(self.destination)
 
 
-# We use a tuple to generate a unique id for each node based on the order of edges.
-GraphType = Tuple[ComputationEdge, ...]
-GraphOrCallable = Union[Callable, GraphType]
-
 merge_graphs = gamla.compose_left(gamla.pack, gamla.concat, gamla.unique, tuple)
 
 
@@ -140,4 +136,10 @@ ambiguity_groups = gamla.compose(
 )
 
 
+# We use a tuple to generate a unique id for each node based on the order of edges.
+GraphType = Tuple[ComputationEdge, ...]
+GraphOrCallable = Union[Callable, GraphType]
+CallableOrNode = Union[Callable, ComputationNode]
+CallableOrNodeOrGraph = Union[CallableOrNode, GraphType]
+NodeOrGraph = Union[ComputationNode, GraphType]
 EMPTY_GRAPH = ()
