@@ -1,7 +1,7 @@
 import functools
 import inspect
 from types import MappingProxyType
-from typing import Callable, FrozenSet, Optional, Tuple, Union
+from typing import Callable, FrozenSet, Tuple
 
 import gamla
 from gamla.optimized import sync as opt_gamla
@@ -73,8 +73,6 @@ edges_to_node_id_map = gamla.compose_left(
     gamla.mapcat(get_edge_nodes), gamla.unique, enumerate, gamla.map(reversed), dict
 )
 
-_CallableOrNode = Union[Callable, base_types.ComputationNode]
-
 
 def _supported_signature(signature: base_types.NodeSignature):
     return not signature.optional_kwargs and not (
@@ -82,7 +80,9 @@ def _supported_signature(signature: base_types.NodeSignature):
     )
 
 
-def make_computation_node(func: _CallableOrNode) -> base_types.ComputationNode:
+def make_computation_node(
+    func: base_types.CallableOrNode,
+) -> base_types.ComputationNode:
     if isinstance(func, base_types.ComputationNode):
         return func
 
@@ -94,39 +94,6 @@ def make_computation_node(func: _CallableOrNode) -> base_types.ComputationNode:
         ),
         is_terminal=False,
     )
-
-
-@gamla.curry
-def make_edge(
-    is_future: bool,
-    priority: int,
-    source: Union[_CallableOrNode, Tuple[_CallableOrNode, ...]],
-    destination: _CallableOrNode,
-    key: Optional[str] = None,
-) -> base_types.ComputationEdge:
-    destination_as_node = make_computation_node(destination)
-    if isinstance(source, tuple):
-        return base_types.ComputationEdge(
-            args=tuple(map(make_computation_node, source)),
-            destination=destination_as_node,
-            priority=priority,
-            source=None,
-            key=None,
-            is_future=is_future,
-        )
-
-    return base_types.ComputationEdge(
-        source=make_computation_node(source),
-        destination=destination_as_node,
-        key=key,
-        args=(),
-        priority=priority,
-        is_future=is_future,
-    )
-
-
-make_standard_edge = make_edge(is_future=False, priority=0)
-make_future_edge = make_edge(is_future=True, priority=0)
 
 
 def get_leaves(edges: base_types.GraphType) -> FrozenSet[base_types.ComputationNode]:
@@ -189,25 +156,10 @@ def make_source_with_name(name: str):
 
 
 @gamla.curry
-def make_terminal(name: str, func: Callable):
+def make_terminal(name: str, func: Callable) -> base_types.ComputationNode:
     return base_types.ComputationNode(
         name=name,
         func=func,
         signature=_infer_callable_signature(func),
         is_terminal=True,
-    )
-
-
-def _aggregator_for_terminal(*args):
-    return tuple(args)
-
-
-DEFAULT_TERMINAL = make_terminal("DEFAULT_TERMINAL", _aggregator_for_terminal)
-
-
-def connect_default_terminal(edges: base_types.GraphType) -> base_types.GraphType:
-    return edges + (
-        make_standard_edge(
-            source=(infer_graph_sink(edges),), destination=DEFAULT_TERMINAL
-        ),
     )

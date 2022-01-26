@@ -76,7 +76,16 @@ def make_and(
                 gamla.map(_infer_sink),
                 tuple,
                 lambda nodes: (
-                    (graph.make_standard_edge(source=nodes, destination=merge_node),),
+                    (
+                        base_types.ComputationEdge(
+                            is_future=False,
+                            priority=0,
+                            source=None,
+                            args=nodes,
+                            destination=merge_node,
+                            key=None,
+                        ),
+                    ),
                     make_compose(merge_fn, merge_node, key="args"),
                 ),
             ),
@@ -105,7 +114,16 @@ def make_or(
                 gamla.map(_infer_sink),
                 tuple,
                 lambda sinks: (
-                    (graph.make_standard_edge(source=sinks, destination=filter_node),),
+                    (
+                        base_types.ComputationEdge(
+                            is_future=False,
+                            priority=0,
+                            source=None,
+                            args=sinks,
+                            destination=filter_node,
+                            key=None,
+                        ),
+                    ),
                     make_compose(merge_fn, filter_node, key="args"),
                 ),
             )
@@ -145,6 +163,7 @@ def _infer_sink(graph_or_node: base_types.NodeOrGraph) -> base_types.Computation
 def make_first(*graphs: base_types.CallableOrNodeOrGraph) -> base_types.GraphType:
     graph_or_nodes = tuple(map(_callable_or_graph_type_to_node_or_graph_type, graphs))
 
+    @graph.make_computation_node
     def first_sink(constituent_of_first):
         return constituent_of_first
 
@@ -156,12 +175,13 @@ def make_first(*graphs: base_types.CallableOrNodeOrGraph) -> base_types.GraphTyp
             enumerate,
             gamla.map(
                 gamla.star(
-                    lambda i, g: graph.make_edge(
-                        is_future=False,
-                        priority=i,
+                    lambda i, g: base_types.ComputationEdge(
                         source=g,
                         destination=first_sink,
                         key="constituent_of_first",
+                        args=(),
+                        priority=i,
+                        is_future=False,
                     )
                 )
             ),
@@ -186,11 +206,15 @@ def _infer_composition_edges(
         assert (
             key is None or key in destination.signature.kwargs
         ), f"Cannot compose, destination signature does not contain key '{key}'"
-
         return base_types.merge_graphs(
             (
-                graph.make_edge(
-                    is_future, priority, _infer_sink(source), destination, key
+                base_types.ComputationEdge(
+                    source=_infer_sink(source),
+                    destination=destination,
+                    key=key,
+                    args=(),
+                    priority=priority,
+                    is_future=is_future,
                 ),
             ),
             _get_edges_from_node_or_graph(source),
@@ -215,8 +239,13 @@ def _infer_composition_edges(
                 or node not in graph.get_all_nodes(source)
             ),
             gamla.map(
-                lambda node: graph.make_edge(
-                    is_future, priority, _infer_sink(source), node, key
+                lambda destination: base_types.ComputationEdge(
+                    is_future=is_future,
+                    priority=priority,
+                    args=(),
+                    source=_infer_sink(source),
+                    destination=destination,
+                    key=key,
                 )
             ),
             tuple,

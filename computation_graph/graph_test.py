@@ -3,7 +3,7 @@ import asyncio
 import gamla
 import pytest
 
-from computation_graph import base_types, composers, graph, graph_runners, legacy
+from computation_graph import base_types, composers, graph, graph_runners, legacy, run
 
 pytestmark = pytest.mark.asyncio
 
@@ -365,36 +365,64 @@ def test_or_with_sink_that_raises():
     )
 
 
-def test_two_terminals():
-    """graph = node1 --> node2 --> DEFAULT_TERMINAL, node1 --> TERMINAL2"""
-    edges = graph.connect_default_terminal(composers.make_compose(_node2, _node1))
-    terminal2 = graph.make_terminal("TERMINAL2", gamla.wrap_tuple)
-    edges += (graph.make_standard_edge(source=_node1, destination=terminal2),)
+def test_unambiguous_composition_using_terminal():
+    terminal = graph.make_terminal("1", lambda x: x)
 
-    result = graph_runners.unary_bare(edges, _node1)("hi")
-    assert (
-        result[graph.make_computation_node(graph.DEFAULT_TERMINAL)][0]
-        == "node2(node1(hi))"
+    def source():
+        return 1
+
+    with pytest.raises(AssertionError):
+        composers.compose_unary(
+            lambda x: x + 1,
+            base_types.merge_graphs(
+                composers.compose_unary(lambda x: x + 1, source),
+                composers.compose_unary(lambda x: x, source),
+            ),
+        )
+
+    g = composers.compose_unary(
+        lambda x: x + 1,
+        base_types.merge_graphs(
+            composers.compose_unary(lambda x: x + 1, source),
+            composers.compose_unary(terminal, source),
+        ),
     )
-    assert result[graph.make_computation_node(terminal2)][0] == "node1(hi)"
+    x = run.to_callable_strict(g)({})
+    assert x[terminal] == 1
+    assert x[graph.infer_graph_sink_excluding_terminals(g)] == 3
+
+
+def test_two_terminals():
+    terminal1 = graph.make_terminal("1", gamla.wrap_tuple)
+    terminal2 = graph.make_terminal("2", gamla.wrap_tuple)
+    result = graph_runners.unary_bare(
+        base_types.merge_graphs(
+            composers.compose_unary(terminal1, composers.make_compose(_node2, _node1)),
+            composers.compose_unary(terminal2, _node1),
+        ),
+        _node1,
+    )("hi")
+    assert result[terminal1][0] == "node2(node1(hi))"
+    assert result[terminal2][0] == "node1(hi)"
 
 
 def test_two_paths_succeed():
     source = graph.make_source()
-    terminal2 = graph.make_terminal("TERMINAL2", gamla.wrap_tuple)
+    terminal1 = graph.make_terminal("1", gamla.wrap_tuple)
+    terminal2 = graph.make_terminal("2", gamla.wrap_tuple)
     result = graph_runners.variadic_bare(
         base_types.merge_graphs(
             composers.make_first(
                 composers.compose_source_unary(_node1, source),
-                graph.connect_default_terminal(
-                    composers.compose_source_unary(_node2, source)
+                composers.compose_unary(
+                    terminal1, composers.compose_source_unary(_node2, source)
                 ),
             ),
-            (graph.make_standard_edge(source=_node1, destination=terminal2),),
+            composers.compose_unary(terminal2, _node1),
         )
     )({source: "hi"})
-    assert result[graph.make_computation_node(graph.DEFAULT_TERMINAL)][0] == "node2(hi)"
-    assert result[graph.make_computation_node(terminal2)][0] == "node1(hi)"
+    assert result[terminal1][0] == "node2(hi)"
+    assert result[terminal2][0] == "node1(hi)"
 
 
 def test_double_star_signature_considered_unary():
