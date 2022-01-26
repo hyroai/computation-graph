@@ -7,7 +7,7 @@ from computation_graph import base_types, composers
 
 
 @dataclasses.dataclass(frozen=True)
-class LegacyComputationResult:
+class ComputationResult:
     result: Any
     state: Any
 
@@ -15,7 +15,7 @@ class LegacyComputationResult:
 @gamla.curry
 def handle_state(key, default, g):
     def retrieve_state(x):
-        assert isinstance(x, LegacyComputationResult), x
+        assert isinstance(x, ComputationResult), x
         return x.state
 
     return base_types.merge_graphs(

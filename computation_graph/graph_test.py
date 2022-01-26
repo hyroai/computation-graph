@@ -84,7 +84,7 @@ def test_kwargs():
 def _node_with_state_as_arg(arg1, state):
     if state is None:
         state = 0
-    return legacy.LegacyComputationResult(
+    return legacy.ComputationResult(
         result=arg1 + f" state={state + 1}", state=state + 1
     )
 

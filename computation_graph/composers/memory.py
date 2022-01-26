@@ -24,7 +24,7 @@ _NO_VALUE_YET = _NoValueYet()
 def changed(f: base_types.GraphOrCallable) -> base_types.GraphType:
     @legacy.handle_state("memory", _NO_VALUE_YET)
     def check_changed(memory, value_to_watch):
-        return legacy.LegacyComputationResult(value_to_watch != memory, value_to_watch)
+        return legacy.ComputationResult(value_to_watch != memory, value_to_watch)
 
     return composers.make_compose(check_changed, f, key="value_to_watch")
 
@@ -41,7 +41,7 @@ def reduce_with_past_result(
 ):
     @legacy.handle_state("state", None)
     def lag(state, current):
-        return legacy.LegacyComputationResult(state, current)
+        return legacy.ComputationResult(state, current)
 
     return composers.compose_dict(
         reduce_with_past,
