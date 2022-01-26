@@ -121,7 +121,9 @@ def _infer_sink(graph_or_node: base_types.NodeOrGraph) -> base_types.Computation
     graph_without_future_edges = gamla.pipe(graph_or_node, graph.remove_future_edges)
     if graph_without_future_edges:
         try:
-            return graph.infer_graph_sink(graph_without_future_edges)
+            return graph.infer_graph_sink_excluding_terminals(
+                graph_without_future_edges
+            )
         except AssertionError:
             # If we reached here we can try again without sources of future edges.
             sources_of_future_edges = gamla.pipe(
