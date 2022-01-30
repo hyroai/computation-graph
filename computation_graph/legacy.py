@@ -3,7 +3,7 @@ from typing import Any
 
 import gamla
 
-from computation_graph import base_types, composers
+from computation_graph import base_types, composers, graph
 
 
 @dataclasses.dataclass(frozen=True)
@@ -14,6 +14,7 @@ class ComputationResult:
 
 @gamla.curry
 def handle_state(key, default, g):
+    @graph.make_terminal("retrieve_state")
     def retrieve_state(x):
         assert isinstance(x, ComputationResult), x
         return x.state

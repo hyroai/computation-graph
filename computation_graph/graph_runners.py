@@ -5,6 +5,13 @@ import gamla
 from computation_graph import base_types, composers, graph, run
 
 
+def _infer_graph_sink(edges: base_types.GraphType) -> base_types.ComputationNode:
+    assert edges, "Empty graphs have no sink."
+    leaves = graph.get_leaves(edges)
+    assert len(leaves) == 1, f"Cannot determine sink for {edges}, got: {tuple(leaves)}."
+    return gamla.head(leaves)
+
+
 def unary(g: base_types.GraphType, source: Callable, sink: Callable) -> Callable:
     return gamla.compose(
         gamla.itemgetter(graph.make_computation_node(sink)), unary_bare(g, source)
@@ -46,7 +53,7 @@ def unary_with_state(
 
 
 def unary_with_state_infer_sink(g: base_types.GraphType, source: Callable) -> Callable:
-    return unary_with_state(g, source, graph.infer_graph_sink(g))
+    return unary_with_state(g, source, _infer_graph_sink(g))
 
 
 def unary_with_state_and_expectations(
@@ -72,7 +79,9 @@ def variadic_with_state_and_expectations(g, sink):
         prev = {}
         for turn, expectation in turns:
             prev = f({**turn, **prev})
-            assert prev[graph.make_computation_node(sink)] == expectation
+            assert (
+                prev[graph.make_computation_node(sink)] == expectation
+            ), f"actual={prev[graph.make_computation_node(sink)]}\n expected: {expectation}"
 
     return inner
 
@@ -83,16 +92,14 @@ def variadic_bare(g):
     def inner(*turns):
         prev = {}
         for turn in turns:
-            prev = f({**turn, **prev})
+            prev = f({**prev, **turn})
         return prev
 
     return inner
 
 
 def variadic_infer_sink(g):
-    return gamla.compose_left(
-        variadic_bare(g), gamla.itemgetter(graph.infer_graph_sink(g))
-    )
+    return gamla.compose_left(variadic_bare(g), gamla.itemgetter(_infer_graph_sink(g)))
 
 
 def variadic_stateful_infer_sink(g):
@@ -102,7 +109,7 @@ def variadic_stateful_infer_sink(g):
         prev = {}
         for turn in turns:
             prev = f({**turn, **prev})
-        return prev[graph.infer_graph_sink(g)]
+        return prev[_infer_graph_sink(g)]
 
     return inner
 
@@ -116,7 +123,7 @@ def nullary(g, sink):
 
 
 def nullary_infer_sink(g):
-    return nullary(g, graph.infer_graph_sink(g))
+    return nullary(g, _infer_graph_sink(g))
 
 
 def nullary_infer_sink_with_state_and_expectations(g):
@@ -126,6 +133,6 @@ def nullary_infer_sink_with_state_and_expectations(g):
         prev = {}
         for expectation in expectations:
             prev = f(prev)
-            assert prev[graph.infer_graph_sink(g)] == expectation
+            assert prev[_infer_graph_sink(g)] == expectation
 
     return inner

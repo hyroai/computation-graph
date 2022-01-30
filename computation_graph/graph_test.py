@@ -8,6 +8,16 @@ from computation_graph import base_types, composers, graph, graph_runners, legac
 pytestmark = pytest.mark.asyncio
 
 
+def _infer_graph_sink_excluding_terminals(
+    edges: base_types.GraphType,
+) -> base_types.ComputationNode:
+    leaves = gamla.pipe(
+        edges, graph.get_leaves, gamla.remove(gamla.attrgetter("is_terminal")), tuple
+    )
+    assert len(leaves) == 1, f"computation graph has more than one sink: {leaves}"
+    return gamla.head(leaves)
+
+
 def _node1(arg1):
     return f"node1({arg1})"
 
@@ -205,10 +215,10 @@ def test_and_with_future():
     source2 = graph.make_source()
     g = base_types.merge_graphs(
         composers.make_and((_reducer_node, _node2, _node1), _merger),
-        composers.compose_source(_merger, source2, key="side_effects"),
-        composers.compose_source(_node1, source1, key="arg1"),
-        composers.compose_source(_node2, source1, key="arg1"),
-        composers.compose_source(_reducer_node, source1, key="arg1"),
+        composers.compose_source(_merger, key="side_effects", source=source2),
+        composers.compose_source(_node1, key="arg1", source=source1),
+        composers.compose_source(_node2, key="arg1", source=source1),
+        composers.compose_source(_reducer_node, key="arg1", source=source1),
         composers.make_compose(_reducer_node, _next_int, key="cur_int"),
         composers.compose_unary_future(_next_int, _next_int, None),
     )
@@ -227,8 +237,8 @@ def test_and_with_unactionable():
     source2 = graph.make_source()
     g = base_types.merge_graphs(
         composers.make_and((_reducer_node, _node_that_raises), _merger),
-        composers.compose_source(_merger, source2, key="side_effects"),
-        composers.compose_source(_reducer_node, source1, key="arg1"),
+        composers.compose_source(_merger, key="side_effects", source=source2),
+        composers.compose_source(_reducer_node, key="arg1", source=source1),
         composers.make_compose(_reducer_node, _next_int, key="cur_int"),
         composers.compose_unary_future(_next_int, _next_int, None),
     )
@@ -389,7 +399,7 @@ def test_unambiguous_composition_using_terminal():
     )
     x = run.to_callable_strict(g)({})
     assert x[terminal] == 1
-    assert x[graph.infer_graph_sink_excluding_terminals(g)] == 3
+    assert x[_infer_graph_sink_excluding_terminals(g)] == 3
 
 
 def test_two_terminals():
@@ -555,7 +565,7 @@ def test_compose_future():
         base_types.merge_graphs(
             composers.compose_source_unary(_plus_1, c),
             composers.compose_source_unary(_times_2, b),
-            composers.compose_source(_multiply, a, "a"),
+            composers.compose_source(_multiply, "a", a),
             composers.make_compose_future(
                 _multiply,
                 composers.make_and([_plus_1, _times_2, _multiply], merge_fn=_sum),

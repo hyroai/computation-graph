@@ -8,6 +8,7 @@ from computation_graph import base_types, composers, legacy
 def accumulate(f: base_types.GraphOrCallable) -> base_types.GraphType:
     """Accumulate `f`'s results into a `tuple`."""
 
+    @with_state("state", None)
     def accumulate(state, x):
         return *(state or ()), x
 
@@ -30,6 +31,7 @@ def changed(f: base_types.GraphOrCallable) -> base_types.GraphType:
 
 
 def ever(bool_node):
+    @with_state("state", None)
     def ever_inner(state, some_bool):
         return state or some_bool
 

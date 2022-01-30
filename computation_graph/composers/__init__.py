@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import inspect
 from typing import Any, Callable, Dict, Iterable, Optional, Sequence
 
 import gamla
@@ -139,8 +140,8 @@ def _infer_sink(graph_or_node: base_types.NodeOrGraph) -> base_types.Computation
     graph_without_future_edges = gamla.pipe(graph_or_node, graph.remove_future_edges)
     if graph_without_future_edges:
         try:
-            return graph.infer_graph_sink_excluding_terminals(
-                graph_without_future_edges
+            return gamla.pipe(
+                graph_without_future_edges, graph.sink_excluding_terminals
             )
         except AssertionError:
             # If we reached here we can try again without sources of future edges.
@@ -163,10 +164,10 @@ def _infer_sink(graph_or_node: base_types.NodeOrGraph) -> base_types.Computation
 def make_first(*graphs: base_types.CallableOrNodeOrGraph) -> base_types.GraphType:
     graph_or_nodes = tuple(map(_callable_or_graph_type_to_node_or_graph_type, graphs))
 
-    @graph.make_computation_node
     def first_sink(constituent_of_first):
         return constituent_of_first
 
+    first_sink.__name__ += f"@{id(first_sink)}:{_scoped_caller_frame('nlu-engine')}"
     return base_types.merge_graphs(
         *map(_get_edges_from_node_or_graph, graph_or_nodes),
         gamla.pipe(
@@ -177,7 +178,7 @@ def make_first(*graphs: base_types.CallableOrNodeOrGraph) -> base_types.GraphTyp
                 gamla.star(
                     lambda i, g: base_types.ComputationEdge(
                         source=g,
-                        destination=first_sink,
+                        destination=graph.make_computation_node(first_sink),
                         key="constituent_of_first",
                         args=(),
                         priority=i,
@@ -188,6 +189,14 @@ def make_first(*graphs: base_types.CallableOrNodeOrGraph) -> base_types.GraphTyp
             tuple,
         ),
     )
+
+
+def _scoped_caller_frame(scope):
+    frame = inspect.currentframe()
+    while scope not in frame.f_code.co_filename:
+        frame = frame.f_back
+    b = f"{frame.f_code.co_filename}:{frame.f_lineno}"
+    return b
 
 
 def last(*args) -> base_types.GraphType:
@@ -317,10 +326,19 @@ def compose_unary_future(
 
 def compose_source(
     destination: base_types.CallableOrNodeOrGraph,
+    key: str,
     source: base_types.CallableOrNodeOrGraph,
-    key: Optional[str],
 ) -> base_types.GraphType:
     return _make_compose_inner(destination, source, key=key, is_future=True, priority=0)
+
+
+@gamla.curry
+def compose_left_source(
+    source: base_types.CallableOrNodeOrGraph,
+    key: str,
+    destination: base_types.CallableOrNodeOrGraph,
+):
+    return compose_source(destination, key, source)
 
 
 def compose_source_unary(

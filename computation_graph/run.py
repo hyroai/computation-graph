@@ -13,6 +13,7 @@ from gamla.optimized import async_functions as opt_async_gamla
 from gamla.optimized import sync as opt_gamla
 
 from computation_graph import base_types, graph
+from computation_graph.composers import debug, lift
 
 
 def _transpose_graph(
@@ -360,11 +361,12 @@ def _combine_inputs_with_edges(
         if edge.source not in inputs:
             return None
 
-        def source():
-            return inputs[edge.source]
-
         return dataclasses.replace(
-            edge, is_future=False, source=graph.make_computation_node(source)
+            edge,
+            is_future=False,
+            source=graph.make_computation_node(
+                debug.name_callable(lift.always(inputs[edge.source]), edge.source.name)
+            ),
         )
 
     return opt_gamla.compose_left(
@@ -384,7 +386,7 @@ def _to_callable_with_side_effect_for_single_and_multiple(
         edges,
         gamla.unique,
         tuple,
-        gamla.assert_that(_composition_is_valid),
+        gamla.side_effect(_assert_composition_is_valid),
         gamla.side_effect(_assert_no_unwanted_ambiguity),
     )
     is_async = _is_graph_async(edges)
@@ -449,9 +451,16 @@ def _node_is_properly_composed(
     )
 
 
-def _composition_is_valid(g):
+def _assert_composition_is_valid(g):
     return gamla.pipe(
-        g, graph.get_all_nodes, gamla.allmap(_node_is_properly_composed(g))
+        g,
+        graph.get_all_nodes,
+        gamla.map(
+            gamla.assert_that_with_message(
+                gamla.wrap_str("{}"), _node_is_properly_composed(g)
+            )
+        ),
+        tuple,
     )
 
 

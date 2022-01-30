@@ -80,6 +80,7 @@ _index_by_source_and_destination = gamla.compose_left(
 
 
 def computation_trace(graph_instance: base_types.GraphType):
+    # TODO(uri): computation trace are broken
     destination_to_edges = _index_by_destination(graph_instance)
     source_and_destination_to_edges = _index_by_source_and_destination(graph_instance)
     sink = graph.infer_graph_sink(graph_instance)

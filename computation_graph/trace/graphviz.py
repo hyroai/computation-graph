@@ -11,6 +11,8 @@ from computation_graph.trace import trace_utils
 def _get_node_shape(node: base_types.ComputationNode):
     if node.name == "first":
         return "triangle"
+    if node.is_terminal:
+        return "doublecircle"
     return "ellipse"
 
 

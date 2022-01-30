@@ -90,7 +90,9 @@ def make_computation_node(
         name=_infer_callable_name(func),
         func=func,
         signature=gamla.pipe(
-            func, _infer_callable_signature, gamla.assert_that(_supported_signature)
+            func,
+            _infer_callable_signature,
+            gamla.assert_that_with_message(gamla.just(str(func)), _supported_signature),
         ),
         is_terminal=False,
     )
@@ -112,22 +114,13 @@ def get_leaves(edges: base_types.GraphType) -> FrozenSet[base_types.ComputationN
     )
 
 
-def infer_graph_sink(edges: base_types.GraphType) -> base_types.ComputationNode:
-    assert edges, "Empty graphs have no sink."
-    leaves = get_leaves(edges)
-    assert len(leaves) == 1, f"Cannot determine sink for {edges}, got: {tuple(leaves)}."
-    return gamla.head(leaves)
-
-
-def infer_graph_sink_excluding_terminals(
-    edges: base_types.GraphType,
-) -> base_types.ComputationNode:
-    leaves = gamla.pipe(
-        edges, get_leaves, gamla.remove(gamla.attrgetter("is_terminal")), tuple
-    )
-    assert len(leaves) == 1, f"computation graph has more than one sink: {leaves}"
-    return gamla.head(leaves)
-
+sink_excluding_terminals = gamla.compose_left(
+    get_leaves,
+    gamla.remove(gamla.attrgetter("is_terminal")),
+    tuple,
+    gamla.assert_that(gamla.len_equals(1)),
+    gamla.head,
+)
 
 get_incoming_edges_for_node = gamla.compose_left(
     gamla.groupby(base_types.edge_destination),
@@ -152,6 +145,7 @@ def make_source_with_name(name: str):
     def source():
         raise NotImplementedError(f"pure source [{name}] should never run")
 
+    source.__name__ = name
     return make_computation_node(source)
 
 
