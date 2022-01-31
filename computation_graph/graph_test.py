@@ -4,6 +4,7 @@ import gamla
 import pytest
 
 from computation_graph import base_types, composers, graph, graph_runners, legacy, run
+from computation_graph.composers import duplication
 
 pytestmark = pytest.mark.asyncio
 
@@ -575,6 +576,19 @@ def test_compose_future():
         ),
         _sum,
     )(([[{a: 2, b: 2, c: 2}, 9], [{a: 2, b: 2, c: 2}, 25]]))
+
+
+def test_dont_duplicate_sources():
+    a = graph.make_source()
+
+    assert (
+        graph_runners.variadic_infer_sink(
+            duplication.duplicate_function_or_graph(
+                composers.compose_source_unary(_plus_1, a)
+            )
+        )({a: 2})
+        == 3
+    )
 
 
 def test_badly_composed_graph_raises():
