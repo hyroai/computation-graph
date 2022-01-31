@@ -448,11 +448,8 @@ def _assert_composition_is_valid(g):
     return gamla.pipe(
         g,
         graph.get_all_nodes,
-        gamla.map(gamla.pair_with(_node_is_properly_composed(g))),
-        gamla.remove(gamla.on_first(bool)),
-        gamla.map(
-            gamla.compose_left(gamla.second, gamla.wrap_str("{0} at {0.func.__code__}"))
-        ),
+        gamla.remove(_node_is_properly_composed(g)),
+        gamla.map(gamla.wrap_str("{0} at {0.func.__code__}")),
         tuple,
         gamla.assert_that_with_message(
             gamla.wrap_str("Bad composition for: {}"), gamla.len_equals(0)
