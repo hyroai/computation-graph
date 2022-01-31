@@ -1,4 +1,5 @@
 import functools
+import inspect
 
 import gamla
 
@@ -24,7 +25,12 @@ def _duplicate_computation_edge(get_duplicated_node):
 
 
 _duplicate_node = gamla.compose_left(
-    gamla.attrgetter("func"), duplicate_function, graph.make_computation_node
+    gamla.attrgetter("func"),
+    gamla.when(
+        gamla.compose_left(inspect.signature, gamla.attrgetter("parameters"), len),
+        duplicate_function,
+    ),
+    graph.make_computation_node,
 )
 
 _node_to_duplicated_node = gamla.compose_left(

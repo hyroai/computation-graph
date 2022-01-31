@@ -149,11 +149,6 @@ def _merge_immutable(x, y):
     return x.update(y)
 
 
-def _handle_node_not_processing(exception, inputs):
-    del exception
-    return inputs[0]
-
-
 def _process_single_layer(
     f: Callable[[_NodeToResultsDict, base_types.ComputationNode], _NodeToResultsDict]
 ) -> Callable[
@@ -337,9 +332,7 @@ def _make_runner(single_node_runner, is_async, edges, handled_exceptions):
     return opt_gamla.compose(
         _dag_layer_reduce(is_async, edges),
         _process_single_layer,
-        gamla.curry(gamla.try_and_excepts)(
-            _DepNotFoundError, _handle_node_not_processing
-        ),
+        lambda f: gamla.first(f, gamla.head, exception_type=_DepNotFoundError),
         _process_node(
             (*handled_exceptions, base_types.SkipComputationError),
             is_async,
@@ -455,12 +448,15 @@ def _assert_composition_is_valid(g):
     return gamla.pipe(
         g,
         graph.get_all_nodes,
+        gamla.map(gamla.pair_with(_node_is_properly_composed(g))),
+        gamla.remove(gamla.on_first(bool)),
         gamla.map(
-            gamla.assert_that_with_message(
-                gamla.wrap_str("{}"), _node_is_properly_composed(g)
-            )
+            gamla.compose_left(gamla.second, gamla.wrap_str("{0} at {0.func.__code__}"))
         ),
         tuple,
+        gamla.assert_that_with_message(
+            gamla.wrap_str("Bad composition for: {}"), gamla.len_equals(0)
+        ),
     )
 
 
