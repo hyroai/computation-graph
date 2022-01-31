@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import inspect
 from typing import Any, Callable, Dict, Iterable, Optional, Sequence
 
 import gamla
@@ -167,7 +166,6 @@ def make_first(*graphs: base_types.CallableOrNodeOrGraph) -> base_types.GraphTyp
     def first_sink(constituent_of_first):
         return constituent_of_first
 
-    first_sink.__name__ += f"@{id(first_sink)}:{_scoped_caller_frame('nlu-engine')}"
     return base_types.merge_graphs(
         *map(_get_edges_from_node_or_graph, graph_or_nodes),
         gamla.pipe(
@@ -189,14 +187,6 @@ def make_first(*graphs: base_types.CallableOrNodeOrGraph) -> base_types.GraphTyp
             tuple,
         ),
     )
-
-
-def _scoped_caller_frame(scope):
-    frame = inspect.currentframe()
-    while scope not in frame.f_code.co_filename:
-        frame = frame.f_back
-    b = f"{frame.f_code.co_filename}:{frame.f_lineno}"
-    return b
 
 
 def last(*args) -> base_types.GraphType:
