@@ -12,7 +12,7 @@ import typeguard
 from gamla.optimized import async_functions as opt_async_gamla
 from gamla.optimized import sync as opt_gamla
 
-from computation_graph import base_types, graph
+from computation_graph import base_types, graph, signature
 from computation_graph.composers import debug, lift
 
 
@@ -61,8 +61,10 @@ def _get_args(
     )
 
 
-_get_inner_kwargs = opt_gamla.compose_left(
-    opt_gamla.keyfilter(base_types.edge_key),
+_get_kwargs = opt_gamla.compose_left(
+    opt_gamla.keyfilter(
+        gamla.compose_left(base_types.edge_key, gamla.not_equals("*args"))
+    ),
     opt_gamla.keymap(base_types.edge_key),
     opt_gamla.valmap(gamla.head),
 )
@@ -100,7 +102,7 @@ def _get_computation_input(
     edges_to_results = dict(zip(incoming_edges, results))
     return (
         _get_args(edges_to_results) if node.signature.is_args else (),
-        _get_inner_kwargs(edges_to_results),
+        _get_kwargs(edges_to_results),
     )
 
 
@@ -310,20 +312,12 @@ _is_graph_async = opt_gamla.compose_left(
 
 
 _assert_no_unwanted_ambiguity = gamla.compose_left(
-    gamla.groupby(
-        gamla.juxt(
-            base_types.edge_sources,
-            gamla.attrgetter("destination"),
-            gamla.attrgetter("priority"),
-        )
-    ),
-    gamla.valmap(
-        gamla.assert_that_with_message(
-            gamla.len_equals(1),
-            gamla.just(
-                "There are multiple edges with the same source, destination, and priority in the computation graph!"
-            ),
-        )
+    base_types.ambiguity_groups,
+    gamla.assert_that_with_message(
+        gamla.len_equals(0),
+        gamla.wrap_str(
+            "There are multiple edges with the same destination, key and priority in the computation graph!: {}"
+        ),
     ),
 )
 
@@ -427,20 +421,13 @@ to_callable = to_callable_with_side_effect(gamla.just(gamla.just(None)))
 
 @gamla.curry
 def _node_is_properly_composed(
-    g: base_types.GraphType, node: base_types.ComputationNode
+    node_to_incoming_edges: base_types.GraphType, node: base_types.ComputationNode
 ) -> bool:
-    unique_keys = gamla.pipe(
-        g,
-        gamla.filter(gamla.compose(gamla.equals(node), base_types.edge_destination)),
-        gamla.map(base_types.edge_key),
-        frozenset,
-    )
-    return any(
-        [
-            frozenset(node.signature.kwargs) == unique_keys,
-            unique_keys == frozenset([None])
-            and (len(node.signature.kwargs) == 1 or node.signature.is_args),
-        ]
+    return gamla.pipe(
+        node,
+        graph.unbound_signature(node_to_incoming_edges),
+        signature.parameters,
+        gamla.len_equals(0),
     )
 
 
@@ -448,7 +435,7 @@ def _assert_composition_is_valid(g):
     return gamla.pipe(
         g,
         graph.get_all_nodes,
-        gamla.remove(_node_is_properly_composed(g)),
+        gamla.remove(_node_is_properly_composed(graph.get_incoming_edges_for_node(g))),
         gamla.map(gamla.wrap_str("{0} at {0.func.__code__}")),
         tuple,
         gamla.assert_that_with_message(

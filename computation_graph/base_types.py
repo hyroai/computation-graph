@@ -51,15 +51,12 @@ class SkipComputationError(Exception):
 class ComputationEdge:
     destination: ComputationNode
     priority: int
-    key: Optional[str]
+    key: str
     source: Optional[ComputationNode]
     args: Tuple[ComputationNode, ...]
     is_future: bool
 
     def __post_init__(self):
-        assert (
-            not (self.args) or not self.key
-        ), f"Edge with `args` cannot have a `key`: {self.args} {self.key}"
         assert bool(self.args) != bool(
             self.source
         ), f"Edge must have a source or args, not both: {self}"
@@ -79,10 +76,18 @@ class ComputationEdge:
             "".join(map(str, self.args)) if self.source is None else str(self.source)
         )
         line = "...." if self.is_future else "----"
-        return source_str + line + (self.key or "") + line + ">" + str(self.destination)
+        return source_str + line + self.key + line + ">" + str(self.destination)
 
 
 merge_graphs = gamla.compose_left(gamla.pack, gamla.concat, gamla.unique, tuple)
+
+
+@dataclasses.dataclass(frozen=True)
+class NodeSignature:
+    is_args: bool
+    kwargs: Tuple[str, ...]
+    optional_kwargs: Tuple[str, ...]
+    is_kwargs: bool
 
 
 @dataclasses.dataclass(frozen=True)
@@ -99,14 +104,6 @@ class ComputationNode:
 
     def __repr__(self):
         return self.name
-
-
-@dataclasses.dataclass(frozen=True)
-class NodeSignature:
-    is_args: bool
-    kwargs: Tuple[str, ...]
-    optional_kwargs: Tuple[str, ...]
-    is_kwargs: bool
 
 
 edge_args = gamla.attrgetter("args")

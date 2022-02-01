@@ -1,63 +1,11 @@
-import functools
-import inspect
-from types import MappingProxyType
-from typing import Callable, FrozenSet, Tuple
+from typing import Callable, FrozenSet
 
 import gamla
 from gamla.optimized import sync as opt_gamla
 
-from computation_graph import base_types
+from computation_graph import base_types, signature
 
 remove_future_edges = gamla.compose(tuple, opt_gamla.remove(base_types.edge_is_future))
-
-
-def _is_star(parameter) -> bool:
-    return "*" + parameter.name == str(parameter)
-
-
-def _is_double_star(parameter) -> bool:
-    return "**" + parameter.name == str(parameter)
-
-
-def _is_default(parameter):
-    return parameter.default != parameter.empty
-
-
-_parameter_name = gamla.attrgetter("name")
-
-
-@gamla.before(
-    gamla.compose_left(
-        inspect.signature,
-        gamla.attrgetter("parameters"),
-        MappingProxyType.values,
-        tuple,
-    )
-)
-def _infer_callable_signature(function_parameters: Tuple) -> base_types.NodeSignature:
-    return base_types.NodeSignature(
-        is_args=gamla.anymap(_is_star)(function_parameters),
-        is_kwargs=gamla.anymap(_is_double_star)(function_parameters),
-        kwargs=gamla.pipe(
-            function_parameters,
-            gamla.remove(gamla.anyjuxt(_is_star, _is_double_star)),
-            gamla.map(_parameter_name),
-            tuple,
-        ),
-        optional_kwargs=gamla.pipe(
-            function_parameters,
-            gamla.remove(gamla.anyjuxt(_is_star, _is_double_star)),
-            gamla.filter(_is_default),
-            gamla.map(_parameter_name),
-            tuple,
-        ),
-    )
-
-
-def _infer_callable_name(func: Callable) -> str:
-    if isinstance(func, functools.partial):
-        return func.func.__name__
-    return func.__name__
 
 
 get_edge_nodes = gamla.ternary(
@@ -74,12 +22,6 @@ edges_to_node_id_map = gamla.compose_left(
 )
 
 
-def _supported_signature(signature: base_types.NodeSignature):
-    return not signature.optional_kwargs and not (
-        signature.kwargs and signature.is_args
-    )
-
-
 def make_computation_node(
     func: base_types.CallableOrNode,
 ) -> base_types.ComputationNode:
@@ -87,12 +29,14 @@ def make_computation_node(
         return func
 
     return base_types.ComputationNode(
-        name=_infer_callable_name(func),
+        name=signature.name(func),
         func=func,
         signature=gamla.pipe(
             func,
-            _infer_callable_signature,
-            gamla.assert_that_with_message(gamla.just(str(func)), _supported_signature),
+            signature.from_callable,
+            gamla.assert_that_with_message(
+                gamla.just(str(func)), signature.is_supported
+            ),
         ),
         is_terminal=False,
     )
@@ -152,8 +96,30 @@ def make_source_with_name(name: str):
 @gamla.curry
 def make_terminal(name: str, func: Callable) -> base_types.ComputationNode:
     return base_types.ComputationNode(
-        name=name,
-        func=func,
-        signature=_infer_callable_signature(func),
-        is_terminal=True,
+        name=name, func=func, signature=signature.from_callable(func), is_terminal=True
+    )
+
+
+@gamla.curry
+def unbound_signature(
+    node_to_incoming_edges, node: base_types.ComputationNode
+) -> base_types.NodeSignature:
+    """Computes the new signature of unbound variables after considering internal edges."""
+    incoming_edges = node_to_incoming_edges(node)
+
+    keep_not_in_bound_kwargs = gamla.pipe(
+        incoming_edges,
+        opt_gamla.map(base_types.edge_key),
+        gamla.filter(gamla.identity),
+        frozenset,
+        gamla.contains,
+        gamla.remove,
+    )
+
+    return base_types.NodeSignature(
+        is_kwargs=False,
+        is_args=node.signature.is_args
+        and not any(edge.args for edge in incoming_edges),
+        kwargs=tuple(keep_not_in_bound_kwargs(node.signature.kwargs)),
+        optional_kwargs=tuple(keep_not_in_bound_kwargs(node.signature.optional_kwargs)),
     )
