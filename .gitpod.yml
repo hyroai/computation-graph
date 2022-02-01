@@ -3,6 +3,5 @@ tasks:
       pip install pre-commit
       pre-commit install --install-hooks
   - init: pip install .
-vscode:
-  extensions:
-    - ms-toolsai.jupyter
+image:
+  file: .gitpod.Dockerfile
