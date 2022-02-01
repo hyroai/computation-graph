@@ -1,0 +1,7 @@
+tasks:
+  - before: sudo apt-get install graphviz graphviz-dev
+  - before: sudo apt-get install python3-dev
+  - init: pip install .
+vscode:
+  extensions:
+    - ms-python.python
