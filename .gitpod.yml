@@ -1,7 +1,7 @@
 tasks:
   - before: |
-      sudo apt-get install -y graphviz graphviz-dev;
-      sudo apt-get install -y python3-dev
+      apt-get install -y graphviz graphviz-dev;
+      apt-get install -y python3-dev
       pip install pre-commit
       pre-commit install --install-hooks
   - init: pip install .
