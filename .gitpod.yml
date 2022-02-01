@@ -5,7 +5,6 @@ tasks:
       pip install pre-commit
       pre-commit install --install-hooks
   - init: pip install .
-image: python:3.9-slim
 vscode:
   extensions:
     - ms-toolsai.jupyter
