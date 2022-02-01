@@ -1,10 +1,11 @@
 tasks:
-  - before: sudo apt-get install -y graphviz graphviz-dev
-  - before: sudo apt-get install -y python3-dev
-  - before: pyenv install 3.9.10
-  - before: pyenv global 3.9.10
-  - before: pip install pre-commit
-  - before: pre-commit install
+  - before:
+      sudo apt-get install -y graphviz graphviz-dev
+      sudo apt-get install -y python3-dev
+      pyenv install 3.9.10
+      pyenv global 3.9.10
+      pip install pre-commit
+      pre-commit install
   - init: pip install .
 vscode:
   extensions:
