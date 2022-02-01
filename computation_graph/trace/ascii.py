@@ -78,40 +78,52 @@ _index_by_source_and_destination = gamla.compose_left(
     gamla.groupby_many(_edge_to_node_pairs), gamla.dict_to_getter_with_default(())
 )
 
+_sources = gamla.compose(frozenset(), gamla.mapcat(base_types.edge_sources(edge)))
 
-def computation_trace(graph_instance: base_types.GraphType):
-    # TODO(uri): computation trace are broken
+
+def _trace_single_output(node_to_result: Callable):
+    return gamla.compose_left(
+        gamla.tree_reduce(
+            gamla.compose_left(
+                destination_to_edges,
+                gamla.filter(
+                    trace_utils.is_edge_participating(
+                        gamla.contains(frozenset(map(gamla.head, trace)))
+                    )
+                ),
+                gamla.mapcat(lambda edge: edge.args if edge.args else (edge.source,)),
+            ),
+            _skip_uninsteresting_nodes(node_to_result),
+        ),
+        gamla.tree_reduce(
+            gamla.nth(1),
+            _process_node(
+                gamla.compose_left(gamla.head, node_to_result),
+                source_and_destination_to_edges,
+            ),
+        ),
+    )
+
+
+def computation_trace(graph_instance: base_types.GraphType) -> _NodeAndResultTree:
     destination_to_edges = _index_by_destination(graph_instance)
     source_and_destination_to_edges = _index_by_source_and_destination(graph_instance)
-    sink = graph.infer_graph_sink(graph_instance)
+    regular_edges = gamla.pipe(
+        graph_instance, gamla.remove(base_types.edge_is_future), frozenset
+    )
+    sinks = gamla.pipe(
+        regular_edges,
+        gamla.map(base_types.edge_destination),
+        gamla.remove(gamla.contains(_sources(regular_edges))),
+        frozenset,
+    )
 
-    def computation_trace(trace):
-        # We set a default here so we don't get a `KeyError`.
-        # This happens when there isn't a working path, and the runner will raise outside.
-        node_to_result = gamla.dict_to_getter_with_default(None, dict(trace))
-        return gamla.pipe(
-            sink,
-            gamla.tree_reduce(
-                gamla.compose_left(
-                    destination_to_edges,
-                    gamla.filter(
-                        trace_utils.is_edge_participating(
-                            gamla.contains(frozenset(map(gamla.head, trace)))
-                        )
-                    ),
-                    gamla.mapcat(
-                        lambda edge: edge.args if edge.args else (edge.source,)
-                    ),
-                ),
-                _skip_uninsteresting_nodes(node_to_result),
-            ),
-            gamla.tree_reduce(
-                gamla.nth(1),
-                _process_node(
-                    gamla.compose_left(gamla.head, node_to_result),
-                    source_and_destination_to_edges,
-                ),
-            ),
-        )
-
-    return gamla.compose_left(frozenset, dict.items, computation_trace, gamla.debug)
+    return gamla.compose(
+        print,
+        lambda trace_single_node: gamla.pipe(
+            sinks, gamla.map(trace_single_node), tuple, str
+        ),
+        _trace_single_output,
+        # We set a default here so we don't get a `KeyError` for nodes that could not be computed.
+        gamla.dict_to_getter_with_default(None),
+    )
