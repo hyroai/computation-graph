@@ -2,11 +2,10 @@ tasks:
   - before: |
       sudo apt-get install -y graphviz graphviz-dev;
       sudo apt-get install -y python3-dev
-      pyenv install 3.9.10
-      pyenv global 3.9.10
       pip install pre-commit
-      pre-commit install
+      pre-commit install --install-hooks
   - init: pip install .
+image: python3.9-alpine
 vscode:
   extensions:
-    - ms-python.python
+    - ms-toolsai.jupyter
