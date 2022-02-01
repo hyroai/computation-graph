@@ -419,12 +419,10 @@ to_callable = to_callable_with_side_effect(gamla.just(gamla.just(None)))
 # to_callable = to_callable_with_side_effect(graphviz.computation_trace('utterance_computation.dot'))
 
 
-@gamla.curry
 def _node_is_properly_composed(
-    node_to_incoming_edges: base_types.GraphType, node: base_types.ComputationNode
-) -> bool:
-    return gamla.pipe(
-        node,
+    node_to_incoming_edges: base_types.GraphType,
+) -> Callable[[base_types.ComputationNode], bool]:
+    return gamla.compose_left(
         graph.unbound_signature(node_to_incoming_edges),
         signature.parameters,
         gamla.len_equals(0),

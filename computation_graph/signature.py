@@ -1,13 +1,14 @@
 import functools
 import inspect
 from types import MappingProxyType
-from typing import Callable, Tuple
+from typing import Callable, FrozenSet, Tuple
 
-from computation_graph import base_types
 import gamla
 
+from computation_graph import base_types
 
-def is_supported(signature: base_types.NodeSignature):
+
+def is_supported(signature: base_types.NodeSignature) -> bool:
     return not signature.optional_kwargs and not (
         signature.kwargs and signature.is_args
     )
@@ -62,12 +63,14 @@ def from_callable(function_parameters: Tuple) -> base_types.NodeSignature:
     )
 
 
-def parameters(signature: base_types.NodeSignature):
-    return {
-        *signature.kwargs,
-        *signature.optional_kwargs,
-        *(("**kwargs",) if signature.is_kwargs else ()),
-    }
+def parameters(signature: base_types.NodeSignature) -> FrozenSet[str]:
+    return frozenset(
+        {
+            *signature.kwargs,
+            *signature.optional_kwargs,
+            *(("**kwargs",) if signature.is_kwargs else ()),
+        }
+    )
 
 
 is_unary = gamla.compose_left(parameters, gamla.len_equals(1))

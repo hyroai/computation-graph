@@ -175,7 +175,7 @@ def _try_connect(
     is_future: bool,
     destination: base_types.ComputationNode,
     unbound_destination_signature: base_types.NodeSignature,
-):
+) -> base_types.ComputationEdge:
     if key is None and signature.is_unary(unbound_destination_signature):
         key = gamla.head(signature.parameters(unbound_destination_signature))
     assert key is not None and key in signature.parameters(

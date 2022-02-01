@@ -100,22 +100,22 @@ def make_terminal(name: str, func: Callable) -> base_types.ComputationNode:
     )
 
 
+_keep_not_in_bound_kwargs = gamla.compose_left(
+    opt_gamla.map(base_types.edge_key),
+    gamla.filter(gamla.identity),
+    frozenset,
+    gamla.contains,
+    gamla.remove,
+)
+
+
 @gamla.curry
 def unbound_signature(
     node_to_incoming_edges, node: base_types.ComputationNode
 ) -> base_types.NodeSignature:
     """Computes the new signature of unbound variables after considering internal edges."""
     incoming_edges = node_to_incoming_edges(node)
-
-    keep_not_in_bound_kwargs = gamla.pipe(
-        incoming_edges,
-        opt_gamla.map(base_types.edge_key),
-        gamla.filter(gamla.identity),
-        frozenset,
-        gamla.contains,
-        gamla.remove,
-    )
-
+    keep_not_in_bound_kwargs = _keep_not_in_bound_kwargs(incoming_edges)
     return base_types.NodeSignature(
         is_kwargs=False,
         is_args=node.signature.is_args
