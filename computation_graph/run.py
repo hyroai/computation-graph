@@ -70,11 +70,7 @@ _get_kwargs = opt_gamla.compose_left(
 )
 
 
-_NodeToResultsDict = Dict[base_types.ComputationNode, base_types.Result]
-
-
-NodeToResults = Callable[[base_types.ComputationNode], base_types.Result]
-
+_NodeToResults = Dict[base_types.ComputationNode, base_types.Result]
 _ComputationInput = Tuple[Tuple[base_types.Result, ...], Dict[str, base_types.Result]]
 
 
@@ -88,17 +84,6 @@ def _get_computation_input(
             len(results) == 1
         ), f"signature for {base_types.pretty_print_function_name(node.func)} contains `**kwargs`. This is considered unary, meaning one incoming edge, but we got more than one: {incoming_edges}."
         return gamla.head(results), {}
-    if (
-        not node.signature.is_args
-        and sum(
-            map(
-                opt_gamla.compose_left(base_types.edge_key, gamla.equals(None)),
-                incoming_edges,
-            )
-        )
-        == 1
-    ):
-        return (), {node.signature.kwargs[0]: gamla.head(gamla.head(results))}
     edges_to_results = dict(zip(incoming_edges, results))
     return (
         _get_args(edges_to_results) if node.signature.is_args else (),
@@ -107,11 +92,7 @@ def _get_computation_input(
 
 
 def _type_check(node: base_types.ComputationNode, result):
-    try:
-        return_typing = typing.get_type_hints(node.func).get("return", None)
-    except TypeError:
-        # Does not support `functools.partial`.
-        return
+    return_typing = typing.get_type_hints(node.func).get("return", None)
     if return_typing:
         try:
             typeguard.check_type(str(node), result, return_typing)
@@ -152,10 +133,8 @@ def _merge_immutable(x, y):
 
 
 def _process_single_layer(
-    f: Callable[[_NodeToResultsDict, base_types.ComputationNode], _NodeToResultsDict]
-) -> Callable[
-    [_NodeToResultsDict, FrozenSet[base_types.ComputationNode]], _NodeToResultsDict,
-]:
+    f: Callable[[_NodeToResults, base_types.ComputationNode], _NodeToResults]
+) -> Callable[[_NodeToResults, FrozenSet[base_types.ComputationNode]], _NodeToResults,]:
     return gamla.compose_left(
         gamla.pack,
         gamla.explode(1),
@@ -169,8 +148,7 @@ def _dag_layer_reduce(is_async: bool, edges: base_types.GraphType):
 
     def inner(
         f: Callable[
-            [_NodeToResultsDict, FrozenSet[base_types.ComputationNode]],
-            _NodeToResultsDict,
+            [_NodeToResults, FrozenSet[base_types.ComputationNode]], _NodeToResults,
         ]
     ):
         if is_async:
@@ -248,9 +226,8 @@ def _process_node(
 
             @opt_async_gamla.star
             async def process_node(
-                accumulated_results: _NodeToResultsDict,
-                node: base_types.ComputationNode,
-            ) -> _NodeToResultsDict:
+                accumulated_results: _NodeToResults, node: base_types.ComputationNode
+            ) -> _NodeToResults:
                 try:
                     return _assoc_immutable(
                         accumulated_results,
@@ -276,9 +253,8 @@ def _process_node(
 
             @opt_gamla.star
             def process_node(
-                accumulated_results: _NodeToResultsDict,
-                node: base_types.ComputationNode,
-            ) -> _NodeToResultsDict:
+                accumulated_results: _NodeToResults, node: base_types.ComputationNode
+            ) -> _NodeToResults:
                 try:
                     return _assoc_immutable(
                         accumulated_results,
@@ -340,7 +316,7 @@ def _make_runner(single_node_runner, is_async, edges, handled_exceptions):
 
 
 def _combine_inputs_with_edges(
-    inputs: _NodeToResultsDict,
+    inputs: _NodeToResults,
 ) -> Callable[[base_types.GraphType], base_types.GraphType]:
     def replace_source(edge):
         assert edge.source, "only supports singular edges for now"
@@ -368,7 +344,7 @@ def _to_callable_with_side_effect_for_single_and_multiple(
     all_nodes_side_effect: Callable,
     edges: base_types.GraphType,
     handled_exceptions: FrozenSet[Type[Exception]],
-) -> Callable[[_NodeToResultsDict], _NodeToResultsDict]:
+) -> Callable[[_NodeToResults], _NodeToResults]:
     edges = gamla.pipe(
         edges,
         gamla.unique,
