@@ -2,7 +2,7 @@ import pprint
 from typing import Callable, Dict, Iterable, Tuple
 
 import gamla
-from gamla import optimized as opt_gamla
+from gamla.optimized import sync as opt_gamla
 
 from computation_graph import base_types
 from computation_graph.trace import trace_utils
@@ -108,7 +108,6 @@ def _trace_single_output(
     )
 
 
-@gamla.before(gamla.compose(frozenset, gamla.remove(base_types.edge_is_future)))
 def _sinks_for_trace(non_future_edges):
     return gamla.pipe(
         non_future_edges,
@@ -118,6 +117,7 @@ def _sinks_for_trace(non_future_edges):
     )
 
 
+@gamla.before(gamla.compose(tuple, gamla.remove(base_types.edge_is_future)))
 def computation_trace(g: base_types.GraphType) -> Callable:
     return gamla.compose_left(
         _trace_single_output(
