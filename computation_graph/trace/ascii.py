@@ -2,6 +2,7 @@ import pprint
 from typing import Callable, Iterable, Tuple
 
 import gamla
+from gamla import optimized as opt_gamla
 
 from computation_graph import base_types
 from computation_graph.trace import trace_utils
@@ -108,28 +109,29 @@ def _trace_single_output(
     )
 
 
-def computation_trace(graph_instance: base_types.GraphType) -> _NodeAndResultTree:
-    regular_edges = gamla.pipe(
-        graph_instance, gamla.remove(base_types.edge_is_future), frozenset
-    )
-    sinks = gamla.pipe(
-        regular_edges,
+@gamla.before(gamla.compose(frozenset, gamla.remove(base_types.edge_is_future)))
+def _sinks_for_trace(non_future_edges):
+    return gamla.pipe(
+        non_future_edges,
         gamla.map(base_types.edge_destination),
-        gamla.remove(gamla.contains(_sources(regular_edges))),
+        gamla.remove(gamla.contains(_sources(non_future_edges))),
         frozenset,
     )
 
-    return gamla.compose(
-        pprint.pprint,
-        lambda trace_single_node: gamla.pipe(
-            sinks, gamla.map(trace_single_node), tuple
+
+def computation_trace(g: base_types.GraphType) -> Callable:
+    return gamla.compose_left(
+        gamla.juxt(
+            gamla.contains,
+            # We set a default here so we don't get a `KeyError` for nodes that could not be computed.
+            gamla.dict_to_getter_with_default(None),
         ),
         gamla.star(
             _trace_single_output(
-                _index_by_source_and_destination(graph_instance),
-                _index_by_destination(graph_instance),
+                _index_by_source_and_destination(g), _index_by_destination(g)
             )
         ),
-        # We set a default here so we don't get a `KeyError` for nodes that could not be computed.
-        gamla.juxt(gamla.contains, gamla.dict_to_getter_with_default(None)),
+        opt_gamla.maptuple,
+        gamla.apply(_sinks_for_trace(g)),
+        pprint.pprint,
     )
