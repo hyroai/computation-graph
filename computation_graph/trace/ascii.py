@@ -1,5 +1,5 @@
 import pprint
-from typing import Callable, Iterable, Tuple
+from typing import Callable, Dict, Iterable, Tuple
 
 import gamla
 from gamla import optimized as opt_gamla
@@ -85,21 +85,23 @@ _sources = gamla.compose(frozenset, gamla.mapcat(base_types.edge_sources))
 
 @gamla.curry
 def _trace_single_output(
-    source_and_destination_to_edges, destination_to_edges, node_to_result: Callable
-):
+    source_and_destination_to_edges, destination_to_edges, node_to_result: Dict
+) -> Callable:
     return gamla.compose_left(
         gamla.tree_reduce(
             gamla.compose_left(
                 destination_to_edges,
-                gamla.filter(trace_utils.is_edge_participating(node_to_result)),
+                gamla.filter(
+                    trace_utils.is_edge_participating(gamla.contains(node_to_result))
+                ),
                 gamla.mapcat(base_types.edge_sources),
             ),
-            _skip_uninsteresting_nodes(node_to_result),
+            _skip_uninsteresting_nodes(node_to_result.__getitem__),
         ),
         gamla.tree_reduce(
             gamla.nth(1),
             _process_node(
-                gamla.compose_left(gamla.head, node_to_result),
+                gamla.compose_left(gamla.head, node_to_result.__getitem__),
                 source_and_destination_to_edges,
             ),
         ),
@@ -118,8 +120,6 @@ def _sinks_for_trace(non_future_edges):
 
 def computation_trace(g: base_types.GraphType) -> Callable:
     return gamla.compose_left(
-        # We set a default here so we don't get a `KeyError` for nodes that could not be computed.
-        gamla.dict_to_getter_with_default(None),
         _trace_single_output(
             _index_by_source_and_destination(g), _index_by_destination(g)
         ),
