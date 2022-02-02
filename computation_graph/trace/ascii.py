@@ -85,16 +85,13 @@ _sources = gamla.compose(frozenset, gamla.mapcat(base_types.edge_sources))
 
 @gamla.curry
 def _trace_single_output(
-    source_and_destination_to_edges,
-    destination_to_edges,
-    node_has_result,
-    node_to_result: Callable,
+    source_and_destination_to_edges, destination_to_edges, node_to_result: Callable
 ):
     return gamla.compose_left(
         gamla.tree_reduce(
             gamla.compose_left(
                 destination_to_edges,
-                gamla.filter(trace_utils.is_edge_participating(node_has_result)),
+                gamla.filter(trace_utils.is_edge_participating(node_to_result)),
                 gamla.mapcat(base_types.edge_sources),
             ),
             _skip_uninsteresting_nodes(node_to_result),
@@ -121,15 +118,10 @@ def _sinks_for_trace(non_future_edges):
 
 def computation_trace(g: base_types.GraphType) -> Callable:
     return gamla.compose_left(
-        gamla.juxt(
-            gamla.contains,
-            # We set a default here so we don't get a `KeyError` for nodes that could not be computed.
-            gamla.dict_to_getter_with_default(None),
-        ),
-        gamla.star(
-            _trace_single_output(
-                _index_by_source_and_destination(g), _index_by_destination(g)
-            )
+        # We set a default here so we don't get a `KeyError` for nodes that could not be computed.
+        gamla.dict_to_getter_with_default(None),
+        _trace_single_output(
+            _index_by_source_and_destination(g), _index_by_destination(g)
         ),
         opt_gamla.maptuple,
         gamla.apply(_sinks_for_trace(g)),
