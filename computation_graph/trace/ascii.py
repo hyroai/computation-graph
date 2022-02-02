@@ -1,8 +1,9 @@
+import pprint
 from typing import Callable, Iterable, Tuple
 
 import gamla
 
-from computation_graph import base_types, graph
+from computation_graph import base_types
 from computation_graph.trace import trace_utils
 
 _NodeTree = Tuple[base_types.ComputationNode, Tuple["_NodeTree", ...]]  # type: ignore
@@ -78,20 +79,22 @@ _index_by_source_and_destination = gamla.compose_left(
     gamla.groupby_many(_edge_to_node_pairs), gamla.dict_to_getter_with_default(())
 )
 
-_sources = gamla.compose(frozenset(), gamla.mapcat(base_types.edge_sources(edge)))
+_sources = gamla.compose(frozenset, gamla.mapcat(base_types.edge_sources))
 
 
-def _trace_single_output(node_to_result: Callable):
+@gamla.curry
+def _trace_single_output(
+    source_and_destination_to_edges,
+    destination_to_edges,
+    node_has_result,
+    node_to_result: Callable,
+):
     return gamla.compose_left(
         gamla.tree_reduce(
             gamla.compose_left(
                 destination_to_edges,
-                gamla.filter(
-                    trace_utils.is_edge_participating(
-                        gamla.contains(frozenset(map(gamla.head, trace)))
-                    )
-                ),
-                gamla.mapcat(lambda edge: edge.args if edge.args else (edge.source,)),
+                gamla.filter(trace_utils.is_edge_participating(node_has_result)),
+                gamla.mapcat(base_types.edge_sources),
             ),
             _skip_uninsteresting_nodes(node_to_result),
         ),
@@ -106,8 +109,6 @@ def _trace_single_output(node_to_result: Callable):
 
 
 def computation_trace(graph_instance: base_types.GraphType) -> _NodeAndResultTree:
-    destination_to_edges = _index_by_destination(graph_instance)
-    source_and_destination_to_edges = _index_by_source_and_destination(graph_instance)
     regular_edges = gamla.pipe(
         graph_instance, gamla.remove(base_types.edge_is_future), frozenset
     )
@@ -119,11 +120,16 @@ def computation_trace(graph_instance: base_types.GraphType) -> _NodeAndResultTre
     )
 
     return gamla.compose(
-        print,
+        pprint.pprint,
         lambda trace_single_node: gamla.pipe(
-            sinks, gamla.map(trace_single_node), tuple, str
+            sinks, gamla.map(trace_single_node), tuple
         ),
-        _trace_single_output,
+        gamla.star(
+            _trace_single_output(
+                _index_by_source_and_destination(graph_instance),
+                _index_by_destination(graph_instance),
+            )
+        ),
         # We set a default here so we don't get a `KeyError` for nodes that could not be computed.
-        gamla.dict_to_getter_with_default(None),
+        gamla.juxt(gamla.contains, gamla.dict_to_getter_with_default(None)),
     )
