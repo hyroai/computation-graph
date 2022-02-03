@@ -89,7 +89,7 @@ def make_source_with_name(name: str):
     def source():
         raise NotImplementedError(f"pure source [{name}] should never run")
 
-    source.__name__ = name
+    source.__name__ = f"source:{name}"
     return make_computation_node(source)
 
 

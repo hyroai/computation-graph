@@ -20,15 +20,17 @@ def unary(g: base_types.GraphType, source: Callable, sink: Callable) -> Callable
 
 def unary_bare(g, source):
     real_source = graph.make_source()
-    compose = gamla.compose(
-        run.to_callable_strict(
-            base_types.merge_graphs(
-                g, composers.compose_left_future(real_source, source, None, None)
+    return gamla.compose(
+        gamla.star(
+            run.to_callable_strict(
+                base_types.merge_graphs(
+                    g, composers.compose_left_future(real_source, source, None, None)
+                )
             )
         ),
+        gamla.pair_with(gamla.just({})),
         gamla.wrap_dict(real_source),
     )
-    return compose
 
 
 def unary_with_state(
@@ -46,7 +48,7 @@ def unary_with_state(
     def inner(*turns):
         prev = {}
         for turn in turns:
-            prev = f({real_source: turn, **prev})
+            prev = f(prev, {real_source: turn})
         return prev[graph.make_computation_node(sink)]
 
     return inner
@@ -78,7 +80,7 @@ def variadic_with_state_and_expectations(g, sink):
     def inner(turns):
         prev = {}
         for turn, expectation in turns:
-            prev = f({**turn, **prev})
+            prev = f(prev, turn)
             assert (
                 prev[graph.make_computation_node(sink)] == expectation
             ), f"actual={prev[graph.make_computation_node(sink)]}\n expected: {expectation}"
@@ -92,7 +94,7 @@ def variadic_bare(g):
     def inner(*turns):
         prev = {}
         for turn in turns:
-            prev = f({**prev, **turn})
+            prev = f(prev, turn)
         return prev
 
     return inner
@@ -104,22 +106,21 @@ def variadic_infer_sink(g):
 
 def variadic_stateful_infer_sink(g):
     f = run.to_callable_strict(g)
+    sink = _infer_graph_sink(g)
 
     def inner(*turns):
         prev = {}
         for turn in turns:
-            prev = f({**turn, **prev})
-        return prev[_infer_graph_sink(g)]
+            prev = f(prev, turn)
+        return prev[sink]
 
     return inner
 
 
 def nullary(g, sink):
     return gamla.compose(
-        gamla.itemgetter(graph.make_computation_node(sink)),
-        run.to_callable_strict(g),
-        gamla.just({}),
-    )()
+        gamla.itemgetter(graph.make_computation_node(sink)), run.to_callable_strict(g)
+    )({}, {})
 
 
 def nullary_infer_sink(g):
@@ -128,11 +129,12 @@ def nullary_infer_sink(g):
 
 def nullary_infer_sink_with_state_and_expectations(g):
     f = run.to_callable_strict(g)
+    sink = _infer_graph_sink(g)
 
     def inner(*expectations):
         prev = {}
         for expectation in expectations:
-            prev = f(prev)
-            assert prev[_infer_graph_sink(g)] == expectation
+            prev = f(prev, {})
+            assert prev[sink] == expectation
 
     return inner

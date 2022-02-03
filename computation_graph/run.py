@@ -344,7 +344,7 @@ def _to_callable_with_side_effect_for_single_and_multiple(
     all_nodes_side_effect: Callable,
     edges: base_types.GraphType,
     handled_exceptions: FrozenSet[Type[Exception]],
-) -> Callable[[_NodeToResults], _NodeToResults]:
+) -> Callable[[_NodeToResults, _NodeToResults], _NodeToResults]:
     edges = gamla.pipe(
         edges,
         gamla.unique,
@@ -355,6 +355,7 @@ def _to_callable_with_side_effect_for_single_and_multiple(
     is_async = _is_graph_async(edges)
     if is_async:
 
+        @_async_graph_reducer
         async def runner(inputs):
             edges_with_inputs = _combine_inputs_with_edges(inputs)(edges)
             return await gamla.compose_left(
@@ -370,6 +371,7 @@ def _to_callable_with_side_effect_for_single_and_multiple(
 
     else:
 
+        @_graph_reducer
         def runner(inputs):
             edges_with_inputs = _combine_inputs_with_edges(inputs)(edges)
             return gamla.compose_left(
@@ -384,6 +386,20 @@ def _to_callable_with_side_effect_for_single_and_multiple(
             )()
 
     return runner
+
+
+def _graph_reducer(graph_callable):
+    def reducer(prev: _NodeToResults, sources: _NodeToResults) -> _NodeToResults:
+        return {**prev, **(graph_callable({**prev, **sources}))}
+
+    return reducer
+
+
+def _async_graph_reducer(graph_callable):
+    async def reducer(prev: _NodeToResults, sources: _NodeToResults) -> _NodeToResults:
+        return {**prev, **(await graph_callable({**prev, **sources}))}
+
+    return reducer
 
 
 to_callable_with_side_effect = gamla.curry(
@@ -420,8 +436,7 @@ def _assert_composition_is_valid(g):
 
 def to_callable_strict(
     g: base_types.GraphType,
-) -> Callable[
-    [Dict[base_types.ComputationNode, base_types.Result]],
-    Dict[base_types.ComputationNode, base_types.Result],
-]:
-    return gamla.compose(to_callable(g, frozenset()), immutables.Map)
+) -> Callable[[_NodeToResults, _NodeToResults], _NodeToResults,]:
+    return gamla.compose(
+        gamla.star(to_callable(g, frozenset())), gamla.map(immutables.Map), gamla.pack
+    )
