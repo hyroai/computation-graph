@@ -333,8 +333,8 @@ def _combine_inputs_with_edges(
         )
 
     return opt_gamla.compose_left(
-        gamla.map(gamla.when(base_types.edge_is_future, replace_source)),
-        gamla.remove(gamla.equals(None)),
+        opt_gamla.map(gamla.when(base_types.edge_is_future, replace_source)),
+        opt_gamla.remove(gamla.equals(None)),
         tuple,
     )
 
