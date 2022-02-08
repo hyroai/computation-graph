@@ -13,7 +13,9 @@ class ComputationResult:
 
 
 @gamla.curry
-def handle_state(key, default, g):
+def handle_state(
+    key: str, default: Any, g: base_types.GraphOrCallable
+) -> base_types.GraphType:
     @graph.make_terminal("retrieve_state")
     def retrieve_state(x):
         assert isinstance(x, ComputationResult), x

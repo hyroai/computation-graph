@@ -25,7 +25,7 @@ def test_computation_trace(tmp_path: pathlib.Path):
     )
     cwd = os.getcwd()
     os.chdir(tmp_path)
-    f({})
+    f({}, {})
     assert (tmp_path / filename).exists()
     g = pgv.AGraph()
     g.read(str(tmp_path / filename))

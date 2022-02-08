@@ -4,7 +4,7 @@ import gamla
 import pytest
 
 from computation_graph import base_types, composers, graph, graph_runners, legacy, run
-from computation_graph.composers import duplication
+from computation_graph.composers import duplication, memory
 
 pytestmark = pytest.mark.asyncio
 
@@ -398,7 +398,7 @@ def test_unambiguous_composition_using_terminal():
             composers.compose_unary(terminal, source),
         ),
     )
-    x = run.to_callable_strict(g)({})
+    x = run.to_callable_strict(g)({}, {})
     assert x[terminal] == 1
     assert x[_infer_graph_sink_excluding_terminals(g)] == 3
 
@@ -596,3 +596,41 @@ def test_badly_composed_graph_raises():
         run.to_callable_strict(
             composers.make_compose(lambda x, y: x + y, lambda: 1, key="x")
         )
+
+
+def test_memory_persists_when_unactionable():
+    def input_node(x):
+        return x
+
+    def output_node(x):
+        return x
+
+    remember_first = memory.with_state("x", None, lambda upstream, x: x or upstream)
+    skip_or_passthrough = (
+        lambda input: input
+        if input != "skip state"
+        else gamla.just_raise(base_types.SkipComputationError)
+    )
+    graph_runners.unary_with_state_and_expectations(
+        composers.compose_left(
+            composers.make_first(
+                composers.make_compose(
+                    composers.compose_left(
+                        skip_or_passthrough, remember_first, key="upstream"
+                    ),
+                    input_node,
+                    key="input",
+                ),
+                lambda: "state skipped",
+            ),
+            output_node,
+        ),
+        input_node,
+        output_node,
+    )(
+        [
+            ["remember this", "remember this"],
+            ["skip state", "state skipped"],
+            ["recall", "remember this"],
+        ]
+    )
