@@ -38,7 +38,7 @@ _toposort_nodes: Callable[
 
 _incoming_edge_options = opt_gamla.compose_left(
     graph.get_incoming_edges_for_node,
-    gamla.after(
+    opt_gamla.after(
         opt_gamla.compose_left(
             opt_gamla.groupby(base_types.edge_key),
             opt_gamla.valmap(gamla.sort_by(base_types.edge_priority)),
@@ -63,7 +63,7 @@ def _get_args(
 
 _get_kwargs = opt_gamla.compose_left(
     opt_gamla.keyfilter(
-        gamla.compose_left(base_types.edge_key, gamla.not_equals("*args"))
+        opt_gamla.compose_left(base_types.edge_key, gamla.not_equals("*args"))
     ),
     opt_gamla.keymap(base_types.edge_key),
     opt_gamla.valmap(gamla.head),
@@ -103,13 +103,11 @@ def _type_check(node: base_types.ComputationNode, result):
 _SingleNodeSideEffect = Callable[[base_types.ComputationNode, Any], None]
 
 
-def _run_keeping_choices(
-    is_async: bool, side_effect: _SingleNodeSideEffect
-) -> Callable:
+def _run_node(is_async: bool, side_effect: _SingleNodeSideEffect) -> Callable:
     if is_async:
 
         @opt_async_gamla.star
-        async def run_keeping_choices(node, edges_leading_to_node, values):
+        async def run_node(node, edges_leading_to_node, values):
             args, kwargs = _get_computation_input(node, edges_leading_to_node, values)
             result = node.func(*args, **kwargs)
             result = await gamla.to_awaitable(result)
@@ -119,13 +117,13 @@ def _run_keeping_choices(
     else:
 
         @opt_gamla.star
-        def run_keeping_choices(node, edges_leading_to_node, values):
+        def run_node(node, edges_leading_to_node, values):
             args, kwargs = _get_computation_input(node, edges_leading_to_node, values)
             result = node.func(*args, **kwargs)
             side_effect(node, result)
             return result
 
-    return run_keeping_choices
+    return run_node
 
 
 def _merge_immutable(x, y):
@@ -141,31 +139,6 @@ def _process_single_layer(
         gamla.map(f),
         opt_gamla.reduce(_merge_immutable, immutables.Map()),
     )
-
-
-def _dag_layer_reduce(is_async: bool, edges: base_types.GraphType):
-    layers = _toposort_nodes(edges)
-
-    def inner(
-        f: Callable[
-            [_NodeToResults, FrozenSet[base_types.ComputationNode]], _NodeToResults,
-        ]
-    ):
-        if is_async:
-
-            async def inner():
-                return await gamla.pipe(
-                    layers, gamla.reduce_curried(f, immutables.Map())
-                )
-
-        else:
-
-            def inner():
-                return gamla.pipe(layers, gamla.reduce_curried(f, immutables.Map()))
-
-        return inner
-
-    return inner
 
 
 class _DepNotFoundError(Exception):
@@ -188,95 +161,89 @@ def _assoc_immutable(d, k, v):
     return d.set(k, v)
 
 
-def _lift_single_runner_to_run_on_many_options(is_async: bool):
-    return (opt_async_gamla.compose_left if is_async else opt_gamla.compose_left)(
-        # base_types.ComputationNode, Iterable[Tuple[base_types.ComputationEdge, ...]], edge_to_values.
-        gamla.pack,
-        gamla.explode(1),
-        # Iterable[Tuple[node, incoming_edges, edge_to_values]]
-        opt_gamla.map(
-            gamla.excepts(
-                _DepNotFoundError,
-                lambda _: None,
-                opt_gamla.juxt(
-                    gamla.head,
-                    gamla.second,
-                    opt_gamla.star(
-                        lambda _, edges, edges_to_values: edges_to_values(edges)
-                    ),
+_get_node_input = opt_gamla.compose_left(
+    # base_types.ComputationNode, Iterable[Tuple[base_types.ComputationEdge, ...]], edge_to_values.
+    gamla.pack,
+    gamla.explode(1),
+    # Iterable[Tuple[node, incoming_edges, edge_to_values]]
+    opt_gamla.map(
+        gamla.excepts(
+            _DepNotFoundError,
+            lambda _: None,
+            opt_gamla.juxt(
+                gamla.head,
+                gamla.second,
+                opt_gamla.star(
+                    lambda _, edges, edges_to_values: edges_to_values(edges)
                 ),
-            )
-        ),
-        gamla.remove(gamla.equals(None)),
-        # Iterable[Tuple[node, edge_option, tuple[tuple[result]]]]
-        tuple,
-        gamla.translate_exception(gamla.head, StopIteration, _DepNotFoundError),
-    )
+            ),
+        )
+    ),
+    gamla.remove(gamla.equals(None)),
+    # Iterable[Tuple[node, edge_option, tuple[tuple[result]]]]
+    tuple,
+    gamla.translate_exception(gamla.head, StopIteration, _DepNotFoundError),
+)
 
 
-def _process_node(
-    handled_exceptions,
-    is_async: bool,
-    incoming_edges_opts: Callable[
-        [base_types.ComputationNode], Iterable[Tuple[base_types.ComputationEdge, ...]]
-    ],
+def _populate_reducer_state(
+    handled_exceptions, is_async: bool, edges, f: Callable[..., base_types.Result]
 ) -> Callable[[Callable], Callable]:
-    def process_node(f: Callable[..., base_types.Result]):
-        if is_async:
+    handled_exceptions = (*handled_exceptions, base_types.SkipComputationError)
+    incoming_edges_opts = _incoming_edge_options(edges)
+    if is_async:
 
-            @opt_async_gamla.star
-            async def process_node(
-                accumulated_results: _NodeToResults, node: base_types.ComputationNode
-            ) -> _NodeToResults:
-                try:
-                    return _assoc_immutable(
-                        accumulated_results,
+        @opt_async_gamla.star
+        async def process_node(
+            accumulated_results: _NodeToResults, node: base_types.ComputationNode
+        ) -> _NodeToResults:
+            try:
+                return _assoc_immutable(
+                    accumulated_results,
+                    node,
+                    await f(  # type: ignore
                         node,
-                        await f(  # type: ignore
-                            node,
-                            incoming_edges_opts(node),
-                            _edges_to_values(
-                                gamla.translate_exception(
-                                    accumulated_results.__getitem__,
-                                    KeyError,
-                                    _DepNotFoundError,
-                                )
-                            ),
+                        incoming_edges_opts(node),
+                        _edges_to_values(
+                            gamla.translate_exception(
+                                accumulated_results.__getitem__,
+                                KeyError,
+                                _DepNotFoundError,
+                            )
                         ),
-                    )
-                except handled_exceptions:
-                    return accumulated_results
+                    ),
+                )
+            except handled_exceptions:
+                return accumulated_results
 
-            return process_node
+        return process_node
 
-        else:
+    else:
 
-            @opt_gamla.star
-            def process_node(
-                accumulated_results: _NodeToResults, node: base_types.ComputationNode
-            ) -> _NodeToResults:
-                try:
-                    return _assoc_immutable(
-                        accumulated_results,
+        @opt_gamla.star
+        def process_node(
+            accumulated_results: _NodeToResults, node: base_types.ComputationNode
+        ) -> _NodeToResults:
+            try:
+                return _assoc_immutable(
+                    accumulated_results,
+                    node,
+                    f(
                         node,
-                        f(
-                            node,
-                            incoming_edges_opts(node),
-                            _edges_to_values(
-                                gamla.translate_exception(
-                                    accumulated_results.__getitem__,
-                                    KeyError,
-                                    _DepNotFoundError,
-                                )
-                            ),
+                        incoming_edges_opts(node),
+                        _edges_to_values(
+                            gamla.translate_exception(
+                                accumulated_results.__getitem__,
+                                KeyError,
+                                _DepNotFoundError,
+                            )
                         ),
-                    )
-                except handled_exceptions:
-                    return accumulated_results
+                    ),
+                )
+            except handled_exceptions:
+                return accumulated_results
 
-            return process_node
-
-    return process_node
+        return process_node
 
 
 _is_graph_async = opt_gamla.compose_left(
@@ -298,20 +265,14 @@ _assert_no_unwanted_ambiguity = gamla.compose_left(
 )
 
 
-def _make_runner(single_node_runner, is_async, edges, handled_exceptions):
-    return opt_gamla.compose(
-        _dag_layer_reduce(is_async, edges),
-        _process_single_layer,
-        lambda f: gamla.first(f, gamla.head, exception_type=_DepNotFoundError),
-        _process_node(
-            (*handled_exceptions, base_types.SkipComputationError),
-            is_async,
-            _incoming_edge_options(edges),
+def _make_runner(single_node_runner):
+    return gamla.reduce_curried(
+        _process_single_layer(
+            gamla.first(
+                single_node_runner, gamla.head, exception_type=_DepNotFoundError
+            )
         ),
-    )(
-        gamla.compose(
-            single_node_runner, _lift_single_runner_to_run_on_many_options(is_async)
-        )
+        immutables.Map(),
     )
 
 
@@ -353,37 +314,42 @@ def _to_callable_with_side_effect_for_single_and_multiple(
         gamla.side_effect(_assert_no_unwanted_ambiguity),
     )
     is_async = _is_graph_async(edges)
+
+    def runner(edges):
+        return _make_runner(
+            _populate_reducer_state(
+                handled_exceptions,
+                is_async,
+                edges,
+                gamla.compose(
+                    _run_node(is_async, single_node_side_effect), _get_node_input
+                ),
+            )
+        )
+
     if is_async:
 
-        async def runner(inputs):
-            edges_with_inputs = _combine_inputs_with_edges(inputs)(edges)
-            return await gamla.compose_left(
-                _make_runner(
-                    _run_keeping_choices(is_async, single_node_side_effect),
-                    is_async,
-                    edges_with_inputs,
-                    handled_exceptions,
-                ),
+        async def final_runner(edges):
+            return await gamla.pipe(
+                _toposort_nodes(edges),
+                runner(edges),
                 dict,
-                gamla.side_effect(all_nodes_side_effect(edges_with_inputs)),
-            )()
+                gamla.side_effect(all_nodes_side_effect(edges)),
+            )
 
     else:
 
-        def runner(inputs):
-            edges_with_inputs = _combine_inputs_with_edges(inputs)(edges)
-            return gamla.compose_left(
-                _make_runner(
-                    _run_keeping_choices(is_async, single_node_side_effect),
-                    is_async,
-                    edges_with_inputs,
-                    handled_exceptions,
-                ),
+        def final_runner(edges):
+            return gamla.pipe(
+                _toposort_nodes(edges),
+                runner(edges),
                 dict,
-                gamla.side_effect(all_nodes_side_effect(edges_with_inputs)),
-            )()
+                gamla.side_effect(all_nodes_side_effect(edges)),
+            )
 
-    return runner
+    return gamla.compose(
+        final_runner, lambda inputs: _combine_inputs_with_edges(inputs)(edges)
+    )
 
 
 to_callable_with_side_effect = gamla.curry(
@@ -406,11 +372,13 @@ def _node_is_properly_composed(
 
 
 def _assert_composition_is_valid(g):
-    return gamla.pipe(
+    return opt_gamla.pipe(
         g,
         graph.get_all_nodes,
-        gamla.remove(_node_is_properly_composed(graph.get_incoming_edges_for_node(g))),
-        gamla.map(gamla.wrap_str("{0} at {0.func.__code__}")),
+        opt_gamla.remove(
+            _node_is_properly_composed(graph.get_incoming_edges_for_node(g))
+        ),
+        opt_gamla.map(gamla.wrap_str("{0} at {0.func.__code__}")),
         tuple,
         gamla.assert_that_with_message(
             gamla.wrap_str("Bad composition for: {}"), gamla.len_equals(0)
