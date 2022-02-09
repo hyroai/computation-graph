@@ -1,20 +1,22 @@
 import asyncio
-import functools
-import json
 
 import gamla
 import pytest
 
-from computation_graph import base_types, composers, graph, run
+from computation_graph import base_types, composers, graph, graph_runners, legacy, run
+from computation_graph.composers import duplication, memory
 
 pytestmark = pytest.mark.asyncio
 
 
-_ROOT_VALUE = "root"
-
-
-class _GraphTestError(Exception):
-    pass
+def _infer_graph_sink_excluding_terminals(
+    edges: base_types.GraphType,
+) -> base_types.ComputationNode:
+    leaves = gamla.pipe(
+        edges, graph.get_leaves, gamla.remove(gamla.attrgetter("is_terminal")), tuple
+    )
+    assert len(leaves) == 1, f"computation graph has more than one sink: {leaves}"
+    return gamla.head(leaves)
 
 
 def _node1(arg1):
@@ -34,48 +36,12 @@ def _node3(arg1, arg2):
     return f"node3(arg1={arg1}, arg2={arg2})"
 
 
-def _node4(y, z=5):
-    return f"node4({y}, z={z})"
-
-
-def _node_with_side_effect(arg1, side_effects, cur_int):
-    return f"node_with_side_effect(arg1={arg1},side_effects={side_effects}, cur_int={cur_int + 1})"
-
-
-@gamla.curry
-def _curried_node(arg1, arg2):
-    return f"curried_node(arg1={arg1}, arg2={arg2})"
-
-
-@gamla.curry
-def _curried_stateful_node(arg1, arg2, cur_int):
-    return f"curried_stateful_node(arg1={arg1}, arg2={arg2}, cur_int={cur_int + 1})"
-
-
-def _unactionable_node(arg1):
-    raise _GraphTestError
+def _node_that_raises():
+    raise base_types.SkipComputationError
 
 
 def _merger(args, side_effects):
     return "[" + ",".join(args) + f"], side_effects={side_effects}"
-
-
-def _merger_that_raises_when_empty(args):
-    if not args:
-        raise _GraphTestError
-    return "[" + ",".join(args) + "]"
-
-
-def _node_with_optional_param(optional_param: int = 5):
-    return f"node_with_optional_param(optional_param={optional_param})"
-
-
-def _node_with_state_as_arg(arg1, state):
-    if state is None:
-        state = 0
-    return base_types.ComputationResult(
-        result=arg1 + f" state={state + 1}", state=state + 1
-    )
 
 
 def _next_int(x):
@@ -88,717 +54,407 @@ def _reducer_node(arg1, cur_int):
     return arg1 + f" cur_int={cur_int + 1}"
 
 
-def _sometimes_unactionable_reducer_node(arg1, cur_int):
-    if arg1 == "fail":
-        raise _GraphTestError
-    return arg1 + f" state={cur_int + 1}"
-
-
-def _runner(edges: base_types.GraphType, **kwargs):
-    return run.to_callable(
-        graph.connect_default_terminal(edges), frozenset([_GraphTestError])
-    )(**kwargs).result[graph.DEFAULT_TERMINAL][0]
-
-
 def test_simple():
-    result = _runner(
-        (graph.make_standard_edge(source=_node1, destination=_node2, key="arg1"),),
-        arg1=_ROOT_VALUE,
-    )
-    assert result == f"node2(node1({_ROOT_VALUE}))"
-
-
-def test_none_as_input():
-    result = _runner(
-        (graph.make_standard_edge(source=_node1, destination=_node2, key="arg1"),),
-        arg1=None,
-    )
-    assert result == "node2(node1(None))"
+    for v in ["root", None]:
+        assert (
+            graph_runners.unary(
+                composers.compose_left_unary(_node1, _node2), _node1, _node2
+            )(v)
+            == f"node2(node1({v}))"
+        )
 
 
 async def test_simple_async():
-    cg = run.to_callable(
-        graph.connect_default_terminal(
-            (
-                graph.make_standard_edge(
-                    source=_node1_async, destination=_node2, key="arg1"
-                ),
-            )
-        ),
-        frozenset([_GraphTestError]),
+    assert (
+        await graph_runners.unary(
+            composers.compose_left_unary(_node1_async, _node2), _node1_async, _node2
+        )("hi")
+        == "node2(node1(hi))"
     )
-    result = await cg(arg1=_ROOT_VALUE)
-
-    assert isinstance(result, base_types.ComputationResult)
-    assert result.result[graph.DEFAULT_TERMINAL][0] == f"node2(node1({_ROOT_VALUE}))"
 
 
 def test_kwargs():
-    cg = run.to_callable(
-        graph.connect_default_terminal(
-            (
-                graph.make_standard_edge(source=_node1, destination=_node3, key="arg1"),
-                graph.make_standard_edge(source=_node2, destination=_node3, key="arg2"),
-            )
-        ),
-        frozenset([_GraphTestError]),
+    def source(x):
+        return x
+
+    assert (
+        graph_runners.unary(
+            base_types.merge_graphs(
+                composers.compose_unary(_node1, source),
+                composers.compose_unary(_node2, source),
+                composers.compose_dict(_node3, {"arg1": _node1, "arg2": _node2}),
+            ),
+            source,
+            _node3,
+        )("hi")
+        == "node3(arg1=node1(hi), arg2=node2(hi))"
     )
 
-    result = cg(arg1=_ROOT_VALUE)
 
-    assert isinstance(result, base_types.ComputationResult)
-    assert (
-        result.result[graph.DEFAULT_TERMINAL][0]
-        == f"node3(arg1=node1({_ROOT_VALUE}), arg2=node2({_ROOT_VALUE}))"
+@legacy.handle_state("state", None)
+def _node_with_state_as_arg(arg1, state):
+    if state is None:
+        state = 0
+    return legacy.ComputationResult(
+        result=arg1 + f" state={state + 1}", state=state + 1
     )
 
 
 def test_state():
-    edges = graph.connect_default_terminal(
-        (
-            graph.make_standard_edge(
-                source=_node1, destination=_node_with_state_as_arg, key="arg1"
-            ),
-            graph.make_standard_edge(
-                source=_node_with_state_as_arg, destination=_node2, key="arg1"
-            ),
-        )
+    f = graph_runners.unary_with_state(
+        base_types.merge_graphs(
+            composers.compose_left(_node1, _node_with_state_as_arg, key="arg1"),
+            composers.compose_left_unary(_node_with_state_as_arg, _node2),
+        ),
+        _node1,
+        _node2,
     )
-    cg = run.to_callable(edges, frozenset([_GraphTestError]))
-
-    result = cg(arg1=_ROOT_VALUE)
-    result = cg(arg1=_ROOT_VALUE, state=result.state)
-    result = cg(arg1=_ROOT_VALUE, state=result.state)
-
-    assert isinstance(result, base_types.ComputationResult)
-    assert (
-        dict(result.state)[
-            graph.edges_to_node_id_map(edges)[
-                graph.make_computation_node(_node_with_state_as_arg)
-            ]
-        ]
-        == 3
-    )
+    assert f("x", "y", "z") == "node2(node1(z) state=3)"
 
 
 def test_self_future_edge():
-    edges = graph.connect_default_terminal(
-        (
-            graph.make_standard_edge(
-                source=_node1, destination=_reducer_node, key="arg1"
+    f = graph_runners.unary_with_state(
+        base_types.merge_graphs(
+            composers.compose_dict(
+                _reducer_node, {"arg1": _node1, "cur_int": _next_int}
             ),
-            graph.make_standard_edge(
-                source=_reducer_node, destination=_node2, key="arg1"
-            ),
-            graph.make_standard_edge(
-                source=_next_int, destination=_reducer_node, key="cur_int"
-            ),
-            graph.make_future_edge(source=_next_int, destination=_next_int, key="x"),
-        )
+            composers.compose_unary(_node2, _reducer_node),
+            composers.compose_left_future(_next_int, _next_int, "x", None),
+        ),
+        _node1,
+        _node2,
     )
-    cg = run.to_callable(edges, frozenset([_GraphTestError]))
-
-    result = cg(arg1=_ROOT_VALUE)
-    result = cg(arg1=_ROOT_VALUE, state=result.state)
-    result = cg(arg1=_ROOT_VALUE, state=result.state)
-    assert isinstance(result, base_types.ComputationResult)
-    assert result.result[graph.DEFAULT_TERMINAL][0] == "node2(node1(root) cur_int=3)"
-
-
-def test_multiple_inputs():
-    edges = graph.connect_default_terminal(
-        (
-            graph.make_standard_edge(source=_node1, destination=_node2, key="arg1"),
-            graph.make_standard_edge(source=_node1, destination=_node3, key="arg1"),
-            graph.make_standard_edge(source=_node2, destination=_node3, key="arg2"),
-        )
-    )
-    result = run.to_callable(edges, frozenset([_GraphTestError]))(arg1=_ROOT_VALUE)
-    assert (
-        result.result[graph.DEFAULT_TERMINAL][0]
-        == "node3(arg1=node1(root), arg2=node2(node1(root)))"
-    )
+    assert f("x", "y", "z") == "node2(node1(z) cur_int=3)"
 
 
 def test_empty_result():
-    edges = graph.connect_default_terminal(
-        (
-            graph.make_standard_edge(
-                source=_node1, destination=_unactionable_node, key="arg1"
-            ),
-        )
-    )
-    assert run.to_callable(edges, frozenset([_GraphTestError]))(
-        arg1=_ROOT_VALUE
-    ).result == {graph.DEFAULT_TERMINAL: {}}
+    def raises(x):
+        del x
+        raise base_types.SkipComputationError
 
-
-def test_external_input_and_future_edge():
-    edges = graph.connect_default_terminal(
-        (
-            graph.make_standard_edge(source=_node1, destination=_node2, key="arg1"),
-            graph.make_standard_edge(
-                source=_node2, destination=_node_with_side_effect, key="arg1"
-            ),
-            graph.make_standard_edge(
-                source=_next_int, destination=_node_with_side_effect, key="cur_int"
-            ),
-            graph.make_future_edge(source=_next_int, destination=_next_int),
-        )
-    )
-
-    cg = run.to_callable(edges, frozenset([_GraphTestError]))
-
-    result = cg(arg1=_ROOT_VALUE, side_effects="side_effects")
-    result = cg(arg1=_ROOT_VALUE, side_effects="side_effects", state=result.state)
-    result = cg(arg1=_ROOT_VALUE, side_effects="side_effects", state=result.state)
-
-    assert (
-        result.result[graph.DEFAULT_TERMINAL][0]
-        == "node_with_side_effect(arg1=node2(node1(root)),side_effects=side_effects, cur_int=3)"
-    )
-
-
-def test_tuple_source_node():
-    edges = graph.connect_default_terminal(
-        (
-            graph.make_standard_edge(
-                source=(_node1, _node2),
-                destination=lambda *args, side_effects: "["
-                + ",".join(args)
-                + f"], side_effects={side_effects}",
-            ),
-        )
-    )
-
-    result = run.to_callable(edges, frozenset([_GraphTestError]))(
-        arg1=_ROOT_VALUE, side_effects="side_effects"
-    )
-
-    assert (
-        result.result[graph.DEFAULT_TERMINAL][0]
-        == f"[node1({_ROOT_VALUE}),node2({_ROOT_VALUE})], side_effects=side_effects"
-    )
+    with pytest.raises(KeyError):
+        graph_runners.nullary(composers.compose_unary(raises, lambda: "hi"), raises)
 
 
 def test_optional():
-    edges = graph.connect_default_terminal(
-        composers.make_optional(_unactionable_node, default_value=None)
+    def raises():
+        raise base_types.SkipComputationError
+
+    def sink(x):
+        return x
+
+    assert (
+        graph_runners.nullary(
+            composers.compose_unary(sink, composers.make_optional(raises, None)), sink
+        )
+        is None
     )
-
-    result = run.to_callable(edges, frozenset([_GraphTestError]))(arg1=_ROOT_VALUE)
-
-    assert result.result[graph.DEFAULT_TERMINAL][0] is None
 
 
 def test_optional_with_future_edge():
-    edges = graph.connect_default_terminal(
-        composers.make_optional(_reducer_node, default_value=None)
-        + (
-            graph.make_standard_edge(
-                source=_next_int, destination=_reducer_node, key="cur_int"
+    def output(x):
+        return x
+
+    def input(x):
+        return x
+
+    f = graph_runners.unary_with_state(
+        base_types.merge_graphs(
+            composers.make_compose(_reducer_node, input, key="arg1"),
+            composers.compose_unary(
+                output, composers.make_optional(_reducer_node, None)
             ),
-            graph.make_future_edge(source=_next_int, destination=_next_int),
-        )
+            composers.make_compose(_reducer_node, _next_int, key="cur_int"),
+            composers.compose_left_future(_next_int, _next_int, None, None),
+        ),
+        input,
+        output,
     )
-    cg = run.to_callable(edges, frozenset([_GraphTestError]))
-
-    result = cg(arg1=_ROOT_VALUE)
-    result = cg(arg1=_ROOT_VALUE, state=result.state)
-    result = cg(arg1=_ROOT_VALUE, state=result.state)
-    assert result.result[graph.DEFAULT_TERMINAL][0] == "root cur_int=3"
-
-
-def test_optional_default_value():
-    edges = graph.connect_default_terminal(
-        composers.make_optional(_unactionable_node, default_value="optional failed")
-    )
-
-    result = run.to_callable(edges, frozenset([_GraphTestError]))(arg1=_ROOT_VALUE)
-
-    assert result.result[graph.DEFAULT_TERMINAL][0] == "optional failed"
+    assert f("x", "y", "z") == "z cur_int=3"
 
 
 def test_first():
-    cg = run.to_callable(
-        graph.connect_default_terminal(
-            composers.make_first(_unactionable_node, _node2, _node1)
-        ),
-        frozenset([_GraphTestError]),
-    )
+    def raises():
+        raise base_types.SkipComputationError
 
-    result = cg(arg1=_ROOT_VALUE)
-    assert result.result[graph.DEFAULT_TERMINAL][0] == "node2(root)"
+    assert (
+        graph_runners.nullary_infer_sink(
+            composers.make_first(raises, lambda: 1, lambda: 2)
+        )
+        == 1
+    )
 
 
 def test_first_all_unactionable():
-    cg = run.to_callable(
-        graph.connect_default_terminal(composers.make_first(_unactionable_node)),
-        frozenset([_GraphTestError]),
-    )
-    result = cg(arg1=_ROOT_VALUE)
-    assert result.result == {graph.DEFAULT_TERMINAL: {}}
+    def raises():
+        raise base_types.SkipComputationError
+
+    with pytest.raises(KeyError):
+        graph_runners.nullary_infer_sink(composers.make_first(raises))
 
 
 def test_first_with_future_edge():
-    cg = run.to_callable(
-        graph.connect_default_terminal(
-            composers.make_first(_unactionable_node, _reducer_node, _node1)
-            + (
-                graph.make_standard_edge(
-                    source=_next_int, destination=_reducer_node, key="cur_int"
-                ),
-                graph.make_future_edge(source=_next_int, destination=_next_int),
-            )
+    def input_node(x):
+        return x
+
+    f = graph_runners.unary_with_state(
+        base_types.merge_graphs(
+            composers.make_compose(_reducer_node, input_node, key="arg1"),
+            composers.make_compose(_node1, input_node, key="arg1"),
+            composers.make_first(_node_that_raises, _reducer_node, _node1),
+            composers.make_compose(_reducer_node, _next_int, key="cur_int"),
+            composers.make_compose_future(_next_int, _next_int, "x", None),
         ),
-        frozenset([_GraphTestError]),
+        input_node,
+        _reducer_node,
     )
-
-    result = cg(arg1=_ROOT_VALUE)
-    result = cg(arg1=_ROOT_VALUE, state=result.state)
-    result = cg(arg1=_ROOT_VALUE, state=result.state)
-    assert result.result[graph.DEFAULT_TERMINAL][0] == "root cur_int=3"
+    assert f("x", "y", "z") == "z cur_int=3"
 
 
-def test_and():
-    edges = graph.connect_default_terminal(
-        composers.make_and(funcs=(_reducer_node, _node2, _node1), merge_fn=_merger)
-        + (
-            graph.make_standard_edge(
-                source=_next_int, destination=_reducer_node, key="cur_int"
-            ),
-            graph.make_future_edge(source=_next_int, destination=_next_int),
-        )
+def test_and_with_future():
+    source1 = graph.make_source()
+    source2 = graph.make_source()
+    g = base_types.merge_graphs(
+        composers.make_and((_reducer_node, _node2, _node1), _merger),
+        composers.compose_source(_merger, key="side_effects", source=source2),
+        composers.compose_source(_node1, key="arg1", source=source1),
+        composers.compose_source(_node2, key="arg1", source=source1),
+        composers.compose_source(_reducer_node, key="arg1", source=source1),
+        composers.make_compose(_reducer_node, _next_int, key="cur_int"),
+        composers.compose_unary_future(_next_int, _next_int, None),
     )
-    cg = run.to_callable(edges, frozenset([_GraphTestError]))
-    result = cg(arg1=_ROOT_VALUE, side_effects="side_effects")
-    result = cg(arg1=_ROOT_VALUE, state=result.state, side_effects="side_effects")
-    result = cg(arg1=_ROOT_VALUE, state=result.state, side_effects="side_effects")
     assert (
-        result.result[graph.DEFAULT_TERMINAL][0]
-        == "[root cur_int=3,node2(root),node1(root)], side_effects=side_effects"
-    )
-
-
-def test_first_with_and():
-    edges = graph.connect_default_terminal(
-        composers.make_first(
-            _unactionable_node,
-            composers.make_and(
-                (_node1, _node2),
-                merge_fn=functools.partial(_merger, side_effects="side_effects"),
-            ),
+        graph_runners.variadic_stateful_infer_sink(g)(
+            {source1: "root", source2: "bla"},
+            {source1: "root", source2: "bla"},
+            {source1: "root", source2: "bla"},
         )
-    )
-
-    result = run.to_callable(edges, frozenset([_GraphTestError]))(arg1=_ROOT_VALUE)
-
-    assert (
-        result.result[graph.DEFAULT_TERMINAL][0]
-        == "[node1(root),node2(root)], side_effects=side_effects"
+        == "[root cur_int=3,node2(root),node1(root)], side_effects=bla"
     )
 
 
 def test_and_with_unactionable():
-    edges = graph.connect_default_terminal(
-        composers.make_and(
-            funcs=(_reducer_node, _node2, _node1, _unactionable_node), merge_fn=_merger
-        )
-        + (
-            graph.make_standard_edge(
-                source=_next_int, destination=_reducer_node, key="cur_int"
-            ),
-            graph.make_future_edge(source=_next_int, destination=_next_int),
-        )
+    source1 = graph.make_source()
+    source2 = graph.make_source()
+    g = base_types.merge_graphs(
+        composers.make_and((_reducer_node, _node_that_raises), _merger),
+        composers.compose_source(_merger, key="side_effects", source=source2),
+        composers.compose_source(_reducer_node, key="arg1", source=source1),
+        composers.make_compose(_reducer_node, _next_int, key="cur_int"),
+        composers.compose_unary_future(_next_int, _next_int, None),
     )
-    assert run.to_callable(edges, frozenset([_GraphTestError]))(
-        arg1=_ROOT_VALUE
-    ).result == {graph.DEFAULT_TERMINAL: {}}
+    with pytest.raises(KeyError):
+        graph_runners.variadic_infer_sink(g)({source1: "root", source2: "bla"})
 
 
 def test_or():
-    edges = graph.connect_default_terminal(
-        composers.make_or(
-            funcs=(_reducer_node, _node2, _node1, _unactionable_node), merge_fn=_merger
-        )
-        + (
-            graph.make_standard_edge(
-                source=_next_int, destination=_reducer_node, key="cur_int"
-            ),
-            graph.make_future_edge(source=_next_int, destination=_next_int),
+    def merger(args):
+        return " ".join(map(str, args))
+
+    f = graph_runners.variadic_stateful_infer_sink(
+        base_types.merge_graphs(
+            composers.make_or((_next_int, lambda: "node1", _node_that_raises), merger),
+            composers.compose_unary_future(_next_int, _next_int, 0),
         )
     )
 
-    result = run.to_callable(edges, frozenset([_GraphTestError]))(
-        arg1=_ROOT_VALUE, side_effects="side_effects"
-    )
-    result = run.to_callable(edges, frozenset([_GraphTestError]))(
-        arg1=_ROOT_VALUE, state=result.state, side_effects="side_effects"
-    )
-    result = run.to_callable(edges, frozenset([_GraphTestError]))(
-        arg1=_ROOT_VALUE, state=result.state, side_effects="side_effects"
-    )
-
-    assert (
-        result.result[graph.DEFAULT_TERMINAL][0]
-        == "[root cur_int=3,node2(root),node1(root)], side_effects=side_effects"
-    )
-
-
-def test_graph_wrapping():
-    edges = graph.connect_default_terminal(
-        composers.make_first(
-            _unactionable_node,
-            composers.make_and(funcs=(_node1, _node2, _node3), merge_fn=_merger),
-            _node1,
-        )
-    )
-
-    result = run.to_callable(edges, frozenset([_GraphTestError]))(
-        arg1=_ROOT_VALUE, arg2="node3value", side_effects="side_effects"
-    )
-
-    assert (
-        result.result[graph.DEFAULT_TERMINAL][0]
-        == "[node1(root),node2(root),node3(arg1=root, arg2=node3value)], side_effects=side_effects"
-    )
-
-
-def test_node_with_optional_param():
-    edges = graph.connect_default_terminal(
-        (
-            graph.make_standard_edge(
-                source=_node_with_optional_param, destination=_node1, key="arg1"
-            ),
-        )
-    )
-
-    result = run.to_callable(edges, frozenset([_GraphTestError]))()
-
-    assert (
-        result.result[graph.DEFAULT_TERMINAL][0]
-        == "node1(node_with_optional_param(optional_param=5))"
-    )
-
-
-def test_node_with_bound_optional_param():
-    edges = graph.connect_default_terminal(
-        (
-            graph.make_standard_edge(
-                source=_node_with_optional_param, destination=_node1, key="arg1"
-            ),
-        )
-    )
-
-    result = run.to_callable(edges, frozenset([_GraphTestError]))(optional_param=10)
-
-    assert (
-        result.result[graph.DEFAULT_TERMINAL][0]
-        == "node1(node_with_optional_param(optional_param=10))"
-    )
+    assert f({}, {}, {}) == "3 node1"
 
 
 def test_compose():
-    result = run.to_callable(
-        graph.connect_default_terminal(composers.make_compose(_node1, _node2)),
-        frozenset([_GraphTestError]),
-    )(arg1=_ROOT_VALUE)
-
-    assert result.result[graph.DEFAULT_TERMINAL][0] == "node1(node2(root))"
+    assert (
+        graph_runners.nullary_infer_sink(composers.make_compose(_node1, lambda: "hi"))
+        == "node1(hi)"
+    )
 
 
 def test_compose_with_future_edge():
-    cg = run.to_callable(
-        graph.connect_default_terminal(
-            composers.make_compose(_node1, _node2)
-            + (
-                graph.make_standard_edge(
-                    source=_node1, destination=_reducer_node, key="arg1"
-                ),
-                graph.make_standard_edge(
-                    source=_next_int, destination=_reducer_node, key="cur_int"
-                ),
-                graph.make_future_edge(source=_next_int, destination=_next_int),
-            )
+    f = graph_runners.unary_with_state(
+        base_types.merge_graphs(
+            composers.make_compose(_node1, _node2),
+            composers.make_compose(_reducer_node, _node1, key="arg1"),
+            composers.make_compose(_reducer_node, _next_int, key="cur_int"),
+            composers.make_compose_future(_next_int, _next_int, None, None),
         ),
-        frozenset([_GraphTestError]),
+        _node2,
+        _reducer_node,
     )
-
-    result = cg(arg1=_ROOT_VALUE)
-    result = cg(arg1=_ROOT_VALUE, state=result.state)
-    result = cg(arg1=_ROOT_VALUE, state=result.state)
-    assert result.result[graph.DEFAULT_TERMINAL][0] == "node1(node2(root)) cur_int=3"
+    assert f("hi", "hi", "hi") == "node1(node2(hi)) cur_int=3"
 
 
-def test_compose_with_partial():
-    cg = run.to_callable(
-        graph.connect_default_terminal(
-            composers.make_compose(
-                functools.partial(_node3, arg2="arg2_partial"), _node1, _node2
-            )
+def test_optional_memory_sometimes_raises():
+    def sometimes_raises(x, cur_int):
+        if x == "fail":
+            raise base_types.SkipComputationError
+        return x + f" state={cur_int + 1}"
+
+    def input_source(x):
+        return x
+
+    f = graph_runners.unary_with_state_infer_sink(
+        base_types.merge_graphs(
+            composers.make_compose(sometimes_raises, input_source, key="x"),
+            composers.make_optional(sometimes_raises, None),
+            composers.make_compose(sometimes_raises, _next_int, key="cur_int"),
+            composers.compose_unary_future(_next_int, _next_int, None),
         ),
-        frozenset([_GraphTestError]),
+        input_source,
     )
-
-    result = cg(arg1=_ROOT_VALUE)
-
-    assert (
-        result.result[graph.DEFAULT_TERMINAL][0]
-        == f"node3(arg1=node1(node2({_ROOT_VALUE})), arg2=arg2_partial)"
-    )
-
-
-def test_partial():
-    edges = graph.connect_default_terminal(
-        composers.make_first(functools.partial(_node3, arg2="arg2_partial"))
-    )
-
-    result = run.to_callable(edges, frozenset([_GraphTestError]))(arg1=_ROOT_VALUE)
-
-    assert (
-        result.result[graph.DEFAULT_TERMINAL][0]
-        == "node3(arg1=root, arg2=arg2_partial)"
-    )
-
-
-def test_curry():
-    edges = graph.connect_default_terminal(
-        composers.make_first(_curried_node(arg2="arg2_curried"))
-    )
-
-    result = run.to_callable(edges, frozenset([_GraphTestError]))(arg1=_ROOT_VALUE)
-
-    assert (
-        result.result[graph.DEFAULT_TERMINAL][0]
-        == "curried_node(arg1=root, arg2=arg2_curried)"
-    )
-
-
-def test_compose_when_all_arguments_have_a_default():
-    edges = graph.connect_default_terminal(
-        composers.make_compose(_node_with_optional_param, _node1)
-    )
-
-    result = run.to_callable(edges, frozenset([_GraphTestError]))(arg1=_ROOT_VALUE)
-
-    assert (
-        result.result[graph.DEFAULT_TERMINAL][0]
-        == "node_with_optional_param(optional_param=node1(root))"
-    )
-
-
-def test_optional_with_sometimes_unactionable_reducer():
-    edges = graph.connect_default_terminal(
-        composers.make_optional(
-            _sometimes_unactionable_reducer_node, default_value=None
-        )
-        + (
-            graph.make_standard_edge(
-                source=_next_int,
-                destination=_sometimes_unactionable_reducer_node,
-                key="cur_int",
-            ),
-            graph.make_future_edge(source=_next_int, destination=_next_int),
-        )
-    )
-    cg = run.to_callable(edges, frozenset([_GraphTestError]))
-    result = cg(arg1=_ROOT_VALUE)
-    result = cg(arg1="fail", state=result.state)
-    result = cg(arg1=_ROOT_VALUE, state=result.state)
-
-    assert result.result[graph.DEFAULT_TERMINAL][0] == "root state=2"
-
-
-def test_unary_graph_composition():
-    inner = composers.make_compose(_node1, _node4)
-    edges = graph.connect_default_terminal(composers.make_first(inner))
-    result = run.to_callable(edges, frozenset([_GraphTestError]))(y=_ROOT_VALUE, z=10)
-
-    assert result.result[graph.DEFAULT_TERMINAL][0] == "node1(node4(root, z=10))"
-
-
-def test_curry_with_future_edge():
-    edges = graph.connect_default_terminal(
-        composers.make_first(_curried_stateful_node)
-        + (
-            graph.make_standard_edge(
-                source=_next_int, destination=_curried_stateful_node, key="cur_int"
-            ),
-            graph.make_future_edge(source=_next_int, destination=_next_int),
-        )
-    )
-
-    cg = run.to_callable(edges, frozenset([_GraphTestError]))
-    result = cg(arg1=_ROOT_VALUE, arg2="arg2")
-    result = cg(arg1=_ROOT_VALUE, arg2="arg2", state=result.state)
-    result = cg(arg1=_ROOT_VALUE, arg2="arg2", state=result.state)
-
-    assert (
-        result.result[graph.DEFAULT_TERMINAL][0]
-        == "curried_stateful_node(arg1=root, arg2=arg2, cur_int=3)"
-    )
-
-
-def test_state_is_serializable():
-    edges = graph.connect_default_terminal(
-        (
-            graph.make_standard_edge(
-                source=_node1, destination=_reducer_node, key="arg1"
-            ),
-            graph.make_standard_edge(
-                source=_reducer_node, destination=_node2, key="arg1"
-            ),
-            graph.make_standard_edge(
-                source=_next_int, destination=_reducer_node, key="cur_int"
-            ),
-            graph.make_future_edge(source=_next_int, destination=_next_int),
-        )
-    )
-
-    cg = run.to_callable(edges, frozenset([_GraphTestError]))
-    result = cg(arg1=_ROOT_VALUE)
-    result = cg(arg1=_ROOT_VALUE, state=result.state)
-    result = cg(arg1=_ROOT_VALUE, state=result.state)
-    json.dumps(result.state)
-
-
-def test_compose_compose():
-
-    inner_graph = composers.make_compose(
-        _curried_node, _node1, _node3, _node2, key="arg1"
-    )
-    assert len(inner_graph) == 3
-
-    edges = graph.connect_default_terminal(
-        composers.make_compose(inner_graph, _node4, key="arg2")
-    )
-
-    result = run.to_callable(edges, frozenset([_GraphTestError]))(
-        y="y", z="z", arg1="arg1"
-    )
-
-    assert len(edges) == 6
-    assert (
-        result.result[graph.DEFAULT_TERMINAL][0]
-        == "curried_node(arg1=node1(node3(arg1=node2(arg1), arg2=node4(y, z=z))), arg2=node4(y, z=z))"
-    )
-
-
-def test_compose_after_first():
-    edges = graph.connect_default_terminal(
-        composers.make_compose(
-            composers.make_first(_unactionable_node, _node1, _node2), _node3, key="arg1"
-        )
-    )
-    result = run.to_callable(edges, frozenset([_GraphTestError]))(
-        arg1="arg1", arg2="arg2"
-    )
-    assert (
-        result.result[graph.DEFAULT_TERMINAL][0] == "node1(node3(arg1=arg1, arg2=arg2))"
-    )
-
-
-def test_first_after_compose():
-    inner_edges = composers.make_compose(_node1, _node2)
-
-    cg = run.to_callable(
-        graph.connect_default_terminal(
-            composers.make_first(_unactionable_node, inner_edges, _node1)
-        ),
-        frozenset([_GraphTestError]),
-    )
-
-    result = cg(arg1="arg1")
-    assert result.result[graph.DEFAULT_TERMINAL][0] == "node1(node2(arg1))"
+    assert f("hi", "fail", "hi") == "hi state=3"
 
 
 def test_first_first():
-    inner_first = composers.make_first(_unactionable_node, _node1, _node2)
+    def node1():
+        return "node1"
 
-    cg = run.to_callable(
-        graph.connect_default_terminal(
-            composers.make_first(_unactionable_node, inner_first, _node1)
-        ),
-        frozenset([_GraphTestError]),
+    assert (
+        graph_runners.nullary_infer_sink(
+            composers.make_first(
+                _node_that_raises,
+                composers.make_first(_node_that_raises, node1, lambda: "node2"),
+                node1,
+            )
+        )
+        == "node1"
     )
-
-    result = cg(arg1=_ROOT_VALUE)
-
-    assert result.result[graph.DEFAULT_TERMINAL][0] == f"node1({_ROOT_VALUE})"
 
 
 def test_compose_with_node_already_in_graph():
-    inner_edges1 = composers.make_and((_node2, _node1), merge_fn=_merger)
-    inner_edges2 = composers.make_compose(_node3, _node1, key="arg1")
-    edges = graph.connect_default_terminal(
-        composers.make_compose(inner_edges1, inner_edges2, key="arg1")
-    )
+    def node1():
+        return "node1"
 
-    result = run.to_callable(edges, frozenset([_GraphTestError]))(
-        arg1=_ROOT_VALUE, arg2="arg2", side_effects="side_effects"
-    )
+    def sink(x, y):
+        return f"x={x} y={y}"
+
+    def merger(args):
+        return " ".join(args)
 
     assert (
-        result.result[graph.DEFAULT_TERMINAL][0]
-        == "[node2(node3(arg1=node1(root), arg2=arg2)),node1(root)], side_effects=side_effects"
+        graph_runners.nullary_infer_sink(
+            composers.make_compose(
+                composers.make_compose(sink, node1, key="x"),
+                composers.make_and((lambda: "node2", node1), merge_fn=merger),
+                key="y",
+            )
+        )
+        == "x=node1 y=node2 node1"
     )
 
 
 def test_first_with_subgraph_that_raises():
-    inner = composers.make_compose(_node2, _unactionable_node)
-    edges = graph.connect_default_terminal(composers.make_first(inner, _node1))
-    result = run.to_callable(edges, frozenset([_GraphTestError]))(arg1=_ROOT_VALUE)
-    assert result.result[graph.DEFAULT_TERMINAL][0] == "node1(root)"
+    def raises():
+        raise base_types.SkipComputationError
+
+    def node2(x):
+        return x
+
+    def node1():
+        return "node1"
+
+    assert (
+        graph_runners.nullary_infer_sink(
+            composers.make_first(composers.compose_unary(node2, raises), node1)
+        )
+        == "node1"
+    )
 
 
 def test_or_with_sink_that_raises():
-    edges = graph.connect_default_terminal(
-        composers.make_or(
-            (_unactionable_node, _node1), merge_fn=_merger_that_raises_when_empty
+    def raises():
+        raise base_types.SkipComputationError
+
+    def merge(args):
+        if not args:
+            raise base_types.SkipComputationError
+        return ",".join(args)
+
+    assert (
+        graph_runners.nullary_infer_sink(
+            composers.make_or((raises, lambda: "node1"), merge_fn=merge)
         )
+        == "node1"
     )
-    result = run.to_callable(edges, frozenset([_GraphTestError]))(arg1=_ROOT_VALUE)
-    assert result.result[graph.DEFAULT_TERMINAL][0] == "[node1(root)]"
+
+
+def test_unambiguous_composition_using_terminal():
+    terminal = graph.make_terminal("1", lambda x: x)
+
+    def source():
+        return 1
+
+    with pytest.raises(AssertionError):
+        composers.compose_unary(
+            lambda x: x + 1,
+            base_types.merge_graphs(
+                composers.compose_unary(lambda x: x + 1, source),
+                composers.compose_unary(lambda x: x, source),
+            ),
+        )
+
+    g = composers.compose_unary(
+        lambda x: x + 1,
+        base_types.merge_graphs(
+            composers.compose_unary(lambda x: x + 1, source),
+            composers.compose_unary(terminal, source),
+        ),
+    )
+    x = run.to_callable_strict(g)({}, {})
+    assert x[terminal] == 1
+    assert x[_infer_graph_sink_excluding_terminals(g)] == 3
 
 
 def test_two_terminals():
-    """graph = node1 --> node2 --> DEFAULT_TERMINAL, node1 --> TERMINAL2"""
-    edges = graph.connect_default_terminal(composers.make_compose(_node2, _node1))
-    terminal2 = graph.make_terminal("TERMINAL2", gamla.wrap_tuple)
-    edges += (graph.make_standard_edge(source=_node1, destination=terminal2),)
-    result = run.to_callable(edges, frozenset([_GraphTestError]))(arg1=_ROOT_VALUE)
-    assert result.result[graph.DEFAULT_TERMINAL][0] == "node2(node1(root))"
-    assert result.result[terminal2][0] == "node1(root)"
+    terminal1 = graph.make_terminal("1", gamla.wrap_tuple)
+    terminal2 = graph.make_terminal("2", gamla.wrap_tuple)
+    result = graph_runners.unary_bare(
+        base_types.merge_graphs(
+            composers.compose_unary(terminal1, composers.make_compose(_node2, _node1)),
+            composers.compose_unary(terminal2, _node1),
+        ),
+        _node1,
+    )("hi")
+    assert result[terminal1][0] == "node2(node1(hi))"
+    assert result[terminal2][0] == "node1(hi)"
 
 
 def test_two_paths_succeed():
-    edges = graph.connect_default_terminal(composers.make_first(_node2, _node1))
-    terminal2 = graph.make_terminal("TERMINAL2", gamla.wrap_tuple)
-    edges += (graph.make_standard_edge(source=_node1, destination=terminal2),)
-    result = run.to_callable(edges, frozenset([_GraphTestError]))(arg1=_ROOT_VALUE)
-
-    assert result.result[graph.DEFAULT_TERMINAL][0] == "node2(root)"
-    assert result.result[terminal2][0] == "node1(root)"
+    source = graph.make_source()
+    terminal1 = graph.make_terminal("1", gamla.wrap_tuple)
+    terminal2 = graph.make_terminal("2", gamla.wrap_tuple)
+    result = graph_runners.variadic_bare(
+        base_types.merge_graphs(
+            composers.make_first(
+                composers.compose_source_unary(_node1, source),
+                composers.compose_unary(
+                    terminal1, composers.compose_source_unary(_node2, source)
+                ),
+            ),
+            composers.compose_unary(terminal2, _node1),
+        )
+    )({source: "hi"})
+    assert result[terminal1][0] == "node2(hi)"
+    assert result[terminal2][0] == "node1(hi)"
 
 
 def test_double_star_signature_considered_unary():
-    assert _runner(
-        composers.make_compose(
-            gamla.juxt(
-                lambda some_argname: some_argname + 1,
-                lambda different_argname: different_argname * 2,
-            ),
-            lambda: 3,
-        ),
-        arg1=_ROOT_VALUE,
-    ) == (4, 6)
+    sink = gamla.juxt(
+        lambda some_argname: some_argname + 1,
+        lambda different_argname: different_argname * 2,
+    )
+    assert graph_runners.nullary(composers.make_compose(sink, lambda: 3), sink) == (
+        4,
+        6,
+    )
 
 
 def test_type_safety_messages(caplog):
     def f(x) -> int:  # Bad typing!
         return "hello " + x
 
-    assert _runner(composers.make_compose(f, lambda: "world")) == "hello world"
+    assert (
+        graph_runners.nullary(composers.make_compose(f, lambda: "world"), f)
+        == "hello world"
+    )
     assert "TypeError" in caplog.text
 
 
@@ -806,7 +462,10 @@ def test_type_safety_messages_no_overtrigger(caplog):
     def f(x) -> str:
         return "hello " + x
 
-    assert _runner(composers.make_compose(f, lambda: "world")) == "hello world"
+    assert (
+        graph_runners.nullary(composers.make_compose(f, lambda: "world"), f)
+        == "hello world"
+    )
     assert "TypeError" not in caplog.text
 
 
@@ -851,27 +510,32 @@ def _sum(args):
 
 
 def test_future_edges():
-    edges = graph.connect_default_terminal(
-        composers.make_compose(_plus_1, _times_2)
-        + composers.make_compose(_multiply, _plus_1, key="a")
-        + (graph.make_future_edge(source=_times_2, destination=_multiply, key="b"),)
-    )
-    cg = run.to_callable(edges, frozenset([_GraphTestError]))
-
-    result = cg(x=3)
-    assert result.result[graph.DEFAULT_TERMINAL][0] == 7
-    assert cg(x=3, state=result.state).result[graph.DEFAULT_TERMINAL][0] == 42
+    graph_runners.unary_with_state_and_expectations(
+        base_types.merge_graphs(
+            composers.compose_unary(_plus_1, _times_2),
+            composers.make_compose(_multiply, _plus_1, key="a"),
+            composers.make_compose_future(_multiply, _times_2, "b", None),
+        ),
+        _times_2,
+        _multiply,
+    )([[3, 7], [3, 42]])
 
 
 def test_future_edges_with_circuit():
-    edges = graph.connect_default_terminal(
-        composers.make_compose(_plus_1, _multiply)
-        + composers.make_compose(_times_2, _plus_1)
-        + (graph.make_future_edge(source=_times_2, destination=_multiply, key="b"),)
+    def some_input(x):
+        return x
+
+    f = graph_runners.unary_with_state(
+        base_types.merge_graphs(
+            composers.make_compose(_plus_1, _multiply),
+            composers.make_compose(_times_2, _plus_1),
+            composers.make_compose(_multiply, some_input, key="a"),
+            composers.make_compose_future(_multiply, _times_2, "b", None),
+        ),
+        some_input,
+        _times_2,
     )
-    cg = run.to_callable(edges, frozenset([_GraphTestError]))
-    result = cg(a=3)
-    assert cg(a=3, state=result.state).result[graph.DEFAULT_TERMINAL][0] == 50
+    assert f(3, 3) == 50
 
 
 def test_sink_with_incoming_future_edge():
@@ -883,22 +547,90 @@ def test_sink_with_incoming_future_edge():
             y = 4
         return f"x={x}, y={y}"
 
-    edges = composers.make_compose(g, f, key="x") + (
-        graph.make_future_edge(source=g, destination=g, key="y"),
+    f = graph_runners.unary(
+        base_types.merge_graphs(
+            composers.make_compose(g, f, key="x"),
+            composers.make_compose_future(g, g, "y", None),
+        ),
+        f,
+        g,
     )
-    assert graph.infer_graph_sink(edges) == graph.make_computation_node(g)
-    assert _runner(edges, x=3) == "x=3, y=4"
+    assert f(3) == "x=3, y=4"
 
 
 def test_compose_future():
-    edges = composers.make_compose_future(
-        _multiply,
-        composers.make_and([_plus_1, _times_2, _multiply], merge_fn=_sum),
-        key="b",
+    a = graph.make_source()
+    b = graph.make_source()
+    c = graph.make_source()
+    graph_runners.variadic_with_state_and_expectations(
+        base_types.merge_graphs(
+            composers.compose_source_unary(_plus_1, c),
+            composers.compose_source_unary(_times_2, b),
+            composers.compose_source(_multiply, "a", a),
+            composers.make_compose_future(
+                _multiply,
+                composers.make_and([_plus_1, _times_2, _multiply], merge_fn=_sum),
+                "b",
+                None,
+            ),
+        ),
+        _sum,
+    )(([[{a: 2, b: 2, c: 2}, 9], [{a: 2, b: 2, c: 2}, 25]]))
+
+
+def test_dont_duplicate_sources():
+    a = graph.make_source()
+
+    assert (
+        graph_runners.variadic_infer_sink(
+            duplication.duplicate_function_or_graph(
+                composers.compose_source_unary(_plus_1, a)
+            )
+        )({a: 2})
+        == 3
     )
-    edges = graph.connect_default_terminal(edges)
-    cg = run.to_callable(edges, frozenset([_GraphTestError]))
-    result = cg(a=2, x=2, y=2)
-    assert result.result[graph.DEFAULT_TERMINAL][0] == 9
-    result = cg(a=2, x=2, y=2, state=result.state)
-    assert result.result[graph.DEFAULT_TERMINAL][0] == 25
+
+
+def test_badly_composed_graph_raises():
+    with pytest.raises(AssertionError):
+        run.to_callable_strict(
+            composers.make_compose(lambda x, y: x + y, lambda: 1, key="x")
+        )
+
+
+def test_memory_persists_when_unactionable():
+    def input_node(x):
+        return x
+
+    def output_node(x):
+        return x
+
+    remember_first = memory.with_state("x", None, lambda upstream, x: x or upstream)
+    skip_or_passthrough = (
+        lambda input: input
+        if input != "skip state"
+        else gamla.just_raise(base_types.SkipComputationError)
+    )
+    graph_runners.unary_with_state_and_expectations(
+        composers.compose_left(
+            composers.make_first(
+                composers.make_compose(
+                    composers.compose_left(
+                        skip_or_passthrough, remember_first, key="upstream"
+                    ),
+                    input_node,
+                    key="input",
+                ),
+                lambda: "state skipped",
+            ),
+            output_node,
+        ),
+        input_node,
+        output_node,
+    )(
+        [
+            ["remember this", "remember this"],
+            ["skip state", "state skipped"],
+            ["recall", "remember this"],
+        ]
+    )

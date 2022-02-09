@@ -1,19 +1,12 @@
-from computation_graph import base_types, graph, run
+from computation_graph import graph_runners
 from computation_graph.composers import memory
 
 
 def test_changed():
-    cg = run.to_callable(
-        graph.connect_default_terminal(
-            memory.changed(
-                lambda state: base_types.ComputationResult(
-                    state, 0 if state is None else state + 1
-                )
+    graph_runners.nullary_infer_sink_with_state_and_expectations(
+        memory.changed(
+            memory.with_state(
+                "state", 0, lambda state: state + 1 if state < 2 else state
             )
-        ),
-        frozenset(),
-    )
-    result = cg()
-    assert not result.result[graph.DEFAULT_TERMINAL][0]
-    result = cg(state=result.state)
-    assert result.result[graph.DEFAULT_TERMINAL][0]
+        )
+    )(True, True, False)

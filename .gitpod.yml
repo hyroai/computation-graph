@@ -1,0 +1,7 @@
+tasks:
+  - before: |
+      pip install pre-commit
+      pre-commit install --install-hooks
+      pip install -e .[test]
+image:
+  file: .gitpod.Dockerfile

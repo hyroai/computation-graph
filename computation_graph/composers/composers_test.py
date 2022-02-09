@@ -1,4 +1,4 @@
-from computation_graph import composers, graph, run
+from computation_graph import composers, graph_runners
 
 
 def test_ambiguity_does_not_blow_up():
@@ -8,13 +8,13 @@ def test_ambiguity_does_not_blow_up():
         nonlocal counter
         counter += 1
 
-    def g(x):
-        return x
+    def g():
+        return "x"
 
     for _ in range(15):
         g = composers.make_first(
             composers.compose_left_unary(g, lambda x: increment() or x + "a"),
             composers.compose_left_unary(g, lambda x: increment() or x + "b"),
         )
-    run.to_callable(graph.connect_default_terminal(g), frozenset())(x="x")
+    graph_runners.nullary_infer_sink(g)
     assert counter == 30

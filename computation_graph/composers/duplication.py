@@ -1,4 +1,5 @@
 import functools
+import inspect
 
 import gamla
 
@@ -24,11 +25,17 @@ def _duplicate_computation_edge(get_duplicated_node):
 
 
 _duplicate_node = gamla.compose_left(
-    gamla.attrgetter("func"), duplicate_function, graph.make_computation_node
+    gamla.attrgetter("func"),
+    gamla.when(
+        gamla.compose_left(inspect.signature, gamla.attrgetter("parameters"), len),
+        duplicate_function,
+    ),
+    graph.make_computation_node,
 )
 
 _node_to_duplicated_node = gamla.compose_left(
     graph.get_all_nodes,
+    gamla.remove(gamla.attrgetter("is_terminal")),
     gamla.map(gamla.pair_right(_duplicate_node)),
     dict,
     gamla.dict_to_getter_with_default(None),
@@ -38,7 +45,15 @@ duplicate_graph = gamla.compose_left(
     gamla.pair_with(_node_to_duplicated_node),
     gamla.star(
         lambda get_duplicated_node, graph: gamla.pipe(
-            graph, gamla.map(_duplicate_computation_edge(get_duplicated_node)), tuple
+            graph,
+            gamla.map(
+                _duplicate_computation_edge(
+                    gamla.ternary(
+                        get_duplicated_node, get_duplicated_node, gamla.identity
+                    )
+                )
+            ),
+            tuple,
         )
     ),
 )

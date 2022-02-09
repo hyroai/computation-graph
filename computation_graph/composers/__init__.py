@@ -1,15 +1,10 @@
 from __future__ import annotations
 
-from typing import Any, Callable, Dict, Iterable, Optional, Sequence, Union
+from typing import Any, Callable, Dict, Iterable, Optional, Sequence
 
 import gamla
-from gamla.optimized import sync as opt_gamla
 
-from computation_graph import base_types, graph
-
-_ComposersInputType = Union[Callable, base_types.ComputationNode, base_types.GraphType]
-
-_ComputationNodeOrGraphType = Union[base_types.ComputationNode, base_types.GraphType]
+from computation_graph import base_types, graph, signature
 
 
 class _ComputationError:
@@ -22,7 +17,7 @@ _callable_or_graph_type_to_node_or_graph_type = gamla.unless(
 
 
 def _get_edges_from_node_or_graph(
-    node_or_graph: _ComputationNodeOrGraphType,
+    node_or_graph: base_types.NodeOrGraph,
 ) -> base_types.GraphType:
     if isinstance(node_or_graph, base_types.ComputationNode):
         return ()
@@ -30,38 +25,15 @@ def _get_edges_from_node_or_graph(
 
 
 @gamla.curry
-def _get_unbound_signature_for_single_node(
-    node_to_incoming_edges, node: base_types.ComputationNode
-) -> base_types.NodeSignature:
-    """Computes the new signature of unbound variables after considering internal edges."""
-    incoming_edges = node_to_incoming_edges(node)
-
-    keep_not_in_bound_kwargs = gamla.pipe(
-        incoming_edges,
-        opt_gamla.map(base_types.edge_key),
-        gamla.filter(gamla.identity),
-        frozenset,
-        gamla.contains,
-        gamla.remove,
-    )
-
-    return base_types.NodeSignature(
-        is_args=node.signature.is_args
-        and not any(edge.args for edge in incoming_edges),
-        kwargs=tuple(keep_not_in_bound_kwargs(node.signature.kwargs)),
-        optional_kwargs=tuple(keep_not_in_bound_kwargs(node.signature.optional_kwargs)),
-    )
-
-
-@gamla.curry
 def make_optional(
-    func: _ComposersInputType, default_value: Any
+    func: base_types.CallableOrNodeOrGraph, default_value: Any
 ) -> base_types.GraphType:
     return make_first(func, lambda: default_value)
 
 
 def make_and(
-    funcs: Iterable[_ComposersInputType], merge_fn: _ComposersInputType
+    funcs: Iterable[base_types.CallableOrNodeOrGraph],
+    merge_fn: base_types.CallableOrNodeOrGraph,
 ) -> base_types.GraphType:
     def args_to_tuple(*args):
         return args
@@ -78,7 +50,16 @@ def make_and(
                 gamla.map(_infer_sink),
                 tuple,
                 lambda nodes: (
-                    (graph.make_standard_edge(source=nodes, destination=merge_node),),
+                    (
+                        base_types.ComputationEdge(
+                            is_future=False,
+                            priority=0,
+                            source=None,
+                            args=nodes,
+                            destination=merge_node,
+                            key="*args",
+                        ),
+                    ),
                     make_compose(merge_fn, merge_node, key="args"),
                 ),
             ),
@@ -88,7 +69,8 @@ def make_and(
 
 
 def make_or(
-    funcs: Sequence[_ComposersInputType], merge_fn: _ComposersInputType
+    funcs: Sequence[base_types.CallableOrNodeOrGraph],
+    merge_fn: base_types.CallableOrNodeOrGraph,
 ) -> base_types.GraphType:
     def filter_computation_errors(*args):
         return gamla.pipe(
@@ -106,7 +88,16 @@ def make_or(
                 gamla.map(_infer_sink),
                 tuple,
                 lambda sinks: (
-                    (graph.make_standard_edge(source=sinks, destination=filter_node),),
+                    (
+                        base_types.ComputationEdge(
+                            is_future=False,
+                            priority=0,
+                            source=None,
+                            args=sinks,
+                            destination=filter_node,
+                            key="*args",
+                        ),
+                    ),
                     make_compose(merge_fn, filter_node, key="args"),
                 ),
             )
@@ -116,19 +107,38 @@ def make_or(
     )
 
 
-def _infer_sink(
-    graph_or_node: _ComputationNodeOrGraphType,
-) -> base_types.ComputationNode:
+def _infer_sink(graph_or_node: base_types.NodeOrGraph) -> base_types.ComputationNode:
     if isinstance(graph_or_node, base_types.ComputationNode):
         return graph_or_node
-    return graph.infer_graph_sink_excluding_terminals(graph_or_node)
+    graph_without_future_edges = gamla.pipe(graph_or_node, graph.remove_future_edges)
+    if graph_without_future_edges:
+        try:
+            return gamla.pipe(
+                graph_without_future_edges, graph.sink_excluding_terminals
+            )
+        except AssertionError:
+            # If we reached here we can try again without sources of future edges.
+            sources_of_future_edges = gamla.pipe(
+                graph_or_node,
+                gamla.filter(base_types.edge_is_future),
+                gamla.map(base_types.edge_source),
+                frozenset,
+            )
+            result = (
+                graph.get_leaves(graph_without_future_edges) - sources_of_future_edges
+            )
+            assert len(result) == 1
+            return gamla.head(result)
+
+    assert len(graph_or_node) == 1, graph_without_future_edges
+    return graph_or_node[0].destination
 
 
-def make_first(*graphs: _ComposersInputType) -> base_types.GraphType:
+def make_first(*graphs: base_types.CallableOrNodeOrGraph) -> base_types.GraphType:
     graph_or_nodes = tuple(map(_callable_or_graph_type_to_node_or_graph_type, graphs))
 
-    def first_sink(x):
-        return x
+    def first_sink(constituent_of_first):
+        return constituent_of_first
 
     return base_types.merge_graphs(
         *map(_get_edges_from_node_or_graph, graph_or_nodes),
@@ -138,12 +148,13 @@ def make_first(*graphs: _ComposersInputType) -> base_types.GraphType:
             enumerate,
             gamla.map(
                 gamla.star(
-                    lambda i, g: graph.make_edge(
-                        is_future=False,
-                        priority=i,
+                    lambda i, g: base_types.ComputationEdge(
                         source=g,
-                        destination=first_sink,
-                        key="x",
+                        destination=graph.make_computation_node(first_sink),
+                        key="constituent_of_first",
+                        args=(),
+                        priority=i,
+                        is_future=False,
                     )
                 )
             ),
@@ -157,22 +168,48 @@ def last(*args) -> base_types.GraphType:
 
 
 @gamla.curry
+def _try_connect(
+    source: base_types.ComputationNode,
+    key: Optional[str],
+    priority: int,
+    is_future: bool,
+    destination: base_types.ComputationNode,
+    unbound_destination_signature: base_types.NodeSignature,
+) -> base_types.ComputationEdge:
+    if key is None and signature.is_unary(unbound_destination_signature):
+        key = gamla.head(signature.parameters(unbound_destination_signature))
+    assert key is not None and key in signature.parameters(
+        unbound_destination_signature
+    ), "Cannot infer composition destination."
+    return base_types.ComputationEdge(
+        source=source,
+        destination=destination,
+        key=key,
+        args=(),
+        priority=priority,
+        is_future=is_future,
+    )
+
+
+@gamla.curry
 def _infer_composition_edges(
+    priority: int,
     key: Optional[str],
     is_future: bool,
-    source: _ComputationNodeOrGraphType,
-    destination: _ComputationNodeOrGraphType,
+    source: base_types.NodeOrGraph,
+    destination: base_types.NodeOrGraph,
 ) -> base_types.GraphType:
-    if isinstance(destination, base_types.ComputationNode):
-        assert (
-            key is None or key in destination.signature.kwargs
-        ), f"Cannot compose, destination signature does not contain key '{key}'"
+    try_connect = _try_connect(_infer_sink(source), key, priority, is_future)
 
+    if isinstance(destination, base_types.ComputationNode):
         return base_types.merge_graphs(
-            (graph.make_edge(is_future, 0, _infer_sink(source), destination, key),),
+            (try_connect(destination, destination.signature),),
             _get_edges_from_node_or_graph(source),
         )
 
+    unbound_signature = graph.unbound_signature(
+        graph.get_incoming_edges_for_node(destination)
+    )
     return base_types.merge_graphs(
         gamla.pipe(
             destination,
@@ -180,10 +217,7 @@ def _infer_composition_edges(
             gamla.unique,
             gamla.filter(
                 gamla.compose_left(
-                    _get_unbound_signature_for_single_node(
-                        graph.get_incoming_edges_for_node(destination)
-                    ),
-                    lambda signature: key in signature.kwargs,
+                    unbound_signature, lambda signature: key in signature.kwargs
                 )
             ),
             # Do not add edges to nodes from source that are already present in destination (cycle).
@@ -192,8 +226,9 @@ def _infer_composition_edges(
                 or node not in graph.get_all_nodes(source)
             ),
             gamla.map(
-                lambda node: graph.make_edge(
-                    is_future, 0, _infer_sink(source), node, key
+                lambda destination: try_connect(
+                    destination=destination,
+                    unbound_destination_signature=unbound_signature(destination),
                 )
             ),
             tuple,
@@ -210,7 +245,10 @@ def _infer_composition_edges(
 
 
 def _make_compose_inner(
-    *funcs: _ComposersInputType, key: Optional[str], is_future
+    *funcs: base_types.CallableOrNodeOrGraph,
+    key: Optional[str],
+    is_future,
+    priority: int,
 ) -> base_types.GraphType:
     assert (
         len(funcs) > 1
@@ -220,25 +258,70 @@ def _make_compose_inner(
         reversed,
         gamla.map(_callable_or_graph_type_to_node_or_graph_type),
         gamla.sliding_window(2),
-        gamla.map(gamla.star(_infer_composition_edges(key, is_future))),
+        gamla.map(gamla.star(_infer_composition_edges(priority, key, is_future))),
         gamla.star(base_types.merge_graphs),
     )
 
 
 def make_compose(
-    *funcs: _ComposersInputType, key: Optional[str] = None
+    *funcs: base_types.CallableOrNodeOrGraph, key: Optional[str] = None
 ) -> base_types.GraphType:
-    return _make_compose_inner(*funcs, key=key, is_future=False)
+    return _make_compose_inner(*funcs, key=key, is_future=False, priority=0)
 
 
-def compose_unary(*funcs: _ComposersInputType) -> base_types.GraphType:
-    return _make_compose_inner(*funcs, key=None, is_future=False)
+def compose_unary(*funcs: base_types.CallableOrNodeOrGraph) -> base_types.GraphType:
+    return _make_compose_inner(*funcs, key=None, is_future=False, priority=0)
 
 
 def make_compose_future(
-    destination: _ComposersInputType, source: _ComposersInputType, key: str
+    destination: base_types.CallableOrNodeOrGraph,
+    source: base_types.CallableOrNodeOrGraph,
+    key: Optional[str],
+    default: base_types.Result,
 ) -> base_types.GraphType:
-    return _make_compose_inner(destination, source, key=key, is_future=True)
+    def when_memory_unavailable():
+        return default
+
+    return base_types.merge_graphs(
+        _make_compose_inner(destination, source, key=key, is_future=True, priority=0),
+        _make_compose_inner(
+            destination, when_memory_unavailable, key=key, is_future=False, priority=1
+        ),
+    )
+
+
+def compose_unary_future(
+    destination: base_types.CallableOrNodeOrGraph,
+    source: base_types.CallableOrNodeOrGraph,
+    default: base_types.Result,
+) -> base_types.GraphType:
+    return make_compose_future(destination, source, None, default)
+
+
+def compose_source(
+    destination: base_types.CallableOrNodeOrGraph,
+    key: str,
+    source: base_types.CallableOrNodeOrGraph,
+) -> base_types.GraphType:
+    return _make_compose_inner(destination, source, key=key, is_future=True, priority=0)
+
+
+@gamla.curry
+def compose_left_source(
+    source: base_types.CallableOrNodeOrGraph,
+    key: str,
+    destination: base_types.CallableOrNodeOrGraph,
+):
+    return compose_source(destination, key, source)
+
+
+def compose_source_unary(
+    destination: base_types.CallableOrNodeOrGraph,
+    source: base_types.CallableOrNodeOrGraph,
+) -> base_types.GraphType:
+    return _make_compose_inner(
+        destination, source, key=None, is_future=True, priority=0
+    )
 
 
 def compose_left(*args, key: Optional[str] = None) -> base_types.GraphType:
@@ -248,9 +331,10 @@ def compose_left(*args, key: Optional[str] = None) -> base_types.GraphType:
 def compose_left_future(
     source: base_types.GraphOrCallable,
     destination: base_types.GraphOrCallable,
-    key: str,
+    key: Optional[str],
+    default: base_types.Result,
 ) -> base_types.GraphType:
-    return make_compose_future(destination, source, key)
+    return make_compose_future(destination, source, key, default)
 
 
 def compose_left_unary(*args) -> base_types.GraphType:
@@ -258,7 +342,9 @@ def compose_left_unary(*args) -> base_types.GraphType:
 
 
 @gamla.curry
-def compose_dict(f: base_types.GraphOrCallable, d: Dict) -> base_types.GraphType:
+def compose_dict(
+    f: base_types.GraphOrCallable, d: Dict[str, base_types.CallableOrNodeOrGraph]
+) -> base_types.GraphType:
     return gamla.pipe(
         d,
         dict.items,
