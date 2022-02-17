@@ -1,5 +1,6 @@
 import functools
 import inspect
+import asyncio
 
 import gamla
 
@@ -7,6 +8,14 @@ from computation_graph import graph
 
 
 def duplicate_function(func):
+    if asyncio.iscoroutinefunction(func):
+
+        @functools.wraps(func)
+        async def inner(*args, **kwargs):
+            return func(*args, **kwargs)
+
+        return inner
+
     @functools.wraps(func)
     def inner(*args, **kwargs):
         return func(*args, **kwargs)
