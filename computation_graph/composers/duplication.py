@@ -12,7 +12,7 @@ def duplicate_function(func):
 
         @functools.wraps(func)
         async def inner(*args, **kwargs):
-            return func(*args, **kwargs)
+            return await func(*args, **kwargs)
 
         return inner
 
