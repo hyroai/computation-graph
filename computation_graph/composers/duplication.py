@@ -1,6 +1,6 @@
+import asyncio
 import functools
 import inspect
-import asyncio
 
 import gamla
 
