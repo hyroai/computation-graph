@@ -31,13 +31,9 @@ def require(
     )
 
 
-def case(cases: Dict[Callable, Callable]) -> base_types.GraphType:
-    return gamla.pipe(
-        cases,
-        dict.items,
-        gamla.map(gamla.star(lambda predicate, fn: require(predicate, fn))),
-        gamla.star(composers.make_first),
-    )
+case: Callable[[Dict[Callable, Callable]], base_types.GraphType] = gamla.compose_left(
+    dict.items, gamla.map(gamla.star(require)), gamla.star(composers.make_first)
+)
 
 
 def require_all(
