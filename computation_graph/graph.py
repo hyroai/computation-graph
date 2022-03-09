@@ -1,4 +1,5 @@
 from typing import Callable, FrozenSet
+import dataclasses
 
 import gamla
 from gamla.optimized import sync as opt_gamla
@@ -122,4 +123,46 @@ def unbound_signature(
         and not any(edge.args for edge in incoming_edges),
         kwargs=tuple(keep_not_in_bound_kwargs(node.signature.kwargs)),
         optional_kwargs=tuple(keep_not_in_bound_kwargs(node.signature.optional_kwargs)),
+    )
+
+def replace_source(x, y):
+    return _transform_edges(_edge_source_equals(x), _replace_edge_source(y))
+
+
+def _transform_edges(query, edge_mapper):
+    return _operate_on_subgraph(
+        _split_by_condition(query), gamla.compose(tuple, gamla.map(edge_mapper))
+    )
+
+
+def _edge_source_equals(x):
+    if not isinstance(x, base_types.ComputationNode):
+        x = make_computation_node(x)
+    return lambda edge: edge.source == x
+
+
+def _replace_edge_source(replacement):
+    if not isinstance(replacement, base_types.ComputationNode):
+        replacement = make_computation_node(replacement)
+
+    def replace_edge_source(edge):
+        return dataclasses.replace(edge, source=replacement)
+
+    return replace_edge_source
+
+
+def _operate_on_subgraph(selector, transformation):
+    return gamla.compose(
+        gamla.star(
+            lambda match, rest: base_types.merge_graphs(rest, transformation(match))
+        ),
+        selector,
+    )
+
+
+def _split_by_condition(condition):
+    return gamla.compose_left(
+        gamla.bifurcate(gamla.filter(condition), gamla.remove(condition)),
+        gamla.map(tuple),
+        tuple,
     )
