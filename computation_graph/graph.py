@@ -130,19 +130,19 @@ def replace_source(x, y):
     return _transform_edges(_edge_source_equals(x), _replace_edge_source(y))
 
 
-def _transform_edges(query, edge_mapper):
+def transform_edges(query, edge_mapper):
     return _operate_on_subgraph(
         _split_by_condition(query), gamla.compose(tuple, gamla.map(edge_mapper))
     )
 
 
-def _edge_source_equals(x):
+def edge_source_equals(x):
     if not isinstance(x, base_types.ComputationNode):
         x = make_computation_node(x)
     return lambda edge: edge.source == x
 
 
-def _replace_edge_source(replacement):
+def replace_edge_source(replacement):
     if not isinstance(replacement, base_types.ComputationNode):
         replacement = make_computation_node(replacement)
 
