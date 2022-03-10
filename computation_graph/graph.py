@@ -1,5 +1,5 @@
-from typing import Callable, FrozenSet
 import dataclasses
+from typing import Callable, FrozenSet
 
 import gamla
 from gamla.optimized import sync as opt_gamla
@@ -124,6 +124,7 @@ def unbound_signature(
         kwargs=tuple(keep_not_in_bound_kwargs(node.signature.kwargs)),
         optional_kwargs=tuple(keep_not_in_bound_kwargs(node.signature.optional_kwargs)),
     )
+
 
 def replace_source(x, y):
     return _transform_edges(_edge_source_equals(x), _replace_edge_source(y))
