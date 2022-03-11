@@ -1,3 +1,4 @@
+import dataclasses
 from typing import Callable, FrozenSet
 
 import gamla
@@ -122,4 +123,49 @@ def unbound_signature(
         and not any(edge.args for edge in incoming_edges),
         kwargs=tuple(keep_not_in_bound_kwargs(node.signature.kwargs)),
         optional_kwargs=tuple(keep_not_in_bound_kwargs(node.signature.optional_kwargs)),
+    )
+
+
+def replace_source(x, y):
+    return transform_edges(edge_source_equals(x), replace_edge_source(y))
+
+
+def transform_edges(query, edge_mapper):
+    return _operate_on_subgraph(
+        _split_by_condition(query), gamla.compose_left(gamla.map(edge_mapper), tuple)
+    )
+
+
+def edge_source_equals(x):
+    x = make_computation_node(x)
+
+    def edge_source_equals(edge):
+        return edge.source == x
+
+    return edge_source_equals
+
+
+def replace_edge_source(replacement):
+    replacement = make_computation_node(replacement)
+
+    def replace_edge_source(edge):
+        return dataclasses.replace(edge, source=replacement)
+
+    return replace_edge_source
+
+
+def _operate_on_subgraph(selector, transformation):
+    return gamla.compose(
+        gamla.star(
+            lambda match, rest: base_types.merge_graphs(rest, transformation(match))
+        ),
+        selector,
+    )
+
+
+def _split_by_condition(condition):
+    return gamla.compose_left(
+        gamla.bifurcate(gamla.filter(condition), gamla.remove(condition)),
+        gamla.map(tuple),
+        tuple,
     )
