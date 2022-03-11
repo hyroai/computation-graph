@@ -127,7 +127,7 @@ def unbound_signature(
 
 
 def replace_source(x, y):
-    return _transform_edges(_edge_source_equals(x), _replace_edge_source(y))
+    return transform_edges(edge_source_equals(x), replace_edge_source(y))
 
 
 def transform_edges(query, edge_mapper):
