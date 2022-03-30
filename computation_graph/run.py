@@ -49,16 +49,12 @@ _incoming_edge_options = opt_gamla.compose_left(
     ),
 )
 
-
-def _get_args(
-    edges_to_results: Dict[base_types.ComputationEdge, Tuple[base_types.Result, ...]]
-) -> Tuple[base_types.Result, ...]:
-    return opt_gamla.pipe(
-        edges_to_results,
-        opt_gamla.keyfilter(gamla.attrgetter("args")),
-        dict.values,
-        gamla.head,
-    )
+_get_args: Callable[
+    [Dict[base_types.ComputationEdge, Tuple[base_types.Result, ...]]],
+    Tuple[base_types.Result, ...],
+] = gamla.compose_left(
+    opt_gamla.keyfilter(gamla.attrgetter("args")), dict.values, gamla.head
+)
 
 
 _get_kwargs = opt_gamla.compose_left(
