@@ -6,9 +6,6 @@ from gamla.optimized import sync as opt_gamla
 
 from computation_graph import base_types, signature
 
-remove_future_edges = gamla.compose(tuple, opt_gamla.remove(base_types.edge_is_future))
-
-
 get_edge_nodes = gamla.ternary(
     base_types.edge_args,
     lambda edge: edge.args + (edge.destination,),
