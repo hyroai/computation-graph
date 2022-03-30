@@ -13,7 +13,7 @@ def _infer_graph_sink_excluding_terminals(
     edges: base_types.GraphType,
 ) -> base_types.ComputationNode:
     leaves = gamla.pipe(
-        edges, graph.get_leaves, gamla.remove(gamla.attrgetter("is_terminal")), tuple
+        edges, graph.get_leaves, gamla.remove(base_types.node_is_terminal), tuple
     )
     assert len(leaves) == 1, f"computation graph has more than one sink: {leaves}"
     return gamla.head(leaves)

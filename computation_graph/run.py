@@ -245,7 +245,7 @@ def _populate_reducer_state(
 _is_graph_async = opt_gamla.compose_left(
     opt_gamla.mapcat(lambda edge: (edge.source, *edge.args)),
     opt_gamla.remove(gamla.equals(None)),
-    opt_gamla.map(gamla.attrgetter("func")),
+    opt_gamla.map(base_types.node_implementation),
     gamla.anymap(asyncio.iscoroutinefunction),
 )
 

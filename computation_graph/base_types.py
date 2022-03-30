@@ -106,6 +106,9 @@ class ComputationNode:
         return self.name
 
 
+node_implementation = gamla.attrgetter("func")
+node_is_terminal = gamla.attrgetter("is_terminal")
+
 edge_args = gamla.attrgetter("args")
 edge_destination = gamla.attrgetter("destination")
 edge_key = gamla.attrgetter("key")

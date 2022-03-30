@@ -61,7 +61,7 @@ def get_leaves(edges: base_types.GraphType) -> FrozenSet[base_types.ComputationN
 
 sink_excluding_terminals = gamla.compose_left(
     get_leaves,
-    gamla.remove(gamla.attrgetter("is_terminal")),
+    gamla.remove(base_types.node_is_terminal),
     tuple,
     gamla.assert_that(gamla.len_equals(1)),
     gamla.head,
@@ -75,7 +75,7 @@ get_incoming_edges_for_node = gamla.compose_left(
 
 
 get_terminals = gamla.compose_left(
-    get_all_nodes, gamla.filter(gamla.attrgetter("is_terminal")), tuple
+    get_all_nodes, gamla.filter(base_types.node_is_terminal), tuple
 )
 
 

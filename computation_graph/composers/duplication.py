@@ -4,7 +4,7 @@ import inspect
 
 import gamla
 
-from computation_graph import graph
+from computation_graph import base_types, graph
 
 
 def duplicate_function(func):
@@ -34,7 +34,7 @@ def _duplicate_computation_edge(get_duplicated_node):
 
 
 _duplicate_node = gamla.compose_left(
-    gamla.attrgetter("func"),
+    base_types.node_implementation,
     gamla.when(
         gamla.compose_left(inspect.signature, gamla.attrgetter("parameters"), len),
         duplicate_function,
@@ -44,7 +44,7 @@ _duplicate_node = gamla.compose_left(
 
 _node_to_duplicated_node = gamla.compose_left(
     graph.get_all_nodes,
-    gamla.remove(gamla.attrgetter("is_terminal")),
+    gamla.remove(base_types.node_is_terminal),
     gamla.map(gamla.pair_right(_duplicate_node)),
     dict,
     gamla.dict_to_getter_with_default(None),
