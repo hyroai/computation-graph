@@ -53,7 +53,7 @@ _get_args: Callable[
     [Dict[base_types.ComputationEdge, Tuple[base_types.Result, ...]]],
     Tuple[base_types.Result, ...],
 ] = gamla.compose_left(
-    opt_gamla.keyfilter(gamla.attrgetter("args")), dict.values, gamla.head
+    opt_gamla.keyfilter(base_types.edge_args), dict.values, gamla.head
 )
 
 
