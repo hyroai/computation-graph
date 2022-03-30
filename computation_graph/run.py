@@ -104,10 +104,10 @@ _SingleNodeSideEffect = Callable[[base_types.ComputationNode, Any], None]
 
 
 def _wrap_result(node, result: base_types.Result, elapsed: float):
-    if elapsed > 0.2:
+    if elapsed > 0.01:
         logging.info(
             termcolor.colored(
-                f"node took {elapsed} seconds: {base_types.pretty_print_function_name(node.func)}",
+                f"function took  {elapsed:.2f} seconds: {base_types.pretty_print_function_name(node.func)}",
                 color="red",
             )
         )
@@ -125,9 +125,8 @@ def _run_node(
             result = node.func(*args, **kwargs)
             before = time.time()
             result = await gamla.to_awaitable(result)
-            elapsed = time.time() - before
             side_effect(node, result)
-            return _wrap_result(node, result, elapsed)
+            return _wrap_result(node, result, time.time() - before)
 
     else:
 
@@ -136,9 +135,8 @@ def _run_node(
             args, kwargs = _get_computation_input(node, edges_leading_to_node, values)
             before = time.time()
             result = node.func(*args, **kwargs)
-            elapsed = time.time() - before
             side_effect(node, result)
-            return _wrap_result(node, result, elapsed)
+            return _wrap_result(node, result, time.time() - before)
 
     return run_node
 
