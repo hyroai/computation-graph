@@ -6,8 +6,6 @@ import pytest
 from computation_graph import base_types, composers, graph, graph_runners, legacy, run
 from computation_graph.composers import duplication, memory
 
-pytestmark = pytest.mark.asyncio
-
 
 def _infer_graph_sink_excluding_terminals(
     edges: base_types.GraphType,
