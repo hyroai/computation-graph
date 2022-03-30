@@ -50,7 +50,6 @@ _incoming_edge_options = opt_gamla.compose_left(
         )
     ),
 )
-_WrappedResult = Dict
 
 _get_args: Callable[
     [Dict[base_types.ComputationEdge, Tuple[base_types.Result, ...]]],
@@ -69,7 +68,7 @@ _get_kwargs = opt_gamla.compose_left(
 )
 
 
-_NodeToResults = Dict[base_types.ComputationNode, _WrappedResult]
+_NodeToResults = Dict[base_types.ComputationNode, base_types.Result]
 _ComputationInput = Tuple[Tuple[base_types.Result, ...], Dict[str, base_types.Result]]
 
 
@@ -116,11 +115,11 @@ def _profile(node, result: base_types.Result, time_started: float):
 
 def _run_node(
     is_async: bool, side_effect: _SingleNodeSideEffect
-) -> Callable[..., _WrappedResult]:
+) -> Callable[..., base_types.Result]:
     if is_async:
 
         @opt_async_gamla.star
-        async def run_node(node, edges_leading_to_node, values) -> _WrappedResult:
+        async def run_node(node, edges_leading_to_node, values) -> base_types.Result:
             args, kwargs = _get_computation_input(node, edges_leading_to_node, values)
             before = time.perf_counter()
             result = await gamla.to_awaitable(node.func(*args, **kwargs))
@@ -131,7 +130,7 @@ def _run_node(
     else:
 
         @opt_gamla.star
-        def run_node(node, edges_leading_to_node, values) -> _WrappedResult:
+        def run_node(node, edges_leading_to_node, values) -> base_types.Result:
             args, kwargs = _get_computation_input(node, edges_leading_to_node, values)
             before = time.perf_counter()
             result = node.func(*args, **kwargs)
@@ -203,7 +202,7 @@ _get_node_input = opt_gamla.compose_left(
 
 
 def _populate_reducer_state(
-    handled_exceptions, is_async: bool, edges, f: Callable[..., _WrappedResult]
+    handled_exceptions, is_async: bool, edges, f: Callable[..., base_types.Result]
 ) -> Callable[[Callable], Callable]:
     handled_exceptions = (*handled_exceptions, base_types.SkipComputationError)
     incoming_edges_opts = _incoming_edge_options(edges)
