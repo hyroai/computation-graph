@@ -51,7 +51,7 @@ _incoming_edge_options = opt_gamla.compose_left(
     ),
 )
 _WrappedResult = Dict
-_unwrap_result = gamla.itemgetter("result")
+unwrap_result = gamla.itemgetter("result")
 
 _get_args: Callable[
     [Dict[base_types.ComputationEdge, Tuple[base_types.Result, ...]]],
@@ -225,7 +225,7 @@ def _populate_reducer_state(
                                     KeyError,
                                     _DepNotFoundError,
                                 ),
-                                _unwrap_result,
+                                unwrap_result,
                             )
                         ),
                     ),
@@ -255,7 +255,7 @@ def _populate_reducer_state(
                                     KeyError,
                                     _DepNotFoundError,
                                 ),
-                                _unwrap_result,
+                                unwrap_result,
                             )
                         ),
                     ),
@@ -369,7 +369,7 @@ def _to_callable_with_side_effect_for_single_and_multiple(
 
     return (_async_graph_reducer if is_async else _graph_reducer)(
         gamla.compose(
-            gamla.valmap(_unwrap_result),
+            gamla.valmap(unwrap_result),
             final_runner,
             lambda inputs: _combine_inputs_with_edges(inputs)(edges),
         )
