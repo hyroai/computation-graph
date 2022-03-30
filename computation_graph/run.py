@@ -107,9 +107,9 @@ def _wrap_result(side_effect, node, result: base_types.Result, time_started: flo
     elapsed = time.perf_counter() - time_started
     side_effect(node, result)
     if elapsed > 0.1:
-        logging.info(
+        logging.warning(
             termcolor.colored(
-                f"function took  {elapsed:.2f} seconds: {base_types.pretty_print_function_name(node.func)}",
+                f"function took {elapsed:.2f} seconds: {base_types.pretty_print_function_name(node.func)}",
                 color="red",
             )
         )
