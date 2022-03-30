@@ -51,7 +51,6 @@ _incoming_edge_options = opt_gamla.compose_left(
     ),
 )
 _WrappedResult = Dict
-unwrap_result = gamla.itemgetter("result")
 
 _get_args: Callable[
     [Dict[base_types.ComputationEdge, Tuple[base_types.Result, ...]]],
@@ -103,9 +102,8 @@ def _type_check(node: base_types.ComputationNode, result):
 _SingleNodeSideEffect = Callable[[base_types.ComputationNode, Any], None]
 
 
-def _wrap_result(side_effect, node, result: base_types.Result, time_started: float):
+def _profile(node, result: base_types.Result, time_started: float):
     elapsed = time.perf_counter() - time_started
-    side_effect(node, result)
     if elapsed > 0.1:
         logging.warning(
             termcolor.colored(
@@ -126,7 +124,9 @@ def _run_node(
             args, kwargs = _get_computation_input(node, edges_leading_to_node, values)
             before = time.perf_counter()
             result = await gamla.to_awaitable(node.func(*args, **kwargs))
-            return _wrap_result(side_effect, node, result, before)
+            side_effect(node, result)
+            _profile(node, result, before)
+            return result
 
     else:
 
@@ -135,7 +135,9 @@ def _run_node(
             args, kwargs = _get_computation_input(node, edges_leading_to_node, values)
             before = time.perf_counter()
             result = node.func(*args, **kwargs)
-            return _wrap_result(side_effect, node, result, before)
+            side_effect(node, result)
+            _profile(node, result, before)
+            return result
 
     return run_node
 
@@ -219,13 +221,10 @@ def _populate_reducer_state(
                         node,
                         incoming_edges_opts(node),
                         _edges_to_values(
-                            gamla.compose_left(
-                                gamla.translate_exception(
-                                    accumulated_results.__getitem__,
-                                    KeyError,
-                                    _DepNotFoundError,
-                                ),
-                                unwrap_result,
+                            gamla.translate_exception(
+                                accumulated_results.__getitem__,
+                                KeyError,
+                                _DepNotFoundError,
                             )
                         ),
                     ),
@@ -249,13 +248,10 @@ def _populate_reducer_state(
                         node,
                         incoming_edges_opts(node),
                         _edges_to_values(
-                            gamla.compose_left(
-                                gamla.translate_exception(
-                                    accumulated_results.__getitem__,
-                                    KeyError,
-                                    _DepNotFoundError,
-                                ),
-                                unwrap_result,
+                            gamla.translate_exception(
+                                accumulated_results.__getitem__,
+                                KeyError,
+                                _DepNotFoundError,
                             )
                         ),
                     ),
@@ -369,9 +365,7 @@ def _to_callable_with_side_effect_for_single_and_multiple(
 
     return (_async_graph_reducer if is_async else _graph_reducer)(
         gamla.compose(
-            gamla.valmap(unwrap_result),
-            final_runner,
-            lambda inputs: _combine_inputs_with_edges(inputs)(edges),
+            final_runner, lambda inputs: _combine_inputs_with_edges(inputs)(edges)
         )
     )
 

@@ -4,7 +4,7 @@ from xml.sax import saxutils
 import gamla
 import pygraphviz as pgv
 
-from computation_graph import base_types, run
+from computation_graph import base_types
 from computation_graph.trace import trace_utils
 
 
@@ -123,12 +123,7 @@ def computation_trace(
         [
             computation_graph_to_graphviz(graph_instance),
             computation_trace_to_graphviz(
-                gamla.pipe(
-                    node_to_results,
-                    gamla.valmap(run.unwrap_result),
-                    dict.items,
-                    frozenset,
-                )
+                gamla.pipe(node_to_results, dict.items, frozenset)
             ),
         ]
     )
