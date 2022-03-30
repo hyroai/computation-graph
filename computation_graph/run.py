@@ -101,16 +101,16 @@ def _type_check(node: base_types.ComputationNode, result):
 _SingleNodeSideEffect = Callable[[base_types.ComputationNode, Any], None]
 
 
-def _profile(node, result: base_types.Result, time_started: float):
+def _profile(node, time_started: float):
     elapsed = time.perf_counter() - time_started
-    if elapsed > 0.1:
-        logging.warning(
-            termcolor.colored(
-                f"function took {elapsed:.2f} seconds: {base_types.pretty_print_function_name(node.func)}",
-                color="red",
-            )
+    if elapsed <= 0.1:
+        return
+    logging.warning(
+        termcolor.colored(
+            f"function took {elapsed:.2f} seconds: {base_types.pretty_print_function_name(node.func)}",
+            color="red",
         )
-    return gamla.frozendict({"result": result, "duration": elapsed})
+    )
 
 
 def _run_node(
@@ -124,7 +124,7 @@ def _run_node(
             before = time.perf_counter()
             result = await gamla.to_awaitable(node.func(*args, **kwargs))
             side_effect(node, result)
-            _profile(node, result, before)
+            _profile(node, before)
             return result
 
     else:
@@ -135,7 +135,7 @@ def _run_node(
             before = time.perf_counter()
             result = node.func(*args, **kwargs)
             side_effect(node, result)
-            _profile(node, result, before)
+            _profile(node, before)
             return result
 
     return run_node
