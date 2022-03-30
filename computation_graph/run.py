@@ -2,6 +2,7 @@ import asyncio
 import dataclasses
 import itertools
 import logging
+import time
 import typing
 from typing import Any, Callable, Dict, FrozenSet, Iterable, Set, Tuple, Type
 
@@ -48,6 +49,8 @@ _incoming_edge_options = opt_gamla.compose_left(
         )
     ),
 )
+_WrappedResult = Dict
+_unwrap_result = gamla.itemgetter("result")
 
 _get_args: Callable[
     [Dict[base_types.ComputationEdge, Tuple[base_types.Result, ...]]],
@@ -66,7 +69,7 @@ _get_kwargs = opt_gamla.compose_left(
 )
 
 
-_NodeToResults = Dict[base_types.ComputationNode, base_types.Result]
+_NodeToResults = Dict[base_types.ComputationNode, _WrappedResult]
 _ComputationInput = Tuple[Tuple[base_types.Result, ...], Dict[str, base_types.Result]]
 
 
@@ -99,25 +102,37 @@ def _type_check(node: base_types.ComputationNode, result):
 _SingleNodeSideEffect = Callable[[base_types.ComputationNode, Any], None]
 
 
-def _run_node(is_async: bool, side_effect: _SingleNodeSideEffect) -> Callable:
+def _wrap_result(result: base_types.Result, elapsed: float):
+    if elapsed > 1:
+        logging.info("slow node detected!!")
+    return gamla.frozendict({"result": result, "duration": elapsed})
+
+
+def _run_node(
+    is_async: bool, side_effect: _SingleNodeSideEffect
+) -> Callable[..., _WrappedResult]:
     if is_async:
 
         @opt_async_gamla.star
-        async def run_node(node, edges_leading_to_node, values):
+        async def run_node(node, edges_leading_to_node, values) -> _WrappedResult:
             args, kwargs = _get_computation_input(node, edges_leading_to_node, values)
             result = node.func(*args, **kwargs)
+            before = time.time()
             result = await gamla.to_awaitable(result)
+            elapsed = time.time() - before
             side_effect(node, result)
-            return result
+            return _wrap_result(result, elapsed)
 
     else:
 
         @opt_gamla.star
-        def run_node(node, edges_leading_to_node, values):
+        def run_node(node, edges_leading_to_node, values) -> _WrappedResult:
             args, kwargs = _get_computation_input(node, edges_leading_to_node, values)
             result = node.func(*args, **kwargs)
+            before = time.time()
+            elapsed = time.time() - before
             side_effect(node, result)
-            return result
+            return _wrap_result(result, elapsed)
 
     return run_node
 
@@ -176,14 +191,14 @@ _get_node_input = opt_gamla.compose_left(
         )
     ),
     gamla.remove(gamla.equals(None)),
-    # Iterable[Tuple[node, edge_option, tuple[tuple[result]]]]
+    # Iterable[Tuple[node, edge_option, Tuple[Tuple[base_types.Result, ...], ...], ...]]
     tuple,
     gamla.translate_exception(gamla.head, StopIteration, _DepNotFoundError),
 )
 
 
 def _populate_reducer_state(
-    handled_exceptions, is_async: bool, edges, f: Callable[..., base_types.Result]
+    handled_exceptions, is_async: bool, edges, f: Callable[..., _WrappedResult]
 ) -> Callable[[Callable], Callable]:
     handled_exceptions = (*handled_exceptions, base_types.SkipComputationError)
     incoming_edges_opts = _incoming_edge_options(edges)
@@ -201,10 +216,13 @@ def _populate_reducer_state(
                         node,
                         incoming_edges_opts(node),
                         _edges_to_values(
-                            gamla.translate_exception(
-                                accumulated_results.__getitem__,
-                                KeyError,
-                                _DepNotFoundError,
+                            gamla.compose_left(
+                                gamla.translate_exception(
+                                    accumulated_results.__getitem__,
+                                    KeyError,
+                                    _DepNotFoundError,
+                                ),
+                                _unwrap_result,
                             )
                         ),
                     ),
@@ -228,10 +246,13 @@ def _populate_reducer_state(
                         node,
                         incoming_edges_opts(node),
                         _edges_to_values(
-                            gamla.translate_exception(
-                                accumulated_results.__getitem__,
-                                KeyError,
-                                _DepNotFoundError,
+                            gamla.compose_left(
+                                gamla.translate_exception(
+                                    accumulated_results.__getitem__,
+                                    KeyError,
+                                    _DepNotFoundError,
+                                ),
+                                _unwrap_result,
                             )
                         ),
                     ),
@@ -345,7 +366,9 @@ def _to_callable_with_side_effect_for_single_and_multiple(
 
     return (_async_graph_reducer if is_async else _graph_reducer)(
         gamla.compose(
-            final_runner, lambda inputs: _combine_inputs_with_edges(inputs)(edges)
+            gamla.valmap(_unwrap_result),
+            final_runner,
+            lambda inputs: _combine_inputs_with_edges(inputs)(edges),
         )
     )
 
