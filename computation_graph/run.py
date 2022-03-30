@@ -8,6 +8,7 @@ from typing import Any, Callable, Dict, FrozenSet, Iterable, Set, Tuple, Type
 
 import gamla
 import immutables
+import termcolor
 import toposort
 import typeguard
 from gamla.optimized import async_functions as opt_async_gamla
@@ -102,9 +103,14 @@ def _type_check(node: base_types.ComputationNode, result):
 _SingleNodeSideEffect = Callable[[base_types.ComputationNode, Any], None]
 
 
-def _wrap_result(result: base_types.Result, elapsed: float):
-    if elapsed > 1:
-        logging.info("slow node detected!!")
+def _wrap_result(node, result: base_types.Result, elapsed: float):
+    if elapsed > 0.2:
+        logging.info(
+            termcolor.colored(
+                f"node took {elapsed} seconds: {base_types.pretty_print_function_name(node.func)}",
+                color="red",
+            )
+        )
     return gamla.frozendict({"result": result, "duration": elapsed})
 
 
@@ -121,7 +127,7 @@ def _run_node(
             result = await gamla.to_awaitable(result)
             elapsed = time.time() - before
             side_effect(node, result)
-            return _wrap_result(result, elapsed)
+            return _wrap_result(node, result, elapsed)
 
     else:
 
@@ -132,7 +138,7 @@ def _run_node(
             before = time.time()
             elapsed = time.time() - before
             side_effect(node, result)
-            return _wrap_result(result, elapsed)
+            return _wrap_result(node, result, elapsed)
 
     return run_node
 
