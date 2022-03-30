@@ -103,8 +103,10 @@ def _type_check(node: base_types.ComputationNode, result):
 _SingleNodeSideEffect = Callable[[base_types.ComputationNode, Any], None]
 
 
-def _wrap_result(node, result: base_types.Result, elapsed: float):
-    if elapsed > 0.01:
+def _wrap_result(side_effect, node, result: base_types.Result, time_started: float):
+    elapsed = time.perf_counter() - time_started
+    side_effect(node, result)
+    if elapsed > 0.1:
         logging.info(
             termcolor.colored(
                 f"function took  {elapsed:.2f} seconds: {base_types.pretty_print_function_name(node.func)}",
@@ -122,21 +124,18 @@ def _run_node(
         @opt_async_gamla.star
         async def run_node(node, edges_leading_to_node, values) -> _WrappedResult:
             args, kwargs = _get_computation_input(node, edges_leading_to_node, values)
-            result = node.func(*args, **kwargs)
-            before = time.time()
-            result = await gamla.to_awaitable(result)
-            side_effect(node, result)
-            return _wrap_result(node, result, time.time() - before)
+            before = time.perf_counter()
+            result = await gamla.to_awaitable(node.func(*args, **kwargs))
+            return _wrap_result(side_effect, node, result, before)
 
     else:
 
         @opt_gamla.star
         def run_node(node, edges_leading_to_node, values) -> _WrappedResult:
             args, kwargs = _get_computation_input(node, edges_leading_to_node, values)
-            before = time.time()
+            before = time.perf_counter()
             result = node.func(*args, **kwargs)
-            side_effect(node, result)
-            return _wrap_result(node, result, time.time() - before)
+            return _wrap_result(side_effect, node, result, before)
 
     return run_node
 
