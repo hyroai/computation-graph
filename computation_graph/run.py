@@ -134,8 +134,8 @@ def _run_node(
         @opt_gamla.star
         def run_node(node, edges_leading_to_node, values) -> _WrappedResult:
             args, kwargs = _get_computation_input(node, edges_leading_to_node, values)
-            result = node.func(*args, **kwargs)
             before = time.time()
+            result = node.func(*args, **kwargs)
             elapsed = time.time() - before
             side_effect(node, result)
             return _wrap_result(node, result, elapsed)
