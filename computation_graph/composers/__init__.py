@@ -180,7 +180,7 @@ def _try_connect(
         key = gamla.head(signature.parameters(unbound_destination_signature))
     assert key is not None and key in signature.parameters(
         unbound_destination_signature
-    ), f"Expecting a unary graph but got:\n{destination}"
+    ), f"Expecting a graph with key {key} but got:\n{destination}"
     return base_types.ComputationEdge(
         source=source,
         destination=destination,
