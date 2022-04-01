@@ -57,9 +57,7 @@ duplicate_graph = gamla.compose_left(
             graph,
             gamla.map(
                 _duplicate_computation_edge(
-                    gamla.ternary(
-                        get_duplicated_node, get_duplicated_node, gamla.identity
-                    )
+                    gamla.when(get_duplicated_node, get_duplicated_node)
                 )
             ),
             tuple,
