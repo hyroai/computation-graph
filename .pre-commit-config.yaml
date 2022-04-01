@@ -41,6 +41,7 @@ repos:
     rev: v0.942
     hooks:
       - id: mypy
+        additional_dependencies: [types-termcolor]
 
   - repo: https://github.com/hyroai/lint
     rev: 96a6998defb11e34d1057cc79616481565f568e3

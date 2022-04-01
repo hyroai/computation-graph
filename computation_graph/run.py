@@ -2,11 +2,13 @@ import asyncio
 import dataclasses
 import itertools
 import logging
+import time
 import typing
 from typing import Any, Callable, Dict, FrozenSet, Iterable, Set, Tuple, Type
 
 import gamla
 import immutables
+import termcolor
 import toposort
 import typeguard
 from gamla.optimized import async_functions as opt_async_gamla
@@ -99,24 +101,41 @@ def _type_check(node: base_types.ComputationNode, result):
 _SingleNodeSideEffect = Callable[[base_types.ComputationNode, Any], None]
 
 
-def _run_node(is_async: bool, side_effect: _SingleNodeSideEffect) -> Callable:
+def _profile(node, time_started: float):
+    elapsed = time.perf_counter() - time_started
+    if elapsed <= 0.1:
+        return
+    logging.warning(
+        termcolor.colored(
+            f"function took {elapsed:.2f} seconds: {base_types.pretty_print_function_name(node.func)}",
+            color="red",
+        )
+    )
+
+
+def _run_node(
+    is_async: bool, side_effect: _SingleNodeSideEffect
+) -> Callable[..., base_types.Result]:
     if is_async:
 
         @opt_async_gamla.star
-        async def run_node(node, edges_leading_to_node, values):
+        async def run_node(node, edges_leading_to_node, values) -> base_types.Result:
             args, kwargs = _get_computation_input(node, edges_leading_to_node, values)
-            result = node.func(*args, **kwargs)
-            result = await gamla.to_awaitable(result)
+            before = time.perf_counter()
+            result = await gamla.to_awaitable(node.func(*args, **kwargs))
             side_effect(node, result)
+            _profile(node, before)
             return result
 
     else:
 
         @opt_gamla.star
-        def run_node(node, edges_leading_to_node, values):
+        def run_node(node, edges_leading_to_node, values) -> base_types.Result:
             args, kwargs = _get_computation_input(node, edges_leading_to_node, values)
+            before = time.perf_counter()
             result = node.func(*args, **kwargs)
             side_effect(node, result)
+            _profile(node, before)
             return result
 
     return run_node
@@ -176,7 +195,7 @@ _get_node_input = opt_gamla.compose_left(
         )
     ),
     gamla.remove(gamla.equals(None)),
-    # Iterable[Tuple[node, edge_option, tuple[tuple[result]]]]
+    # Iterable[Tuple[node, edge_option, Tuple[Tuple[base_types.Result, ...], ...], ...]]
     tuple,
     gamla.translate_exception(gamla.head, StopIteration, _DepNotFoundError),
 )
