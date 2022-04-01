@@ -17,6 +17,7 @@ def when(
     )
 
 
+@gamla.curry
 def require(
     condition: base_types.GraphOrCallable, result: base_types.GraphOrCallable
 ) -> base_types.GraphType:
