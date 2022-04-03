@@ -20,7 +20,7 @@ def _debug_with_frame(debugger):
 
 
 def _debug_inner(x, frame):
-    logging.debug(
+    logging.info(
         f"Debug prompt for {frame.f_code.co_filename}:{frame.f_lineno}. Hit x+enter to see current value."
     )
     builtins.breakpoint()
@@ -31,7 +31,7 @@ debug = _debug_with_frame(_debug_inner)
 
 
 def _debug_log_inner(x, frame):
-    logging.debug(f"{frame.f_code.co_filename}:{frame.f_lineno} output:\n{x}")
+    logging.info(f"{frame.f_code.co_filename}:{frame.f_lineno} output:\n{x}")
 
 
 #: Prints a debug log with the node output (with a line number!).
