@@ -107,6 +107,9 @@ def make_or(
     )
 
 
+_destinations = gamla.compose(set, gamla.map(base_types.edge_destination))
+
+
 def _infer_sink(graph_or_node: base_types.NodeOrGraph) -> base_types.ComputationNode:
     if isinstance(graph_or_node, base_types.ComputationNode):
         return graph_or_node
@@ -130,8 +133,8 @@ def _infer_sink(graph_or_node: base_types.NodeOrGraph) -> base_types.Computation
             assert len(result) == 1
             return gamla.head(result)
 
-    assert len(graph_or_node) == 1, graph_without_future_edges
-    return graph_or_node[0].destination
+    assert len(_destinations(graph_or_node)) == 1, graph_or_node
+    return base_types.edge_destination(graph_or_node[0])
 
 
 def make_first(*graphs: base_types.CallableOrNodeOrGraph) -> base_types.GraphType:
