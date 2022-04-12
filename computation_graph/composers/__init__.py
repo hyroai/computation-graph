@@ -217,7 +217,9 @@ def _infer_composition_edges(
             gamla.unique,
             gamla.filter(
                 gamla.compose_left(
-                    unbound_signature, lambda signature: key in signature.kwargs
+                    unbound_signature,
+                    lambda sig: key in sig.kwargs
+                    or (key is None and signature.is_unary(sig)),
                 )
             ),
             # Do not add edges to nodes from source that are already present in destination (cycle).
