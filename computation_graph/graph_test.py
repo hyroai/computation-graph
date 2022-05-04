@@ -611,15 +611,12 @@ def test_memory_persists_when_unactionable():
     )
     graph_runners.unary_with_state_and_expectations(
         composers.compose_left(
-            composers.make_first(
-                composers.make_compose(
-                    composers.compose_left(
-                        skip_or_passthrough, remember_first, key="upstream"
-                    ),
-                    input_node,
-                    key="input",
+            composers.compose_left(
+                input_node,
+                composers.compose_left(
+                    skip_or_passthrough, remember_first, key="upstream"
                 ),
-                lambda: "state skipped",
+                key="input",
             ),
             output_node,
         ),
@@ -628,7 +625,7 @@ def test_memory_persists_when_unactionable():
     )(
         [
             ["remember this", "remember this"],
-            ["skip state", "state skipped"],
+            ["skip state", "remember this"],
             ["recall", "remember this"],
         ]
     )
