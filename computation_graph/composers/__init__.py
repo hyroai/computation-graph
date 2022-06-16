@@ -35,6 +35,14 @@ def make_and(
     funcs: Iterable[base_types.CallableOrNodeOrGraph],
     merge_fn: base_types.CallableOrNodeOrGraph,
 ) -> base_types.GraphType:
+    """Aggregate funcs' output into `merge_fn`.
+    * merge_fn should have only 1 argument named `args`.
+    * All funcs must not raise an exception in order for merge_fn to run.
+    >>>make_and(composers.make_and([gamla.just(1), gamla.just(2), gamla.just(3)], lambda args: sum(args)))
+    (justjustjust----*args---->args_to_tuple, args_to_tuple----args----><lambda>)
+    Will return 6.
+    """
+
     def args_to_tuple(*args):
         return args
 
@@ -72,6 +80,11 @@ def make_or(
     funcs: Sequence[base_types.CallableOrNodeOrGraph],
     merge_fn: base_types.CallableOrNodeOrGraph,
 ) -> base_types.GraphType:
+    """Aggregate funcs' output into `merge_fn`.
+    * merge_fn should have only 1 argument named `args`.
+    * merge_fn will run anyway, with the outputs of the funcs that didn't raise an exception.
+    """
+
     def filter_computation_errors(*args):
         return gamla.pipe(
             args, gamla.remove(gamla.is_instance(_ComputationError)), tuple
@@ -138,6 +151,13 @@ def _infer_sink(graph_or_node: base_types.NodeOrGraph) -> base_types.Computation
 
 
 def make_first(*graphs: base_types.CallableOrNodeOrGraph) -> base_types.GraphType:
+    """Returns a graph that when run, returns the first value that doesn't raise an exception.
+    >>> def raise_some_exception():
+    ...     raise Exception
+    ... make_first(raise_some_exception, gamla.just(1))
+    (raise_exception----constituent_of_first---->first_sink, just----constituent_of_first---->first_sink)
+    Will return 1.
+    """
     graph_or_nodes = tuple(map(_callable_or_graph_type_to_node_or_graph_type, graphs))
 
     def first_sink(constituent_of_first):
@@ -275,6 +295,10 @@ def make_compose(
 
 
 def compose_unary(*funcs: base_types.CallableOrNodeOrGraph) -> base_types.GraphType:
+    """Returns a graph of the funcs composed from right to left. All functions need to be unary (have 1 argument).
+    >>> compose_unary(gamla.add(1), gamla.multiply(2), gamla.divide_by(2))
+    (divide_by----y---->multiply, multiply----y---->add)
+    """
     return _make_compose_inner(*funcs, key=None, is_future=False, priority=0)
 
 
@@ -330,6 +354,10 @@ def compose_source_unary(
 
 
 def compose_left(*args, key: Optional[str] = None) -> base_types.GraphType:
+    """Compose a function onto another function on a certain key.
+    >>>compose_left(gamla.just(1), gamla.between, key="low")
+    (just----low---->between,)
+    """
     return make_compose(*reversed(args), key=key)
 
 
@@ -343,6 +371,10 @@ def compose_left_future(
 
 
 def compose_left_unary(*args) -> base_types.GraphType:
+    """Returns a graph of the funcs composed from left to right. All functions need to be unary (have 1 argument).
+    >>> compose_left_unary(gamla.add(1), gamla.multiply(2), gamla.divide_by(2))
+    (add----y---->multiply, multiply----y---->divide_by)
+    """
     return compose_unary(*reversed(args))
 
 
@@ -350,6 +382,10 @@ def compose_left_unary(*args) -> base_types.GraphType:
 def compose_dict(
     f: base_types.GraphOrCallable, d: Dict[str, base_types.CallableOrNodeOrGraph]
 ) -> base_types.GraphType:
+    """Compose the functions in d.values() onto f, where d.keys() specify the arguments
+    >>> compose_dict(gamla.between, {"low": gamla.just(0), "high": gamla.just(10)})
+    (just----low---->between, just----high---->between)
+    """
     return gamla.pipe(
         d,
         dict.items,
@@ -392,6 +428,6 @@ def aggregation(
     return make_and(
         graphs,
         # It is important that `aggregation` is duplicated here.
-        # If it weren't for the `compose_left` we would need to do it explcitly.
+        # If it weren't for the `compose_left` we would need to do it explicitly.
         gamla.compose_left(lambda args: args, aggregation),
     )
