@@ -4,7 +4,7 @@ import itertools
 import logging
 import time
 import typing
-from typing import Any, Callable, Dict, FrozenSet, Iterable, Set, Tuple, Type
+from typing import Any, Callable, Dict, FrozenSet, Iterable, Optional, Set, Tuple, Type
 
 import gamla
 import immutables
@@ -141,18 +141,23 @@ def _run_node(
     return run_node
 
 
-def _merge_immutable(x, y):
-    return x.update(y)
-
-
 def _process_single_layer(
-    f: Callable[[_NodeToResults, base_types.ComputationNode], _NodeToResults]
-) -> Callable[[_NodeToResults, FrozenSet[base_types.ComputationNode]], _NodeToResults,]:
+    process_single_node: Callable[
+        [_NodeToResults, base_types.ComputationNode],
+        Optional[Tuple[base_types.ComputationNode, base_types.Result]],
+    ]
+) -> Callable[[_NodeToResults, FrozenSet[base_types.ComputationNode]], _NodeToResults]:
     return gamla.compose_left(
         gamla.pack,
-        gamla.explode(1),
-        gamla.map(f),
-        opt_gamla.reduce(_merge_immutable, immutables.Map()),
+        gamla.juxt(
+            gamla.head,
+            gamla.compose_left(
+                gamla.explode(1), gamla.map_filter_empty(process_single_node), tuple
+            ),
+        ),
+        gamla.star(
+            lambda prev_results, current_results: prev_results.update(current_results)
+        ),
     )
 
 
@@ -170,10 +175,6 @@ def _edges_to_values(
             base_types.edge_sources, opt_gamla.maptuple(node_to_result)
         )
     )
-
-
-def _assoc_immutable(d, k, v):
-    return d.set(k, v)
 
 
 _get_node_input = opt_gamla.compose_left(
@@ -201,9 +202,12 @@ _get_node_input = opt_gamla.compose_left(
 )
 
 
-def _populate_reducer_state(
+def _make_process_node(
     handled_exceptions, is_async: bool, edges, f: Callable[..., base_types.Result]
-) -> Callable[[Callable], Callable]:
+) -> Callable[
+    [_NodeToResults, base_types.ComputationNode],
+    Optional[Tuple[base_types.ComputationNode, base_types.Result]],
+]:
     handled_exceptions = (*handled_exceptions, base_types.SkipComputationError)
     incoming_edges_opts = _incoming_edge_options(edges)
     if is_async:
@@ -211,10 +215,9 @@ def _populate_reducer_state(
         @opt_async_gamla.star
         async def process_node(
             accumulated_results: _NodeToResults, node: base_types.ComputationNode
-        ) -> _NodeToResults:
+        ) -> Optional[Tuple[base_types.ComputationNode, base_types.Result]]:
             try:
-                return _assoc_immutable(
-                    accumulated_results,
+                return (
                     node,
                     await f(  # type: ignore
                         node,
@@ -229,19 +232,17 @@ def _populate_reducer_state(
                     ),
                 )
             except handled_exceptions:
-                return accumulated_results
+                return None
 
         return process_node
-
     else:
 
         @opt_gamla.star
         def process_node(
             accumulated_results: _NodeToResults, node: base_types.ComputationNode
-        ) -> _NodeToResults:
+        ) -> Optional[Tuple[base_types.ComputationNode, base_types.Result]]:
             try:
-                return _assoc_immutable(
-                    accumulated_results,
+                return (
                     node,
                     f(
                         node,
@@ -256,7 +257,7 @@ def _populate_reducer_state(
                     ),
                 )
             except handled_exceptions:
-                return accumulated_results
+                return None
 
         return process_node
 
@@ -280,11 +281,11 @@ _assert_no_unwanted_ambiguity = gamla.compose_left(
 )
 
 
-def _make_runner(single_node_runner):
+def _make_runner(process_single_node):
     return gamla.reduce_curried(
         _process_single_layer(
             gamla.first(
-                single_node_runner, gamla.head, exception_type=_DepNotFoundError
+                process_single_node, gamla.just(None), exception_type=_DepNotFoundError
             )
         ),
         immutables.Map(),
@@ -332,7 +333,7 @@ def _to_callable_with_side_effect_for_single_and_multiple(
 
     def runner(edges):
         return _make_runner(
-            _populate_reducer_state(
+            _make_process_node(
                 handled_exceptions,
                 is_async,
                 edges,
