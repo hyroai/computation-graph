@@ -632,3 +632,87 @@ def test_memory_persists_when_unactionable():
             ["recall", "remember this"],
         ]
     )
+
+
+def test_replace_source():
+    a = graph.make_source()
+
+    assert graph.replace_source(_node1, _node1_async)(
+        base_types.merge_graphs(
+            composers.compose_source_unary(_node1, a),
+            composers.compose_left_unary(_node1, _node2),
+        )
+    ) == base_types.merge_graphs(
+        composers.compose_source_unary(_node1, a),
+        composers.compose_left_unary(_node1_async, _node2),
+    )
+
+
+def test_replace_source_with_args():
+    assert graph.replace_source(_node1, _node1_async)(
+        (
+            base_types.ComputationEdge(
+                is_future=False,
+                priority=0,
+                source=None,
+                args=(
+                    graph.make_computation_node(_node1),
+                    graph.make_computation_node(_node2),
+                ),
+                destination=_merger,
+                key="args",
+            ),
+        )
+    ) == (
+        base_types.ComputationEdge(
+            is_future=False,
+            priority=0,
+            source=None,
+            args=(
+                graph.make_computation_node(_node1_async),
+                graph.make_computation_node(_node2),
+            ),
+            destination=_merger,
+            key="args",
+        ),
+    )
+
+
+def test_replace_destination():
+    assert graph.replace_destination(_node1, _node1_async)(
+        (
+            base_types.ComputationEdge(
+                is_future=False,
+                priority=0,
+                source=graph.make_computation_node(_node2),
+                args=(),
+                destination=graph.make_computation_node(_node1),
+                key="arg1",
+            ),
+        )
+    ) == base_types.merge_graphs(
+        (
+            base_types.ComputationEdge(
+                is_future=False,
+                priority=0,
+                source=graph.make_computation_node(_node2),
+                args=(),
+                destination=graph.make_computation_node(_node1_async),
+                key="arg1",
+            ),
+        )
+    )
+
+
+def test_replace_node():
+    a = graph.make_source()
+
+    assert graph.replace_node(_node1, _node1_async)(
+        base_types.merge_graphs(
+            composers.compose_source_unary(_node1, a),
+            composers.compose_left_unary(_node1, _node2),
+        )
+    ) == base_types.merge_graphs(
+        composers.compose_source_unary(_node1_async, a),
+        composers.compose_left_unary(_node1_async, _node2),
+    )
