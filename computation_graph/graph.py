@@ -197,14 +197,7 @@ def edge_destination_equals(
 def replace_edge_source(
     replacement: base_types.CallableOrNode,
 ) -> Callable[[base_types.ComputationEdge], base_types.ComputationEdge]:
-    replacement = make_computation_node(replacement)
-
-    def replace_edge_source(
-        edge: base_types.ComputationEdge,
-    ) -> base_types.ComputationEdge:
-        return dataclasses.replace(edge, source=replacement)
-
-    return replace_edge_source
+    return gamla.dataclass_replace("source", make_computation_node(replacement))
 
 
 def _replace_edge_source_args(
@@ -233,14 +226,7 @@ def _replace_edge_source_args(
 def _replace_edge_destination(
     replacement: base_types.CallableOrNode,
 ) -> Callable[[base_types.ComputationEdge], base_types.ComputationEdge]:
-    replacement = make_computation_node(replacement)
-
-    def replace_edge_destination(
-        edge: base_types.ComputationEdge,
-    ) -> base_types.ComputationEdge:
-        return dataclasses.replace(edge, destination=replacement)
-
-    return replace_edge_destination
+    return gamla.dataclass_replace("destination", make_computation_node(replacement))
 
 
 def _operate_on_subgraph(selector, transformation):
