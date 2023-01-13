@@ -124,12 +124,11 @@ def unbound_signature(
 
 
 def _node_in_edge_args(
-    x: base_types.GraphOrCallable,
+    x: base_types.CallableOrNode,
 ) -> Callable[[base_types.ComputationEdge], bool]:
     node = make_computation_node(x)
 
     def node_in_edge_args(edge: base_types.ComputationEdge) -> bool:
-        print("1", edge.args, node)
         return node in edge.args
 
     return node_in_edge_args
@@ -173,7 +172,9 @@ def transform_edges(
     )
 
 
-def edge_source_equals(x: base_types.GraphOrCallable) -> bool:
+def edge_source_equals(
+    x: base_types.CallableOrNode,
+) -> Callable[[base_types.ComputationEdge], bool]:
     x = make_computation_node(x)
 
     def edge_source_equals(edge):
@@ -182,7 +183,9 @@ def edge_source_equals(x: base_types.GraphOrCallable) -> bool:
     return edge_source_equals
 
 
-def edge_destination_equals(x: base_types.GraphOrCallable) -> bool:
+def edge_destination_equals(
+    x: base_types.CallableOrNode,
+) -> Callable[[base_types.ComputationEdge], bool]:
     x = make_computation_node(x)
 
     def edge_destination_equals(edge):
@@ -192,7 +195,7 @@ def edge_destination_equals(x: base_types.GraphOrCallable) -> bool:
 
 
 def replace_edge_source(
-    replacement: base_types.GraphOrCallable,
+    replacement: base_types.CallableOrNode,
 ) -> Callable[[base_types.ComputationEdge], base_types.ComputationEdge]:
     replacement = make_computation_node(replacement)
 
@@ -205,7 +208,7 @@ def replace_edge_source(
 
 
 def _replace_edge_source_args(
-    original: base_types.GraphOrCallable, replacement: base_types.GraphOrCallable
+    original: base_types.CallableOrNode, replacement: base_types.CallableOrNode
 ):
     def replace_edge_source_args(
         edge: base_types.ComputationEdge,
