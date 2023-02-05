@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import dataclasses
 import functools
+import inspect
 import typing
 from typing import Callable, Hashable, Optional, Tuple, Union
 
@@ -108,7 +109,9 @@ class ComputationNode:
 
 node_implementation = gamla.attrgetter("func")
 node_is_terminal = gamla.attrgetter("is_terminal")
+node_is_input = gamla.compose_left(node_implementation,
 
+        inspect.signature, gamla.attrgetter("parameters"), gamla.len_equals(0))
 edge_args = gamla.attrgetter("args")
 edge_destination = gamla.attrgetter("destination")
 edge_key = gamla.attrgetter("key")
