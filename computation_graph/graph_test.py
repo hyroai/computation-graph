@@ -578,10 +578,6 @@ def test_compose_future():
 
 def test_dont_duplicate_sources():
     a = graph.make_source()
-    # single future edge: (s..>_plus_1) somthing disappears from evaluation because this edge is remvoed
-    # is this legal? if all edges are future edges without defaults then what happens in first turn?
-    # this is a true source, not just a future edge source (not from previous run, but from outside)
-
     assert (
         graph_runners.variadic_infer_sink(
             duplication.duplicate_function_or_graph(
@@ -605,7 +601,10 @@ def test_memory_persists_when_unactionable():
 
     def output_node(x):
         return x
-    def skipper(upstream,x): return x or upstream
+
+    def skipper(upstream, x):
+        return x or upstream
+
     remember_first = memory.with_state("x", None, skipper)
     skip_or_passthrough = (
         lambda input: input
