@@ -578,7 +578,6 @@ def test_compose_future():
 
 def test_dont_duplicate_sources():
     a = graph.make_source()
-
     assert (
         graph_runners.variadic_infer_sink(
             duplication.duplicate_function_or_graph(
@@ -603,7 +602,10 @@ def test_memory_persists_when_unactionable():
     def output_node(x):
         return x
 
-    remember_first = memory.with_state("x", None, lambda upstream, x: x or upstream)
+    def skipper(upstream, x):
+        return x or upstream
+
+    remember_first = memory.with_state("x", None, skipper)
     skip_or_passthrough = (
         lambda input: input
         if input != "skip state"

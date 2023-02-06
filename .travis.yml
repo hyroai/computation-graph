@@ -1,12 +1,13 @@
 language: python
 python:
-- 3.9
+- '3.11'
+dist: focal
 jobs:
   include:
   - stage: test
     name: pytest
     install:
-    - sudo apt update && sudo apt install graphviz
+    - sudo apt update && sudo apt install graphviz graphviz-dev
     - pip install .[test]
     script: pytest
   - stage: test
