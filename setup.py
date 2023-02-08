@@ -7,7 +7,7 @@ with open("README.md", "r") as fh:
 setuptools.setup(
     name="computation-graph",
     python_requires=">=3",
-    version="41",
+    version="42",
     long_description=_LONG_DESCRIPTION,
     long_description_content_type="text/markdown",
     packages=setuptools.find_namespace_packages(),
