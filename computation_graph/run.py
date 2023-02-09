@@ -19,6 +19,19 @@ from computation_graph import base_types, graph, signature
 from computation_graph.composers import debug
 
 
+class _DepNotFoundError(Exception):
+    pass
+
+
+_NodeToResults = Dict[base_types.ComputationNode, base_types.Result]
+_ComputationInput = Tuple[Tuple[base_types.Result, ...], Dict[str, base_types.Result]]
+_SingleNodeSideEffect = Callable[[base_types.ComputationNode, Any], None]
+_NodeToComputationInput = Callable[[base_types.ComputationNode], _ComputationInput]
+_ComputaionInputSpec = Tuple[
+    Tuple[base_types.ComputationNode, ...], Dict[str, base_types.ComputationNode]
+]
+
+
 def _transpose_graph(
     graph: Dict[base_types.ComputationNode, Set[base_types.ComputationNode]]
 ) -> Dict[base_types.ComputationNode, Set[base_types.ComputationNode]]:
@@ -37,37 +50,6 @@ _toposort_nodes: Callable[
     _transpose_graph,
     toposort.toposort,
 )
-_get_args: Callable[
-    [Dict[base_types.ComputationEdge, Tuple[base_types.Result, ...]]],
-    Tuple[base_types.Result, ...],
-] = gamla.compose_left(
-    opt_gamla.keyfilter(base_types.edge_args), dict.values, gamla.head
-)
-
-
-_get_kwargs = opt_gamla.compose_left(
-    opt_gamla.keyfilter(
-        opt_gamla.compose_left(base_types.edge_key, gamla.not_equals("*args"))
-    ),
-    opt_gamla.keymap(base_types.edge_key),
-    opt_gamla.valmap(gamla.head),
-)
-
-
-_NodeToResults = Dict[base_types.ComputationNode, base_types.Result]
-_ComputationInput = Tuple[Tuple[base_types.Result, ...], Dict[str, base_types.Result]]
-
-
-def _get_computation_input(
-    node: base_types.ComputationNode,
-    edge_to_result: Dict[base_types.ComputationEdge, Tuple[base_types.Result, ...]],
-) -> _ComputationInput:
-    if node.signature.is_kwargs:
-        return gamla.head(edge_to_result.values()), {}
-    return (
-        _get_args(edge_to_result) if node.signature.is_args else (),
-        _get_kwargs(edge_to_result),
-    )
 
 
 def _type_check(node: base_types.ComputationNode, result):
@@ -77,9 +59,6 @@ def _type_check(node: base_types.ComputationNode, result):
             typeguard.check_type(str(node), result, return_typing)
         except TypeError as e:
             logging.error([node.func.__code__, e])
-
-
-_SingleNodeSideEffect = Callable[[base_types.ComputationNode, Any], None]
 
 
 def _profile(node, time_started: float):
@@ -102,9 +81,9 @@ def _make_get_node_input_and_apply(
 
         @opt_async_gamla.star
         async def run_node(
-            node_to_input: _NodeToEdgesAndResults, node: base_types.ComputationNode
+            node_to_input: _NodeToComputationInput, node: base_types.ComputationNode
         ) -> base_types.Result:
-            args, kwargs = _get_computation_input(node, node_to_input(node))
+            args, kwargs = node_to_input(node)
             before = time.perf_counter()
             result = await gamla.to_awaitable(node.func(*args, **kwargs))
             side_effect(node, result)
@@ -114,8 +93,8 @@ def _make_get_node_input_and_apply(
     else:
 
         @opt_gamla.star
-        def run_node(node_to_input: _NodeToEdgesAndResults, node: base_types.ComputationNode) -> base_types.Result:  # type: ignore
-            args, kwargs = _get_computation_input(node, node_to_input(node))
+        def run_node(node_to_input: _NodeToComputationInput, node: base_types.ComputationNode) -> base_types.Result:  # type: ignore
+            args, kwargs = node_to_input(node)
             before = time.perf_counter()
             result = node.func(*args, **kwargs)
             side_effect(node, result)
@@ -123,10 +102,6 @@ def _make_get_node_input_and_apply(
             return node, result
 
     return run_node
-
-
-class _DepNotFoundError(Exception):
-    pass
 
 
 _is_graph_async = opt_gamla.compose_left(
@@ -250,19 +225,41 @@ def _to_callable_with_side_effect_for_single_and_multiple(
     return (_async_graph_reducer if is_async else _graph_reducer)(final_runner)
 
 
-_NodeToEdgesAndResults = Callable[
-    [base_types.ComputationNode],
-    Dict[base_types.ComputationEdge, Tuple[base_types.Result, ...]],
-]
+_get_args_nodes: Callable[
+    [Tuple[base_types.ComputationEdge, ...]], Tuple[base_types.ComputationNode, ...],
+] = gamla.compose_left(
+    opt_gamla.filter(base_types.edge_args), gamla.head, base_types.edge_args
+)
+_get_kwargs_nodes = opt_gamla.compose_left(
+    opt_gamla.filter(
+        gamla.compose_left(base_types.edge_key, gamla.not_equals("*args"))
+    ),
+    gamla.map(gamla.juxt(base_types.edge_key, base_types.edge_source)),
+    gamla.frozendict,
+)
+
+
+def _node_incoming_edges_to_input_spec(
+    node_incoming_edges: Tuple[base_types.ComputationEdge],
+) -> _ComputaionInputSpec:
+    if not len(node_incoming_edges):
+        return (), {}
+    first_incoming_edge = gamla.head(node_incoming_edges)
+    node = base_types.edge_destination(first_incoming_edge)
+    if node.signature.is_kwargs:
+        return (base_types.edge_source(first_incoming_edge),), {}
+    return (
+        _get_args_nodes(node_incoming_edges) if node.signature.is_args else (),
+        _get_kwargs_nodes(node_incoming_edges),
+    )
 
 
 def _edges_to_accumulated_results_to_node_to_first_possible_input(
     edges,
-) -> Callable[[_NodeToResults], _NodeToEdgesAndResults,]:
+) -> Callable[[_NodeToResults], _NodeToComputationInput,]:
     node_to_incoming_edges = graph.get_incoming_edges_for_node(edges)
-
-    node_to_edge_options: Callable[
-        [base_types.ComputationNode], Tuple[Tuple[base_types.ComputationEdge]]
+    node_to_computation_input_spec_options: Callable[
+        [base_types.ComputationNode], Tuple[_ComputaionInputSpec]
     ] = functools.cache(
         gamla.compose_left(
             node_to_incoming_edges,
@@ -270,34 +267,32 @@ def _edges_to_accumulated_results_to_node_to_first_possible_input(
             opt_gamla.valmap(gamla.sort_by(base_types.edge_priority)),
             dict.values,
             opt_gamla.star(itertools.product),
-            opt_gamla.map(tuple),
-            tuple,
+            opt_gamla.maptuple(_node_incoming_edges_to_input_spec),
         )
+    )
+    # TODO(eli): Add sync.translate_exception/except that avoids inspect.iscoroutinefunction so this can be inlined (ENG-5212)
+    head_or_dep_not_found = gamla.translate_exception(
+        gamla.head, StopIteration, _DepNotFoundError
     )
 
     def make_node_to_first_possible_input(
         accumulated_results: _NodeToResults,
-    ) -> _NodeToEdgesAndResults:
+    ) -> _NodeToComputationInput:
         return opt_gamla.compose_left(
-            node_to_edge_options,
+            node_to_computation_input_spec_options,
             opt_gamla.map(
-                opt_gamla.pair_right(
-                    gamla.excepts(
-                        KeyError,
-                        lambda _: None,
-                        opt_gamla.maptuple(
-                            opt_gamla.compose_left(
-                                base_types.edge_sources,
-                                opt_gamla.maptuple(accumulated_results.__getitem__),
-                            )
-                        ),
-                    )
+                gamla.excepts(
+                    KeyError,
+                    lambda _: None,
+                    opt_gamla.packstack(
+                        opt_gamla.maptuple(accumulated_results.__getitem__),
+                        opt_gamla.valmap(accumulated_results.__getitem__),
+                    ),
                 )
             ),
-            opt_gamla.remove(gamla.on_second(gamla.equals(None))),
-            gamla.translate_exception(gamla.head, StopIteration, _DepNotFoundError),
-            opt_gamla.star(zip),
-            dict,
+            opt_gamla.remove(gamla.equals(None)),
+            head_or_dep_not_found,
+            tuple,
         )
 
     return make_node_to_first_possible_input
