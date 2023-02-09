@@ -1,10 +1,11 @@
 import asyncio
 import dataclasses
+import functools
 import itertools
 import logging
 import time
 import typing
-from typing import Any, Callable, Dict, FrozenSet, Iterable, Optional, Set, Tuple, Type
+from typing import Any, Callable, Dict, FrozenSet, Set, Tuple, Type
 
 import gamla
 import immutables
@@ -15,6 +16,7 @@ from gamla.optimized import async_functions as opt_async_gamla
 from gamla.optimized import sync as opt_gamla
 
 from computation_graph import base_types, graph, signature
+from computation_graph.composers import debug
 
 
 def _transpose_graph(
@@ -35,21 +37,6 @@ _toposort_nodes: Callable[
     _transpose_graph,
     toposort.toposort,
 )
-
-
-_incoming_edge_options = opt_gamla.compose_left(
-    graph.get_incoming_edges_for_node,
-    opt_gamla.after(
-        opt_gamla.compose_left(
-            opt_gamla.groupby(base_types.edge_key),
-            opt_gamla.valmap(gamla.sort_by(base_types.edge_priority)),
-            dict.values,
-            opt_gamla.star(itertools.product),
-            opt_gamla.map(tuple),
-        )
-    ),
-)
-
 _get_args: Callable[
     [Dict[base_types.ComputationEdge, Tuple[base_types.Result, ...]]],
     Tuple[base_types.Result, ...],
@@ -73,18 +60,13 @@ _ComputationInput = Tuple[Tuple[base_types.Result, ...], Dict[str, base_types.Re
 
 def _get_computation_input(
     node: base_types.ComputationNode,
-    incoming_edges: base_types.GraphType,
-    results: Tuple[Tuple[base_types.Result, ...], ...],
+    edge_to_result: Dict[base_types.ComputationEdge, Tuple[base_types.Result, ...]],
 ) -> _ComputationInput:
     if node.signature.is_kwargs:
-        assert (
-            len(results) == 1
-        ), f"signature for {base_types.pretty_print_function_name(node.func)} contains `**kwargs`. This is considered unary, meaning one incoming edge, but we got more than one: {incoming_edges}."
-        return gamla.head(results), {}
-    edges_to_results = dict(zip(incoming_edges, results))
+        return gamla.head(edge_to_result.values()), {}
     return (
-        _get_args(edges_to_results) if node.signature.is_args else (),
-        _get_kwargs(edges_to_results),
+        _get_args(edge_to_result) if node.signature.is_args else (),
+        _get_kwargs(edge_to_result),
     )
 
 
@@ -106,36 +88,39 @@ def _profile(node, time_started: float):
         return
     logging.warning(
         termcolor.colored(
-            f"function took {elapsed:.2f} seconds: {base_types.pretty_print_function_name(node.func)}",
+            f"function took {elapsed:.6f} seconds: {base_types.pretty_print_function_name(node.func)}",
             color="red",
         )
     )
 
 
-def _run_node(
+def _make_get_node_input_and_apply(
     is_async: bool, side_effect: _SingleNodeSideEffect
 ) -> Callable[..., base_types.Result]:
+
     if is_async:
 
         @opt_async_gamla.star
-        async def run_node(node, edges_leading_to_node, values) -> base_types.Result:
-            args, kwargs = _get_computation_input(node, edges_leading_to_node, values)
+        async def run_node(
+            node_to_input: _NodeToEdgesAndResults, node: base_types.ComputationNode
+        ) -> base_types.Result:
+            args, kwargs = _get_computation_input(node, node_to_input(node))
             before = time.perf_counter()
             result = await gamla.to_awaitable(node.func(*args, **kwargs))
             side_effect(node, result)
             _profile(node, before)
-            return result
+            return node, result
 
     else:
 
         @opt_gamla.star
-        def run_node(node, edges_leading_to_node, values) -> base_types.Result:
-            args, kwargs = _get_computation_input(node, edges_leading_to_node, values)
+        def run_node(node_to_input: _NodeToEdgesAndResults, node: base_types.ComputationNode) -> base_types.Result:  # type: ignore
+            args, kwargs = _get_computation_input(node, node_to_input(node))
             before = time.perf_counter()
             result = node.func(*args, **kwargs)
             side_effect(node, result)
             _profile(node, before)
-            return result
+            return node, result
 
     return run_node
 
@@ -144,114 +129,12 @@ class _DepNotFoundError(Exception):
     pass
 
 
-def _edges_to_values(
-    node_to_result: Callable[[base_types.ComputationNode], base_types.Result]
-) -> Callable[
-    [Iterable[base_types.ComputationEdge]], Tuple[Tuple[base_types.Result, ...], ...]
-]:
-    return opt_gamla.maptuple(
-        opt_gamla.compose_left(
-            base_types.edge_sources, opt_gamla.maptuple(node_to_result)
-        )
-    )
-
-
-_get_node_input = opt_gamla.compose_left(
-    # base_types.ComputationNode, Iterable[Tuple[base_types.ComputationEdge, ...]], edge_to_values.
-    gamla.pack,
-    gamla.explode(1),
-    # Iterable[Tuple[node, incoming_edges, edge_to_values]]
-    opt_gamla.map(
-        gamla.excepts(
-            _DepNotFoundError,
-            lambda _: None,
-            opt_gamla.juxt(
-                gamla.head,
-                gamla.second,
-                opt_gamla.star(
-                    lambda _, edges, edges_to_values: edges_to_values(edges)
-                ),
-            ),
-        )
-    ),
-    gamla.remove(gamla.equals(None)),
-    # Iterable[Tuple[node, edge_option, Tuple[Tuple[base_types.Result, ...], ...], ...]]
-    tuple,
-    gamla.translate_exception(gamla.head, StopIteration, _DepNotFoundError),
-)
-
-
-def _make_process_node(
-    handled_exceptions: Tuple[Type[Exception], ...],
-    is_async: bool,
-    incoming_edges_options: Callable[
-        [base_types.ComputationNode], Tuple[base_types.GraphType, ...]
-    ],
-    run_node: Callable[..., base_types.Result],
-) -> Callable[
-    [_NodeToResults, base_types.ComputationNode],
-    Optional[Tuple[base_types.ComputationNode, base_types.Result]],
-]:
-    handled_exceptions = (*handled_exceptions, base_types.SkipComputationError)
-    if is_async:
-
-        @opt_async_gamla.star
-        async def process_node(
-            accumulated_results: _NodeToResults, node: base_types.ComputationNode
-        ) -> Optional[Tuple[base_types.ComputationNode, base_types.Result]]:
-            try:
-                return (
-                    node,
-                    await run_node(  # type: ignore
-                        node,
-                        incoming_edges_options(node),
-                        _edges_to_values(
-                            gamla.translate_exception(
-                                accumulated_results.__getitem__,
-                                KeyError,
-                                _DepNotFoundError,
-                            )
-                        ),
-                    ),
-                )
-            except handled_exceptions:
-                return None
-
-    else:
-
-        @opt_gamla.star
-        def process_node(
-            accumulated_results: _NodeToResults, node: base_types.ComputationNode
-        ) -> Optional[Tuple[base_types.ComputationNode, base_types.Result]]:
-            try:
-                return (
-                    node,
-                    run_node(
-                        node,
-                        incoming_edges_options(node),
-                        _edges_to_values(
-                            gamla.translate_exception(
-                                accumulated_results.__getitem__,
-                                KeyError,
-                                _DepNotFoundError,
-                            )
-                        ),
-                    ),
-                )
-            except handled_exceptions:
-                return None
-
-    return process_node
-
-
 _is_graph_async = opt_gamla.compose_left(
     opt_gamla.mapcat(lambda edge: (edge.source, *edge.args)),
     opt_gamla.remove(gamla.equals(None)),
     opt_gamla.map(base_types.node_implementation),
     gamla.anymap(asyncio.iscoroutinefunction),
 )
-
-
 _assert_no_unwanted_ambiguity = gamla.compose_left(
     base_types.ambiguity_groups,
     gamla.assert_that_with_message(
@@ -367,39 +250,104 @@ def _to_callable_with_side_effect_for_single_and_multiple(
     return (_async_graph_reducer if is_async else _graph_reducer)(final_runner)
 
 
+_NodeToEdgesAndResults = Callable[
+    [base_types.ComputationNode],
+    Dict[base_types.ComputationEdge, Tuple[base_types.Result, ...]],
+]
+
+
+def _edges_to_accumulated_results_to_node_to_first_possible_input(
+    edges,
+) -> Callable[[_NodeToResults], _NodeToEdgesAndResults,]:
+    node_to_incoming_edges = graph.get_incoming_edges_for_node(edges)
+
+    node_to_edge_options: Callable[
+        [base_types.ComputationNode], Tuple[Tuple[base_types.ComputationEdge]]
+    ] = functools.cache(
+        gamla.compose_left(
+            node_to_incoming_edges,
+            opt_gamla.groupby(base_types.edge_key),
+            opt_gamla.valmap(gamla.sort_by(base_types.edge_priority)),
+            dict.values,
+            opt_gamla.star(itertools.product),
+            opt_gamla.map(tuple),
+            tuple,
+        )
+    )
+
+    def make_node_to_first_possible_input(
+        accumulated_results: _NodeToResults,
+    ) -> _NodeToEdgesAndResults:
+        return opt_gamla.compose_left(
+            node_to_edge_options,
+            opt_gamla.map(
+                opt_gamla.pair_right(
+                    gamla.excepts(
+                        KeyError,
+                        lambda _: None,
+                        opt_gamla.maptuple(
+                            opt_gamla.compose_left(
+                                base_types.edge_sources,
+                                opt_gamla.maptuple(accumulated_results.__getitem__),
+                            )
+                        ),
+                    )
+                )
+            ),
+            opt_gamla.remove(gamla.on_second(gamla.equals(None))),
+            gamla.translate_exception(gamla.head, StopIteration, _DepNotFoundError),
+            opt_gamla.star(zip),
+            dict,
+        )
+
+    return make_node_to_first_possible_input
+
+
 def _make_reduce_layers(
     edges: base_types.GraphType,
     handled_exceptions: Tuple[Type[Exception], ...],
     is_async: bool,
     single_node_side_effect: _SingleNodeSideEffect,
 ) -> Callable[[immutables.Map], Callable[[Tuple[FrozenSet, ...]], immutables.Map]]:
-    process_node_over_input_options = _make_process_node(
-        handled_exceptions,
-        is_async,
-        _incoming_edge_options(edges),
-        gamla.compose(_run_node(is_async, single_node_side_effect), _get_node_input),
+    get_node_input_and_apply = _make_get_node_input_and_apply(
+        is_async, single_node_side_effect
     )
-    reduce_single_layer = gamla.compose_left(
-        gamla.pack,
-        gamla.juxt(
-            gamla.head,
-            gamla.compose_left(
-                gamla.explode(1),
-                gamla.map_filter_empty(
-                    gamla.first(
-                        process_node_over_input_options,
-                        gamla.just(None),
-                        exception_type=_DepNotFoundError,
-                    )
+    accumlated_results_to_node_to_input = (
+        _edges_to_accumulated_results_to_node_to_first_possible_input(edges)
+    )
+    single_layer_reducer = debug.name_callable(
+        gamla.compose_left(
+            gamla.pack,
+            gamla.juxt(
+                gamla.head,
+                gamla.compose_left(
+                    opt_gamla.packstack(
+                        accumlated_results_to_node_to_input, gamla.identity
+                    ),
+                    gamla.explode(1),
+                    gamla.map_filter_empty(
+                        gamla.first(
+                            get_node_input_and_apply,
+                            gamla.just(None),
+                            exception_type=(
+                                *handled_exceptions,
+                                base_types.SkipComputationError,
+                                _DepNotFoundError,
+                            ),
+                        )
+                    ),
+                    tuple,
                 ),
-                tuple,
+            ),
+            opt_gamla.star(
+                lambda prev_results, current_results: prev_results.update(
+                    current_results
+                )
             ),
         ),
-        opt_gamla.star(
-            lambda prev_results, current_results: prev_results.update(current_results)
-        ),
+        "single_layer_reducer",
     )
-    return gamla.curry(gamla.reduce_curried)(reduce_single_layer)
+    return gamla.curry(gamla.reduce_curried)(single_layer_reducer)
 
 
 def _graph_reducer(graph_callable):

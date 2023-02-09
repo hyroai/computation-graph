@@ -2,6 +2,9 @@ language: python
 python:
 - '3.11'
 dist: focal
+cache:
+  directories:
+  - $HOME/.cache/pre-commit
 jobs:
   include:
   - stage: test
@@ -20,3 +23,6 @@ deploy:
   skip_existing: true
   password:
     secure: DtG3+MJ2ZaZDM+Jre0LJakgV6F4LgMYBFjF7Prb7tqA9GE2xuOZegsjtADrZeegiI5nNMZfS3DAcL46g4+gbH33rqTUAoUnaddnML4YPpc12hnDSml7MYVCjv9UYn8oLlquzjasDBGMstIvUWmypPYLkHEkenZ9uj7n8zDh0trlnFcEDQu3p+yOKZ3hk9ysNi9opA8Spu1hix7PvW9iuXW7dJiJlSvUxxiphkKywJj4WTOWwuXWThmXPD5z3rfo7qMn4QZXdf8DnfW/rlk8vZaH9LXQmBeYhyKqBnvLfgFR0DlksVloPVjhLJCaiti+meLINkY6YbjsTc5Yv++6Ezi/SgeAeLT4m3oj2TjhnIiM6Qt/0eKPgpqZEJV7p0/NOwdz3B2xU18jrgZKBqkkveQnonBaZjBxWcubXiRdmrcqNuMxmQqWYCInEKmK2ngeMIZR3MsI4N3DK93vzMWtk+X4gFvghuc9uhZLfqooxwuMsFNxUVJ86TBZKPKyFjvNmdluZszbCTY38FjonIsu0wsOS81dyHJfGrtMKIfpwp5HwidAeWTPHEZS8kpgGUi9d8SUukqYAdJPKifV720biT73pH3I92NQi7iIpnJvuiYh5ramrrqD9CozlNpZW9zD1jT2rExGMXkGF+U8C5tUsKxOpv7EkdsoPg0Ch5ac8zkg=
+cache:
+  directories:
+  - $HOME/.cache/pre-commit
