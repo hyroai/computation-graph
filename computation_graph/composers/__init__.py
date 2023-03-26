@@ -143,7 +143,7 @@ def _infer_sink(graph_or_node: base_types.NodeOrGraph) -> base_types.Computation
             result = (
                 graph.get_leaves(graph_without_future_edges) - sources_of_future_edges
             )
-            assert len(result) == 1, result
+            assert len(result) == 1
             return gamla.head(result)
 
     assert len(_destinations(graph_or_node)) == 1, graph_or_node
@@ -260,7 +260,7 @@ def _infer_composition_edges(
             gamla.check(
                 gamla.identity,
                 AssertionError(
-                    f"Cannot compose, destination signature does not contain key '{key}, {source}, {destination}'"
+                    f"Cannot compose, destination signature does not contain key '{key}'"
                 ),
             ),
         ),
