@@ -56,9 +56,9 @@ def _type_check(node: base_types.ComputationNode, result):
     return_typing = typing.get_type_hints(node.func).get("return", None)
     if return_typing:
         try:
-            typeguard.check_type(str(node), result, return_typing)
-        except TypeError as e:
-            logging.error([node.func.__code__, e])
+            typeguard.check_type(result, return_typing)
+        except typeguard.TypeCheckError as e:
+            logging.error([node.func.__code__, str(e)])
 
 
 def _profile(node, time_started: float):

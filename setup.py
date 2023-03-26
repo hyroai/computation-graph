@@ -11,12 +11,6 @@ setuptools.setup(
     long_description=_LONG_DESCRIPTION,
     long_description_content_type="text/markdown",
     packages=setuptools.find_namespace_packages(),
-    install_requires=[
-        "gamla",
-        "typeguard==2.13.3",
-        "toposort",
-        "immutables",
-        "termcolor",
-    ],
+    install_requires=["gamla", "typeguard", "toposort", "immutables", "termcolor"],
     extras_require={"test": ["pygraphviz", "pytest>=5.4.0"]},
 )
