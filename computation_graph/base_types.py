@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import dataclasses
 import functools
+import types
 import typing
 from typing import Callable, Hashable, Optional, Tuple, Union
 
@@ -94,6 +95,7 @@ class NodeSignature:
 class ComputationNode:
     name: str
     func: Callable
+    creation_tb: Optional[types.TracebackType] = dataclasses.field(compare=False)
     signature: NodeSignature
     is_terminal: bool
 

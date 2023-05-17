@@ -5,6 +5,7 @@ import itertools
 import logging
 import time
 import typing
+from types import TracebackType
 from typing import Any, Callable, Dict, FrozenSet, Set, Tuple, Type
 
 import gamla
@@ -41,7 +42,7 @@ def _transpose_graph(
 
 
 _toposort_nodes: Callable[
-    [base_types.GraphType], Tuple[FrozenSet[base_types.ComputationNode], ...],
+    [base_types.GraphType], Tuple[FrozenSet[base_types.ComputationNode], ...]
 ] = opt_gamla.compose_left(
     opt_gamla.groupby_many(base_types.edge_sources),
     opt_gamla.valmap(
@@ -76,7 +77,6 @@ def _profile(node, time_started: float):
 def _make_get_node_input_and_apply(
     is_async: bool, side_effect: _SingleNodeSideEffect
 ) -> Callable[..., base_types.Result]:
-
     if is_async:
 
         @opt_async_gamla.star
@@ -85,7 +85,19 @@ def _make_get_node_input_and_apply(
         ) -> base_types.Result:
             args, kwargs = node_to_input(node)
             before = time.perf_counter()
-            result = await gamla.to_awaitable(node.func(*args, **kwargs))
+            try:
+                result = await gamla.to_awaitable(node.func(*args, **kwargs))
+            except Exception as e:
+                if node.creation_tb:
+                    e.with_traceback(
+                        TracebackType(
+                            e.__traceback__,
+                            node.creation_tb.tb_frame,
+                            node.creation_tb.tb_lasti,
+                            node.creation_tb.tb_lineno,
+                        )
+                    )
+                raise
             side_effect(node, result)
             _profile(node, before)
             return node, result
@@ -96,7 +108,19 @@ def _make_get_node_input_and_apply(
         def run_node(node_to_input: _NodeToComputationInput, node: base_types.ComputationNode) -> base_types.Result:  # type: ignore
             args, kwargs = node_to_input(node)
             before = time.perf_counter()
-            result = node.func(*args, **kwargs)
+            try:
+                result = node.func(*args, **kwargs)
+            except Exception as e:
+                if node.creation_tb:
+                    e.with_traceback(
+                        TracebackType(
+                            e.__traceback__,
+                            node.creation_tb.tb_frame,
+                            node.creation_tb.tb_lasti,
+                            node.creation_tb.tb_lineno,
+                        )
+                    )
+                raise
             side_effect(node, result)
             _profile(node, before)
             return node, result
@@ -226,7 +250,7 @@ def _to_callable_with_side_effect_for_single_and_multiple(
 
 
 _get_args_nodes: Callable[
-    [Tuple[base_types.ComputationEdge, ...]], Tuple[base_types.ComputationNode, ...],
+    [Tuple[base_types.ComputationEdge, ...]], Tuple[base_types.ComputationNode, ...]
 ] = gamla.compose_left(
     opt_gamla.filter(base_types.edge_args), gamla.head, base_types.edge_args
 )
@@ -256,7 +280,7 @@ def _node_incoming_edges_to_input_spec(
 
 def _edges_to_accumulated_results_to_node_to_first_possible_input(
     edges,
-) -> Callable[[_NodeToResults], _NodeToComputationInput,]:
+) -> Callable[[_NodeToResults], _NodeToComputationInput]:
     node_to_incoming_edges = graph.get_incoming_edges_for_node(edges)
     node_to_computation_input_spec_options: Callable[
         [base_types.ComputationNode], Tuple[_ComputaionInputSpec]
@@ -395,7 +419,7 @@ def _assert_composition_is_valid(g: base_types.GraphType):
 
 def to_callable_strict(
     g: base_types.GraphType,
-) -> Callable[[_NodeToResults, _NodeToResults], _NodeToResults,]:
+) -> Callable[[_NodeToResults, _NodeToResults], _NodeToResults]:
     return gamla.compose(
         gamla.star(to_callable(g, frozenset())), gamla.map(immutables.Map), gamla.pack
     )

@@ -1,4 +1,6 @@
 import dataclasses
+import inspect
+from types import TracebackType
 from typing import Callable, FrozenSet
 
 import gamla
@@ -26,9 +28,23 @@ def make_computation_node(
     if isinstance(func, base_types.ComputationNode):
         return func
 
+    prev_tb_top = None
+    frame = inspect.currentframe()
+    if frame is not None:
+        while frame.f_back and "computation_graph" not in frame.f_code.co_filename:
+            frame = frame.f_back
+
+        prev_tb_top = prev_tb = TracebackType(
+            None, frame, frame.f_lasti, frame.f_lineno
+        )
+        while frame.f_back:
+            frame = frame.f_back
+            prev_tb = TracebackType(prev_tb, frame, frame.f_lasti, frame.f_lineno)
+
     return base_types.ComputationNode(
         name=signature.name(func),
         func=func,
+        creation_tb=prev_tb_top,
         signature=gamla.pipe(
             func,
             signature.from_callable,
@@ -94,7 +110,11 @@ def make_source_with_name(name: str):
 @gamla.curry
 def make_terminal(name: str, func: Callable) -> base_types.ComputationNode:
     return base_types.ComputationNode(
-        name=name, func=func, signature=signature.from_callable(func), is_terminal=True
+        name=name,
+        func=func,
+        signature=signature.from_callable(func),
+        creation_tb=None,
+        is_terminal=True,
     )
 
 
