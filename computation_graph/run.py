@@ -113,10 +113,10 @@ _is_graph_async = opt_gamla.compose_left(
 _assert_no_unwanted_ambiguity = gamla.compose_left(
     base_types.ambiguity_groups,
     gamla.assert_that_with_message(
-        gamla.len_equals(0),
         gamla.wrap_str(
             "There are multiple edges with the same destination, key and priority in the computation graph!: {}"
         ),
+        gamla.len_equals(0),
     ),
 )
 
