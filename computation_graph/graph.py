@@ -115,7 +115,9 @@ def unbound_signature(
     incoming_edges = node_to_incoming_edges(node)
     keep_not_in_bound_kwargs = _keep_not_in_bound_kwargs(incoming_edges)
     return base_types.NodeSignature(
-        is_kwargs=False,
+        is_kwargs=node.signature.is_kwargs
+        and "**kwargs" not in tuple(opt_gamla.map(base_types.edge_key)(incoming_edges))
+        and signature.is_unary(node.signature),
         is_args=node.signature.is_args
         and not any(edge.args for edge in incoming_edges),
         kwargs=tuple(keep_not_in_bound_kwargs(node.signature.kwargs)),

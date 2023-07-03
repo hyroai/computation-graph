@@ -12,6 +12,18 @@ def test_unary_composition_with_graph_destination():
     assert result == -1
 
 
+def test_unary_composition_on_unbounded_kwargs_in_graph_destination():
+    result = graph_runners.nullary_infer_sink(
+        composers.compose_left_unary(
+            lambda: 2,
+            composers.compose_left_unary(
+                lambda *args, **kwargs: args[0] - 3, lambda x: x
+            ),
+        )
+    )
+    assert result == -1
+
+
 def test_infer_sink_edge_case_all_future_edges_with_single_destination():
     s = computation_graph.graph.make_source()
 
