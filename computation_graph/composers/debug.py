@@ -7,11 +7,11 @@ from computation_graph import composers
 
 
 def _debug_with_frame(debugger):
-    def debug(f):
+    def debug(f, *optional_message):
         frame = inspect.currentframe().f_back
 
         def d(x):
-            debugger(x, frame)
+            debugger(x, frame, *optional_message)
             return x
 
         return composers.compose_unary(d, f)
@@ -19,7 +19,7 @@ def _debug_with_frame(debugger):
     return debug
 
 
-def _debug_inner(x, frame):
+def _debug_inner(x, frame, *optional_message):
     logging.info(
         f"Debug prompt for {frame.f_code.co_filename}:{frame.f_lineno}. Hit x+enter to see current value."
     )
@@ -30,8 +30,12 @@ def _debug_inner(x, frame):
 debug = _debug_with_frame(_debug_inner)
 
 
-def _debug_log_inner(x, frame):
-    logging.info(f"{frame.f_code.co_filename}:{frame.f_lineno} output:\n{x}")
+def _debug_log_inner(x, frame, *optional_message: str):
+    if not optional_message:
+        logging.info(f"{frame.f_code.co_filename}:{frame.f_lineno} output: {x}")
+    logging.info(
+        f"{optional_message[0]} at {frame.f_code.co_filename}:{frame.f_lineno} output: {x}"
+    )
 
 
 #: Prints a debug log with the node output (with a line number!).
