@@ -110,15 +110,6 @@ _is_graph_async = opt_gamla.compose_left(
     opt_gamla.map(base_types.node_implementation),
     gamla.anymap(asyncio.iscoroutinefunction),
 )
-_assert_no_unwanted_ambiguity = gamla.compose_left(
-    base_types.ambiguity_groups,
-    gamla.assert_that_with_message(
-        gamla.wrap_str(
-            "There are multiple edges with the same destination, key and priority in the computation graph!: {}"
-        ),
-        gamla.len_equals(0),
-    ),
-)
 
 
 def _future_edge_to_regular_edge_with_placeholder(
@@ -173,7 +164,7 @@ def _to_callable_with_side_effect_for_single_and_multiple(
         ),
         tuple,
         gamla.side_effect(_assert_composition_is_valid),
-        gamla.side_effect(_assert_no_unwanted_ambiguity),
+        gamla.side_effect(base_types.assert_no_unwanted_ambiguity),
     )
     is_async = _is_graph_async(edges)
     placeholder_to_future_source = opt_gamla.pipe(

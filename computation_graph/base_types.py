@@ -79,9 +79,6 @@ class ComputationEdge:
         return source_str + line + self.key + line + ">" + str(self.destination)
 
 
-merge_graphs = gamla.compose_left(gamla.pack, gamla.concat, gamla.unique, tuple)
-
-
 @dataclasses.dataclass(frozen=True)
 class NodeSignature:
     is_args: bool
@@ -132,9 +129,25 @@ ambiguity_groups = gamla.compose(
     frozenset,
     gamla.filter(gamla.len_greater(1)),
     dict.values,
+    gamla.keyfilter(gamla.compose_left(gamla.head, gamla.complement(node_is_terminal))),
     gamla.groupby(gamla.juxt(edge_destination, edge_key, edge_priority)),
 )
 
+assert_no_unwanted_ambiguity = gamla.side_effect(
+    gamla.compose_left(
+        ambiguity_groups,
+        gamla.assert_that_with_message(
+            gamla.wrap_str(
+                "There are multiple edges with the same destination, key and priority in the computation graph!: {}"
+            ),
+            gamla.len_equals(0),
+        ),
+    )
+)
+
+merge_graphs = gamla.compose_left(
+    gamla.pack, gamla.concat, gamla.unique, tuple, assert_no_unwanted_ambiguity
+)
 
 # We use a tuple to generate a unique id for each node based on the order of edges.
 GraphType = Tuple[ComputationEdge, ...]
