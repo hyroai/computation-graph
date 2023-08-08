@@ -661,7 +661,7 @@ def test_replace_source_with_args():
                     graph.make_computation_node(_node1),
                     graph.make_computation_node(_node2),
                 ),
-                destination=_merger,
+                destination=graph.make_computation_node(_merger),
                 key="args",
             ),
         )
@@ -674,7 +674,7 @@ def test_replace_source_with_args():
                 graph.make_computation_node(_node1_async),
                 graph.make_computation_node(_node2),
             ),
-            destination=_merger,
+            destination=graph.make_computation_node(_merger),
             key="args",
         ),
     )
