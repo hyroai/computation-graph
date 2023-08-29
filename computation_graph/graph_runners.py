@@ -79,6 +79,7 @@ def variadic_with_state_and_expectations(g, sink):
     f = run.to_callable_strict(g)
 
     if asyncio.iscoroutinefunction(f):
+
         async def inner(turns):
             prev = {}
             for turn, expectation in turns:
@@ -86,6 +87,7 @@ def variadic_with_state_and_expectations(g, sink):
                 assert (
                     prev[graph.make_computation_node(sink)] == expectation
                 ), f"actual={prev[graph.make_computation_node(sink)]}\n expected: {expectation}"
+
         return inner
 
     def inner(turns):
