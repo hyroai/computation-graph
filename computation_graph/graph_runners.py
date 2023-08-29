@@ -1,3 +1,4 @@
+import asyncio
 from typing import Callable, Union
 
 import gamla
@@ -76,6 +77,18 @@ def unary_with_state_and_expectations(
 
 def variadic_with_state_and_expectations(g, sink):
     f = run.to_callable_strict(g)
+
+    if asyncio.iscoroutinefunction(f):
+
+        async def inner(turns):
+            prev = {}
+            for turn, expectation in turns:
+                prev = await f(prev, turn)
+                assert (
+                    prev[graph.make_computation_node(sink)] == expectation
+                ), f"actual={prev[graph.make_computation_node(sink)]}\n expected: {expectation}"
+
+        return inner
 
     def inner(turns):
         prev = {}
