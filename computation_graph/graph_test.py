@@ -499,6 +499,11 @@ def _plus_1(y):
     return y + 1
 
 
+async def _plus_1_async(y):
+    await asyncio.sleep(0.1)
+    return y + 1
+
+
 def _times_2(x):
     return x * 2
 
@@ -568,6 +573,26 @@ def test_compose_future():
             composers.make_compose_future(
                 _multiply,
                 composers.make_and([_plus_1, _times_2, _multiply], merge_fn=_sum),
+                "b",
+                None,
+            ),
+        ),
+        _sum,
+    )(([[{a: 2, b: 2, c: 2}, 9], [{a: 2, b: 2, c: 2}, 25]]))
+
+
+def test_compose_future_async():
+    a = graph.make_source()
+    b = graph.make_source()
+    c = graph.make_source()
+    graph_runners.variadic_with_state_and_expectations(
+        base_types.merge_graphs(
+            composers.compose_source_unary(_plus_1_async, c),
+            composers.compose_source_unary(_times_2, b),
+            composers.compose_source(_multiply, "a", a),
+            composers.make_compose_future(
+                _multiply,
+                composers.make_and([_plus_1_async, _times_2, _multiply], merge_fn=_sum),
                 "b",
                 None,
             ),
