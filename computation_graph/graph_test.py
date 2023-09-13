@@ -743,3 +743,25 @@ def test_replace_node():
         composers.compose_source_unary(_node1_async, a),
         composers.compose_left_unary(_node1_async, _node2),
     )
+
+
+def test_ambig_edges_assertion_in_merge_graphs_active_only_when_env_var_is_active(
+    monkeypatch,
+):
+    def a(x):
+        pass
+
+    monkeypatch.delenv(base_types.COMPUTATION_GRAPH_DEBUG_ENV_KEY, raising=False)
+    base_types.merge_graphs(
+        composers.compose_left_unary(lambda: 1, a),
+        composers.compose_left_unary(lambda: 1, a),
+    )
+
+    monkeypatch.setenv(base_types.COMPUTATION_GRAPH_DEBUG_ENV_KEY, "1")
+    with pytest.raises(
+        Exception, match=r".*There are multiple edges with the same destination.*"
+    ):
+        base_types.merge_graphs(
+            composers.compose_left_unary(lambda: 1, a),
+            composers.compose_left_unary(lambda: 1, a),
+        )

@@ -2,10 +2,13 @@ from __future__ import annotations
 
 import dataclasses
 import functools
+import os
 import typing
 from typing import Callable, Hashable, Optional, Tuple, Union
 
 import gamla
+
+COMPUTATION_GRAPH_DEBUG_ENV_KEY = "COMPUTATION_GRAPH_DEBUG"
 
 Result = Hashable
 
@@ -139,14 +142,26 @@ assert_no_unwanted_ambiguity = gamla.side_effect(
         gamla.assert_that_with_message(
             gamla.wrap_str(
                 "There are multiple edges with the same destination, key and priority in the computation graph!: {}"
+                f"\n To get a more relevant stacktrace please set the environment variable with %env {COMPUTATION_GRAPH_DEBUG_ENV_KEY}=1 and rebuild."
             ),
             gamla.len_equals(0),
         ),
     )
 )
 
+
+@gamla.side_effect
+def _assert_no_unwanted_ambiguity_when_debug_set(graph):
+    if os.getenv(COMPUTATION_GRAPH_DEBUG_ENV_KEY):
+        assert_no_unwanted_ambiguity(graph)
+
+
 merge_graphs = gamla.compose_left(
-    gamla.pack, gamla.concat, gamla.unique, tuple, assert_no_unwanted_ambiguity
+    gamla.pack,
+    gamla.concat,
+    gamla.unique,
+    tuple,
+    _assert_no_unwanted_ambiguity_when_debug_set,
 )
 
 # We use a tuple to generate a unique id for each node based on the order of edges.
