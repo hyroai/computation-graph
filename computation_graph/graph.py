@@ -136,7 +136,7 @@ def _node_in_edge_args(
     return node_in_edge_args
 
 
-def replace_source(
+def _replace_source_in_edges(
     original: base_types.CallableOrNode, replacement: base_types.CallableOrNode
 ) -> Callable[[base_types.GraphType], base_types.GraphType]:
     return gamla.compose(
@@ -146,6 +146,26 @@ def replace_source(
             _replace_edge_source_args(original, replacement),
         ),
     )
+
+
+@gamla.curry
+def replace_source(
+    original: base_types.CallableOrNode,
+    replacement: base_types.CallableOrNodeOrGraph,
+    current_graph: base_types.GraphType,
+) -> base_types.GraphType:
+    if gamla.is_instance(base_types.CallableOrNode)(replacement):
+        return _replace_source_in_edges(original, replacement)(current_graph)
+
+    if base_types.is_computation_graph(replacement):
+        return gamla.pipe(
+            current_graph,
+            _replace_source_in_edges(original, sink_excluding_terminals(replacement)),
+            gamla.concat_with(replacement),
+            tuple,
+        )
+
+    raise RuntimeError(f"Unsupported relacement graph {replacement}")
 
 
 def replace_destination(

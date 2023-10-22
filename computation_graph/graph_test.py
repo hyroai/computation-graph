@@ -705,6 +705,23 @@ def test_replace_source_with_args():
     )
 
 
+def test_replace_source_with_graph():
+    a = graph.make_source()
+
+    assert graph.replace_source(
+        _node1, composers.compose_left_unary(_node1_async, _next_int)
+    )(
+        base_types.merge_graphs(
+            composers.compose_source_unary(_node1, a),
+            composers.compose_left_unary(_node1, _node2),
+        )
+    ) == base_types.merge_graphs(
+        composers.compose_source_unary(_node1, a),
+        composers.compose_left_unary(_next_int, _node2),
+        composers.compose_left_unary(_node1_async, _next_int),
+    )
+
+
 def test_replace_destination():
     assert graph.replace_destination(_node1, _node1_async)(
         (
