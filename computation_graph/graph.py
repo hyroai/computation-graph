@@ -154,6 +154,9 @@ def replace_source(
     replacement: base_types.CallableOrNodeOrGraph,
     current_graph: base_types.GraphType,
 ) -> base_types.GraphType:
+    if make_computation_node(original) not in get_all_nodes(current_graph):
+        return current_graph
+
     if gamla.is_instance(base_types.CallableOrNode)(replacement):
         return _replace_source_in_edges(original, replacement)(current_graph)
 

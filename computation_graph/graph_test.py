@@ -722,6 +722,22 @@ def test_replace_source_with_graph():
     )
 
 
+def test_replace_source_that_doesnt_exist():
+    a = graph.make_source()
+
+    assert graph.replace_source(
+        lambda x: x, composers.compose_left_unary(_node1_async, _next_int)
+    )(
+        base_types.merge_graphs(
+            composers.compose_source_unary(_node1, a),
+            composers.compose_left_unary(_node1, _node2),
+        )
+    ) == base_types.merge_graphs(
+        composers.compose_source_unary(_node1, a),
+        composers.compose_left_unary(_node1, _node2),
+    )
+
+
 def test_replace_destination():
     assert graph.replace_destination(_node1, _node1_async)(
         (
