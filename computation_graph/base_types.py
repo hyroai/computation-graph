@@ -100,7 +100,7 @@ class ComputationNode:
     def __hash__(self):
         if self.is_terminal:
             return hash(self.name)
-        return id(self.func)
+        return hash(self.func)
 
     def __repr__(self):
         return self.name
