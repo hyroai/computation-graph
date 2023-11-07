@@ -217,7 +217,7 @@ def _to_callable_with_side_effect_for_single_and_multiple(
 
 
 _get_args_nodes: Callable[
-    [Tuple[base_types.ComputationEdge, ...]], Tuple[base_types.ComputationNode, ...],
+    [Tuple[base_types.ComputationEdge, ...]], Tuple[base_types.ComputationNode, ...]
 ] = gamla.compose_left(
     opt_gamla.filter(base_types.edge_args), gamla.head, base_types.edge_args
 )
@@ -386,7 +386,7 @@ def _assert_composition_is_valid(g: base_types.GraphType):
 
 def to_callable_strict(
     g: base_types.GraphType,
-) -> Callable[[_NodeToResults, _NodeToResults], _NodeToResults,]:
+) -> Callable[[_NodeToResults, _NodeToResults], _NodeToResults]:
     return gamla.compose(
         gamla.star(to_callable(g, frozenset())), gamla.map(immutables.Map), gamla.pack
     )

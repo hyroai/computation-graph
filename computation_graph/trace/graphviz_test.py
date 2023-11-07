@@ -29,9 +29,9 @@ def test_computation_trace(tmp_path: pathlib.Path):
     assert (tmp_path / filename).exists()
     g = pgv.AGraph()
     g.read(str(tmp_path / filename))
-    assert g.get_node(id(node1)).attr["result"] == "node1(node2)"
-    assert g.get_node(id(node1)).attr["color"] == "red"
-    assert g.get_node(id(node2)).attr["result"] == "node2"
-    assert g.get_node(id(node2)).attr["color"] == "red"
-    assert not g.get_node(id(raises)).attr["color"]
+    assert g.get_node(hash(node1)).attr["result"] == "node1(node2)"
+    assert g.get_node(hash(node1)).attr["color"] == "red"
+    assert g.get_node(hash(node2)).attr["result"] == "node2"
+    assert g.get_node(hash(node2)).attr["color"] == "red"
+    assert not g.get_node(hash(raises)).attr["color"]
     os.chdir(cwd)
