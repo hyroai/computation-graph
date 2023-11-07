@@ -158,7 +158,7 @@ def replace_source(
         return current_graph
 
     if gamla.is_instance(base_types.CallableOrNode)(replacement):
-        return _replace_source_in_edges(original, replacement)(current_graph)
+        return _replace_source_in_edges(original, replacement)(current_graph)  # type: ignore
 
     if base_types.is_computation_graph(replacement):
         return gamla.pipe(
