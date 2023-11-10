@@ -453,7 +453,7 @@ def test_type_safety_messages(caplog):
         graph_runners.nullary(composers.make_compose(f, lambda: "world"), f)
         == "hello world"
     )
-    assert "TypeError" in caplog.text
+    assert "not an instance" in caplog.text
 
 
 def test_type_safety_messages_no_overtrigger(caplog):
