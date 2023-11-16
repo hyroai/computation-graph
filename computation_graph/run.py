@@ -3,6 +3,7 @@ import dataclasses
 import functools
 import itertools
 import logging
+import os
 import time
 import typing
 from typing import Any, Callable, Dict, FrozenSet, Set, Tuple, Type
@@ -41,7 +42,7 @@ def _transpose_graph(
 
 
 _toposort_nodes: Callable[
-    [base_types.GraphType], Tuple[FrozenSet[base_types.ComputationNode], ...],
+    [base_types.GraphType], Tuple[FrozenSet[base_types.ComputationNode], ...]
 ] = opt_gamla.compose_left(
     opt_gamla.groupby_many(base_types.edge_sources),
     opt_gamla.valmap(
@@ -76,7 +77,6 @@ def _profile(node, time_started: float):
 def _make_get_node_input_and_apply(
     is_async: bool, side_effect: _SingleNodeSideEffect
 ) -> Callable[..., base_types.Result]:
-
     if is_async:
 
         @opt_async_gamla.star
@@ -149,6 +149,12 @@ def _to_callable_with_side_effect_for_single_and_multiple(
     edges: base_types.GraphType,
     handled_exceptions: Tuple[Type[Exception], ...],
 ) -> Callable[[_NodeToResults, _NodeToResults], _NodeToResults]:
+    single_node_side_effect = (
+        (lambda node, result: result)
+        if os.getenv(base_types.COMPUTATION_GRAPH_DEBUG_ENV_KEY) is None
+        else single_node_side_effect
+    )
+
     future_sources = _graph_to_future_sources(edges)
     future_source_to_placeholder = _map_future_source_to_placeholder(future_sources)
     edges = gamla.pipe(
@@ -247,7 +253,7 @@ def _node_incoming_edges_to_input_spec(
 
 def _edges_to_accumulated_results_to_node_to_first_possible_input(
     edges,
-) -> Callable[[_NodeToResults], _NodeToComputationInput,]:
+) -> Callable[[_NodeToResults], _NodeToComputationInput]:
     node_to_incoming_edges = graph.get_incoming_edges_for_node(edges)
     node_to_computation_input_spec_options: Callable[
         [base_types.ComputationNode], Tuple[_ComputaionInputSpec]

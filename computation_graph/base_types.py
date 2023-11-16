@@ -152,7 +152,7 @@ assert_no_unwanted_ambiguity = gamla.side_effect(
 
 @gamla.side_effect
 def _assert_no_unwanted_ambiguity_when_debug_set(graph):
-    if os.getenv(COMPUTATION_GRAPH_DEBUG_ENV_KEY):
+    if os.getenv(COMPUTATION_GRAPH_DEBUG_ENV_KEY) is not None:
         assert_no_unwanted_ambiguity(graph)
 
 
