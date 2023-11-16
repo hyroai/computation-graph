@@ -445,7 +445,9 @@ def test_double_star_signature_considered_unary():
     )
 
 
-def test_type_safety_messages(caplog):
+def test_type_safety_messages(caplog, monkeypatch):
+    monkeypatch.setenv(base_types.COMPUTATION_GRAPH_DEBUG_ENV_KEY, "j")
+
     def f(x) -> int:  # Bad typing!
         return "hello " + x
 
@@ -456,7 +458,9 @@ def test_type_safety_messages(caplog):
     assert "TypeError" in caplog.text
 
 
-def test_type_safety_messages_no_overtrigger(caplog):
+def test_type_safety_messages_no_overtrigger(caplog, monkeypatch):
+    monkeypatch.setenv(base_types.COMPUTATION_GRAPH_DEBUG_ENV_KEY, "h")
+
     def f(x) -> str:
         return "hello " + x
 
