@@ -20,6 +20,7 @@ def duplicate_function(func):
     def inner(*args, **kwargs):
         return func(*args, **kwargs)
 
+    inner.__name__ = f"duplicate of {inner.__name__}"
     return inner
 
 
@@ -68,3 +69,28 @@ duplicate_graph = gamla.compose_left(
 duplicate_function_or_graph = gamla.ternary(
     gamla.is_instance(tuple), duplicate_graph, duplicate_function
 )
+
+_traverse_forward = gamla.compose_left(
+    gamla.mapcat(
+        gamla.compose_left(
+            gamla.juxt(base_types.edge_sources, base_types.edge_destination),
+            gamla.explode(0),
+        )
+    ),
+    gamla.groupby_many_reduce(
+        gamla.compose_left(gamla.head, gamla.wrap_tuple),
+        lambda ds, e: (*(ds if ds else ()), e[1]),
+    ),
+    gamla.dict_to_getter_with_default(()),
+    gamla.before(graph.make_computation_node),
+)
+
+
+def safe_replace_node(o, r, g):
+    for v in gamla.graph_traverse(o, _traverse_forward(g)):
+        if v == o:
+            g = graph.replace_node(o, r)(g)
+        else:
+            g = graph.replace_node(v, _duplicate_node(v))(g)
+
+    return g

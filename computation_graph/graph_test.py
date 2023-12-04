@@ -802,3 +802,75 @@ def test_ambig_edges_assertion_in_merge_graphs_active_only_when_env_var_is_activ
             composers.compose_left_unary(lambda: 1, a),
             composers.compose_left_unary(lambda: 1, a),
         )
+
+
+def a():
+    pass
+
+
+def b(x):
+    pass
+
+
+def c(x):
+    pass
+
+
+def d(x, y):
+    pass
+
+
+def kuky():
+    pass
+
+
+g = (
+    composers.compose_left(a, c)
+    + composers.compose_left(c, d, key="x")
+    + composers.compose_left(b, d, key="y")
+    + composers.compose_left_future(d, b, "x", "bla")
+)
+
+
+@pytest.mark.parametrize(
+    "to_replace,expected_edges_strs",
+    [
+        pytest.param(
+            a,
+            {
+                "kuky----x---->duplicate of c",
+                "duplicate of c----x---->duplicate of d",
+                "when_memory_unavailable----x---->duplicate of b",
+                "duplicate of d....x....>duplicate of b",
+                "duplicate of b----y---->duplicate of d",
+            },
+            id="replace source node",
+        ),
+        pytest.param(
+            c,
+            {
+                "a----x---->kuky",
+                "kuky----x---->duplicate of d",
+                "when_memory_unavailable----x---->duplicate of b",
+                "duplicate of d....x....>duplicate of b",
+                "duplicate of b----y---->duplicate of d",
+            },
+            id="replace node not in cycle",
+        ),
+        pytest.param(
+            b,
+            {
+                "a----x---->c",
+                "c----x---->duplicate of d",
+                "when_memory_unavailable----x---->kuky",
+                "duplicate of d....x....>kuky",
+                "kuky----y---->duplicate of d",
+            },
+            id="replace node in cycle",
+        ),
+    ],
+)
+def test_safe_replace_node(to_replace, expected_edges_strs):
+    assert expected_edges_strs == {
+        str(e) for e in duplication.safe_replace_node(to_replace, kuky, g)
+    }
