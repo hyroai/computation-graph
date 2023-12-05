@@ -1,4 +1,5 @@
 import asyncio
+from typing import Dict
 
 import gamla
 import pytest
@@ -824,11 +825,18 @@ def kuky():
     pass
 
 
+def kuku():
+    pass
+
+
+t = graph.make_terminal("t", lambda x: x)
+
 g = (
     composers.compose_left(a, c)
     + composers.compose_left(c, d, key="x")
     + composers.compose_left(b, d, key="y")
     + composers.compose_left_future(d, b, "x", "bla")
+    + composers.compose_left(a, t)
 )
 
 
@@ -836,9 +844,10 @@ g = (
     "to_replace,expected_edges_strs",
     [
         pytest.param(
-            a,
+            {a: kuky},
             {
                 "kuky----x---->duplicate of c",
+                "kuky----x---->t",
                 "duplicate of c----x---->duplicate of d",
                 "when_memory_unavailable----x---->duplicate of b",
                 "duplicate of d....x....>duplicate of b",
@@ -847,9 +856,10 @@ g = (
             id="replace source node",
         ),
         pytest.param(
-            c,
+            {c: kuky},
             {
                 "a----x---->kuky",
+                "a----x---->t",
                 "kuky----x---->duplicate of d",
                 "when_memory_unavailable----x---->duplicate of b",
                 "duplicate of d....x....>duplicate of b",
@@ -858,9 +868,10 @@ g = (
             id="replace node not in cycle",
         ),
         pytest.param(
-            b,
+            {b: kuky},
             {
                 "a----x---->c",
+                "a----x---->t",
                 "c----x---->duplicate of d",
                 "when_memory_unavailable----x---->kuky",
                 "duplicate of d....x....>kuky",
@@ -868,9 +879,24 @@ g = (
             },
             id="replace node in cycle",
         ),
+        pytest.param(
+            {a: kuku, b: kuky},
+            {
+                "duplicate of c----x---->duplicate of d",
+                "duplicate of d....x....>kuky",
+                "kuku----x---->duplicate of c",
+                "kuku----x---->t",
+                "kuky----y---->duplicate of d",
+                "when_memory_unavailable----x---->kuky",
+            },
+            id="replace multiple nodes - duplicate reachables once",
+        ),
     ],
 )
-def test_safe_replace_node(to_replace, expected_edges_strs):
+def test_safe_replace_node(
+    to_replace: Dict[base_types.CallableOrNode, base_types.CallableOrNodeOrGraph],
+    expected_edges_strs: str,
+):
     assert expected_edges_strs == {
-        str(e) for e in duplication.safe_replace_node(to_replace, kuky, g)
+        str(e) for e in duplication.safe_replace_sources(to_replace, g)
     }

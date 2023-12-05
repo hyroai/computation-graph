@@ -1,5 +1,5 @@
 import dataclasses
-from typing import Callable, FrozenSet
+from typing import Callable, FrozenSet, Tuple
 
 import gamla
 from gamla.optimized import sync as opt_gamla
@@ -146,6 +146,25 @@ def _replace_source_in_edges(
             _replace_edge_source_args(original, replacement),
         ),
     )
+
+
+traverse_forward: Callable[
+    [base_types.GraphType],
+    Callable[[base_types.CallableOrNode], Tuple[base_types.ComputationNode, ...]],
+] = gamla.compose_left(
+    gamla.mapcat(
+        gamla.compose_left(
+            gamla.juxt(base_types.edge_sources, base_types.edge_destination),
+            gamla.explode(0),
+        )
+    ),
+    gamla.groupby_many_reduce(
+        gamla.compose_left(gamla.head, gamla.wrap_tuple),
+        lambda destinations, e: (*(destinations if destinations else ()), e[1]),
+    ),
+    gamla.dict_to_getter_with_default(()),
+    gamla.before(make_computation_node),
+)
 
 
 @gamla.curry
