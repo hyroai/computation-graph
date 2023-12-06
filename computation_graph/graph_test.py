@@ -1,4 +1,5 @@
 import asyncio
+from typing import Dict
 
 import gamla
 import pytest
@@ -802,3 +803,100 @@ def test_ambig_edges_assertion_in_merge_graphs_active_only_when_env_var_is_activ
             composers.compose_left_unary(lambda: 1, a),
             composers.compose_left_unary(lambda: 1, a),
         )
+
+
+def a():
+    pass
+
+
+def b(x):
+    pass
+
+
+def c(x):
+    pass
+
+
+def d(x, y):
+    pass
+
+
+def kuky():
+    pass
+
+
+def kuku():
+    pass
+
+
+t = graph.make_terminal("t", lambda x: x)
+
+g = (
+    composers.compose_left(a, c)
+    + composers.compose_left(c, d, key="x")
+    + composers.compose_left(b, d, key="y")
+    + composers.compose_left_future(d, b, "x", "bla")
+    + composers.compose_left(a, t)
+)
+
+
+@pytest.mark.parametrize(
+    "to_replace,expected_edges_strs",
+    [
+        pytest.param(
+            {a: kuky},
+            {
+                "kuky----x---->duplicate of c",
+                "kuky----x---->t",
+                "duplicate of c----x---->duplicate of d",
+                "when_memory_unavailable----x---->duplicate of b",
+                "duplicate of d....x....>duplicate of b",
+                "duplicate of b----y---->duplicate of d",
+            },
+            id="replace source node",
+        ),
+        pytest.param(
+            {c: kuky},
+            {
+                "a----x---->kuky",
+                "a----x---->t",
+                "kuky----x---->duplicate of d",
+                "when_memory_unavailable----x---->duplicate of b",
+                "duplicate of d....x....>duplicate of b",
+                "duplicate of b----y---->duplicate of d",
+            },
+            id="replace node not in cycle",
+        ),
+        pytest.param(
+            {b: kuky},
+            {
+                "a----x---->c",
+                "a----x---->t",
+                "c----x---->duplicate of d",
+                "when_memory_unavailable----x---->kuky",
+                "duplicate of d....x....>kuky",
+                "kuky----y---->duplicate of d",
+            },
+            id="replace node in cycle",
+        ),
+        pytest.param(
+            {a: kuku, b: kuky},
+            {
+                "duplicate of c----x---->duplicate of d",
+                "duplicate of d....x....>kuky",
+                "kuku----x---->duplicate of c",
+                "kuku----x---->t",
+                "kuky----y---->duplicate of d",
+                "when_memory_unavailable----x---->kuky",
+            },
+            id="replace multiple nodes - duplicate reachables once",
+        ),
+    ],
+)
+def test_safe_replace_node(
+    to_replace: Dict[base_types.CallableOrNode, base_types.CallableOrNodeOrGraph],
+    expected_edges_strs: str,
+):
+    assert expected_edges_strs == {
+        str(e) for e in duplication.safe_replace_sources(to_replace, g)
+    }
