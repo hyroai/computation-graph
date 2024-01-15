@@ -18,6 +18,7 @@ from gamla.optimized import sync as opt_gamla
 
 from computation_graph import base_types, graph, signature
 from computation_graph.composers import debug
+from computation_graph.trace import graphviz
 
 
 class _DepNotFoundError(Exception):
@@ -361,8 +362,8 @@ to_callable_with_side_effect = gamla.curry(
 )(_type_check)
 
 # Use the second line if you want to see the winning path in the computation graph (a little slower).
-to_callable = to_callable_with_side_effect(gamla.just(gamla.just(None)))
-# to_callable = to_callable_with_side_effect(graphviz.computation_trace('utterance_computation.dot'))
+# to_callable = to_callable_with_side_effect(gamla.just(gamla.just(None)))
+to_callable = to_callable_with_side_effect(graphviz.computation_trace('utterance_computation.dot'))
 
 
 def _node_is_properly_composed(
