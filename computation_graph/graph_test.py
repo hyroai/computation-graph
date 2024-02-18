@@ -376,7 +376,7 @@ def test_or_with_sink_that_raises():
 
 
 def test_unambiguous_composition_using_terminal():
-    terminal = graph.make_terminal("1", lambda x: x)
+    terminal = graph.make_terminal("1", lambda x: x[0])
 
     def source():
         return 1
@@ -403,8 +403,8 @@ def test_unambiguous_composition_using_terminal():
 
 
 def test_two_terminals():
-    terminal1 = graph.make_terminal("1", gamla.wrap_tuple)
-    terminal2 = graph.make_terminal("2", gamla.wrap_tuple)
+    terminal1 = graph.make_terminal("1", lambda x: x)
+    terminal2 = graph.make_terminal("2", lambda x: x)
     result = graph_runners.unary_bare(
         base_types.merge_graphs(
             composers.compose_unary(terminal1, composers.make_compose(_node2, _node1)),
@@ -418,8 +418,8 @@ def test_two_terminals():
 
 def test_two_paths_succeed():
     source = graph.make_source()
-    terminal1 = graph.make_terminal("1", gamla.wrap_tuple)
-    terminal2 = graph.make_terminal("2", gamla.wrap_tuple)
+    terminal1 = graph.make_terminal("1", lambda x: x)
+    terminal2 = graph.make_terminal("2", lambda x: x)
     result = graph_runners.variadic_bare(
         base_types.merge_graphs(
             composers.make_first(

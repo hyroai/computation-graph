@@ -18,6 +18,9 @@ def handle_state(
 ) -> base_types.GraphType:
     @graph.make_terminal("retrieve_state")
     def retrieve_state(x):
+        if x == ():
+            raise base_types.SkipComputationError
+        x = x[0]
         assert isinstance(x, ComputationResult), x
         return x.state
 

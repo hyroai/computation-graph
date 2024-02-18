@@ -98,8 +98,6 @@ class ComputationNode:
     is_terminal: bool
 
     def __hash__(self):
-        if self.is_terminal:
-            return hash(self.name)
         return hash(self.func)
 
     def __repr__(self):

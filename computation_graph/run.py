@@ -16,7 +16,7 @@ import typeguard
 from gamla.optimized import async_functions as opt_async_gamla
 from gamla.optimized import sync as opt_gamla
 
-from computation_graph import base_types, graph, signature
+from computation_graph import base_types, composers, graph, signature
 from computation_graph.composers import debug
 
 
@@ -28,7 +28,7 @@ _NodeToResults = Dict[base_types.ComputationNode, base_types.Result]
 _ComputationInput = Tuple[Tuple[base_types.Result, ...], Dict[str, base_types.Result]]
 _SingleNodeSideEffect = Callable[[base_types.ComputationNode, Any], None]
 _NodeToComputationInput = Callable[[base_types.ComputationNode], _ComputationInput]
-_ComputaionInputSpec = Tuple[
+_ComputationInputSpec = Tuple[
     Tuple[base_types.ComputationNode, ...], Dict[str, base_types.ComputationNode]
 ]
 
@@ -143,12 +143,41 @@ _graph_to_future_sources = opt_gamla.compose_left(
 )
 
 
+"""Replace multiple edges pointing to a terminal with one edge that has multiple args"""
+
+
+def _merge_edges_pointing_to_terminals(g: base_types.GraphType) -> base_types.GraphType:
+    return gamla.compose_left(
+        gamla.groupby(gamla.attrgetter("destination")),
+        gamla.itemmap(
+            gamla.star(
+                lambda dest, edges_for_dest: (
+                    dest,
+                    base_types.merge_graphs(
+                        composers.make_or(
+                            opt_gamla.maptuple(base_types.edge_source)(edges_for_dest),
+                            merge_fn=(aggregate := lambda args: args),
+                        ),
+                        composers.compose_left_unary(aggregate, dest),
+                    )
+                    if dest.is_terminal
+                    else edges_for_dest,
+                )
+            )
+        ),
+        dict.values,
+        gamla.concat,
+        tuple,
+    )(g)
+
+
 def _to_callable_with_side_effect_for_single_and_multiple(
     single_node_side_effect: _SingleNodeSideEffect,
     all_nodes_side_effect: Callable,
     edges: base_types.GraphType,
     handled_exceptions: Tuple[Type[Exception], ...],
 ) -> Callable[[_NodeToResults, _NodeToResults], _NodeToResults]:
+    edges = _merge_edges_pointing_to_terminals(edges)
     single_node_side_effect = (
         (lambda node, result: result)
         if os.getenv(base_types.COMPUTATION_GRAPH_DEBUG_ENV_KEY) is None
@@ -238,7 +267,7 @@ _get_kwargs_nodes = opt_gamla.compose_left(
 
 def _node_incoming_edges_to_input_spec(
     node_incoming_edges: Tuple[base_types.ComputationEdge],
-) -> _ComputaionInputSpec:
+) -> _ComputationInputSpec:
     if not len(node_incoming_edges):
         return (), {}
     first_incoming_edge = gamla.head(node_incoming_edges)
@@ -256,7 +285,7 @@ def _edges_to_accumulated_results_to_node_to_first_possible_input(
 ) -> Callable[[_NodeToResults], _NodeToComputationInput]:
     node_to_incoming_edges = graph.get_incoming_edges_for_node(edges)
     node_to_computation_input_spec_options: Callable[
-        [base_types.ComputationNode], Tuple[_ComputaionInputSpec]
+        [base_types.ComputationNode], Tuple[_ComputationInputSpec]
     ] = functools.cache(
         gamla.compose_left(
             node_to_incoming_edges,
@@ -304,7 +333,7 @@ def _make_reduce_layers(
     get_node_input_and_apply = _make_get_node_input_and_apply(
         is_async, single_node_side_effect
     )
-    accumlated_results_to_node_to_input = (
+    accumulated_results_to_node_to_input = (
         _edges_to_accumulated_results_to_node_to_first_possible_input(edges)
     )
     single_layer_reducer = debug.name_callable(
@@ -314,7 +343,7 @@ def _make_reduce_layers(
                 gamla.head,
                 gamla.compose_left(
                     opt_gamla.packstack(
-                        accumlated_results_to_node_to_input, gamla.identity
+                        accumulated_results_to_node_to_input, gamla.identity
                     ),
                     gamla.explode(1),
                     gamla.map_filter_empty(
