@@ -1,7 +1,7 @@
 import functools
 import inspect
 from types import MappingProxyType
-from typing import Callable, FrozenSet, Tuple
+from typing import Callable, FrozenSet
 
 import gamla
 
@@ -34,16 +34,13 @@ def _is_default(parameter):
 
 _parameter_name = gamla.attrgetter("name")
 
-
-@gamla.before(
-    gamla.compose_left(
-        inspect.signature,
-        gamla.attrgetter("parameters"),
-        MappingProxyType.values,
-        tuple,
-    )
+_func_parameters = gamla.compose_left(
+    inspect.signature, gamla.attrgetter("parameters"), MappingProxyType.values, tuple
 )
-def from_callable(function_parameters: Tuple) -> base_types.NodeSignature:
+
+
+def from_callable(func: Callable) -> base_types.NodeSignature:
+    function_parameters = _func_parameters(func)
     return base_types.NodeSignature(
         is_args=gamla.anymap(parameter_is_star)(function_parameters),
         is_kwargs=gamla.anymap(parameter_is_double_star)(function_parameters),

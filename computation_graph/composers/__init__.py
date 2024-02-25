@@ -48,14 +48,14 @@ def make_and(
 
     merge_node = graph.make_computation_node(args_to_tuple)
 
-    return gamla.pipe(
+    return gamla.sync.pipe(
         funcs,
-        gamla.map(_callable_or_graph_type_to_node_or_graph_type),
+        gamla.sync.map(_callable_or_graph_type_to_node_or_graph_type),
         tuple,
-        gamla.juxtcat(
-            gamla.map(_get_edges_from_node_or_graph),
-            gamla.compose_left(
-                gamla.map(_infer_sink),
+        gamla.sync.juxtcat(
+            gamla.sync.map(_get_edges_from_node_or_graph),
+            gamla.sync.compose_left(
+                gamla.sync.map(_infer_sink),
                 tuple,
                 lambda nodes: (
                     (
@@ -72,7 +72,7 @@ def make_and(
                 ),
             ),
         ),
-        gamla.star(base_types.merge_graphs),
+        gamla.sync.star(base_types.merge_graphs),
     )
 
 
@@ -92,13 +92,13 @@ def make_or(
 
     filter_node = graph.make_computation_node(filter_computation_errors)
 
-    return gamla.pipe(
+    return gamla.sync.pipe(
         funcs,
-        gamla.map(make_optional(default_value=_ComputationError())),
+        gamla.sync.map(make_optional(default_value=_ComputationError())),
         tuple,
-        gamla.pair_with(
-            gamla.compose_left(
-                gamla.map(_infer_sink),
+        gamla.sync.pair_right(
+            gamla.sync.compose_left(
+                gamla.sync.map(_infer_sink),
                 tuple,
                 lambda sinks: (
                     (
@@ -116,7 +116,7 @@ def make_or(
             )
         ),
         gamla.concat,
-        gamla.star(base_types.merge_graphs),
+        gamla.sync.star(base_types.merge_graphs),
     )
 
 
@@ -126,18 +126,16 @@ _destinations = gamla.compose(set, gamla.map(base_types.edge_destination))
 def _infer_sink(graph_or_node: base_types.NodeOrGraph) -> base_types.ComputationNode:
     if isinstance(graph_or_node, base_types.ComputationNode):
         return graph_or_node
-    graph_without_future_edges = gamla.pipe(graph_or_node, graph.remove_future_edges)
+    graph_without_future_edges = graph.remove_future_edges(graph_or_node)
     if graph_without_future_edges:
         try:
-            return gamla.pipe(
-                graph_without_future_edges, graph.sink_excluding_terminals
-            )
+            return graph.sink_excluding_terminals(graph_without_future_edges)
         except AssertionError:
             # If we reached here we can try again without sources of future edges.
-            sources_of_future_edges = gamla.pipe(
+            sources_of_future_edges = gamla.sync.pipe(
                 graph_or_node,
-                gamla.filter(base_types.edge_is_future),
-                gamla.map(base_types.edge_source),
+                gamla.sync.filter(base_types.edge_is_future),
+                gamla.sync.map(base_types.edge_source),
                 frozenset,
             )
             result = (
@@ -234,30 +232,30 @@ def _infer_composition_edges(
         graph.get_incoming_edges_for_node(destination)
     )
     return base_types.merge_graphs(
-        gamla.pipe(
+        gamla.sync.pipe(
             destination,
-            gamla.mapcat(graph.get_edge_nodes),
+            gamla.sync.mapcat(graph.get_edge_nodes),
             gamla.unique,
-            gamla.filter(
-                gamla.compose_left(
+            gamla.sync.filter(
+                gamla.sync.compose_left(
                     unbound_signature,
                     lambda sig: key in sig.kwargs
                     or (key is None and signature.is_unary(sig)),
                 )
             ),
             # Do not add edges to nodes from source that are already present in destination (cycle).
-            gamla.filter(
+            gamla.sync.filter(
                 lambda node: isinstance(source, base_types.ComputationNode)
                 or node not in graph.get_all_nodes(source)
             ),
-            gamla.map(
+            gamla.sync.map(
                 lambda destination: try_connect(
                     destination=destination,
                     unbound_destination_signature=unbound_signature(destination),
                 )
             ),
             tuple,
-            gamla.check(
+            gamla.sync.check(
                 gamla.identity,
                 AssertionError(
                     f"Cannot compose, destination signature does not contain key '{key}'"
@@ -278,13 +276,13 @@ def _make_compose_inner(
     assert (
         len(funcs) > 1
     ), f"Only {len(funcs)} function passed to compose, need at least 2, funcs={funcs}"
-    return gamla.pipe(
+    return gamla.sync.pipe(
         funcs,
         reversed,
-        gamla.map(_callable_or_graph_type_to_node_or_graph_type),
+        gamla.sync.map(_callable_or_graph_type_to_node_or_graph_type),
         gamla.sliding_window(2),
-        gamla.map(gamla.star(_infer_composition_edges(priority, key, is_future))),
-        gamla.star(base_types.merge_graphs),
+        gamla.sync.map(gamla.star(_infer_composition_edges(priority, key, is_future))),
+        gamla.sync.star(base_types.merge_graphs),
     )
 
 
@@ -389,8 +387,8 @@ def compose_dict(
     return gamla.pipe(
         d,
         dict.items,
-        gamla.map(gamla.star(lambda key, fn: make_compose(f, fn, key=key))),
-        gamla.star(base_types.merge_graphs),
+        gamla.sync.map(gamla.star(lambda key, fn: make_compose(f, fn, key=key))),
+        gamla.sync.star(base_types.merge_graphs),
     ) or compose_left_unary(f, lambda x: x)
 
 
