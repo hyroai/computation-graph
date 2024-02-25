@@ -6,16 +6,16 @@ from gamla.optimized import sync as opt_gamla
 
 from computation_graph import base_types, signature
 
-get_edge_nodes = gamla.ternary(
+get_edge_nodes = opt_gamla.ternary(
     base_types.edge_args,
     lambda edge: edge.args + (edge.destination,),
     lambda edge: (edge.source, edge.destination),
 )
 
-get_all_nodes = gamla.compose_left(gamla.mapcat(get_edge_nodes), frozenset)
+get_all_nodes = opt_gamla.compose_left(opt_gamla.mapcat(get_edge_nodes), frozenset)
 
 
-edges_to_node_id_map = gamla.compose_left(
+edges_to_node_id_map = opt_gamla.compose_left(
     gamla.mapcat(get_edge_nodes), gamla.unique, enumerate, gamla.map(reversed), dict
 )
 
@@ -41,13 +41,13 @@ def make_computation_node(
 
 
 def get_leaves(edges: base_types.GraphType) -> FrozenSet[base_types.ComputationNode]:
-    return gamla.pipe(
+    return opt_gamla.pipe(
         edges,
         get_all_nodes,
-        gamla.remove(
-            gamla.pipe(
+        opt_gamla.remove(
+            opt_gamla.pipe(
                 edges,
-                gamla.mapcat(lambda edge: (edge.source, *edge.args)),
+                opt_gamla.mapcat(lambda edge: (edge.source, *edge.args)),
                 frozenset,
                 gamla.contains,
             )
@@ -56,27 +56,29 @@ def get_leaves(edges: base_types.GraphType) -> FrozenSet[base_types.ComputationN
     )
 
 
-sink_excluding_terminals = gamla.compose_left(
+sink_excluding_terminals = opt_gamla.compose_left(
     get_leaves,
-    gamla.remove(base_types.node_is_terminal),
+    opt_gamla.remove(base_types.node_is_terminal),
     tuple,
     gamla.assert_that(gamla.len_equals(1)),
     gamla.head,
 )
 
-get_incoming_edges_for_node = gamla.compose_left(
-    gamla.groupby(base_types.edge_destination),
-    gamla.valmap(frozenset),
+get_incoming_edges_for_node = opt_gamla.compose_left(
+    opt_gamla.groupby(base_types.edge_destination),
+    opt_gamla.valmap(frozenset),
     gamla.dict_to_getter_with_default(frozenset()),
 )
 
 
-get_terminals = gamla.compose_left(
-    get_all_nodes, gamla.filter(base_types.node_is_terminal), tuple
+get_terminals = opt_gamla.compose_left(
+    get_all_nodes, opt_gamla.filter(base_types.node_is_terminal), tuple
 )
 
 
-remove_future_edges = gamla.compose(tuple, opt_gamla.remove(base_types.edge_is_future))
+remove_future_edges = opt_gamla.compose(
+    tuple, opt_gamla.remove(base_types.edge_is_future)
+)
 
 
 def make_source():
@@ -98,7 +100,7 @@ def make_terminal(name: str, func: Callable) -> base_types.ComputationNode:
     )
 
 
-_keep_not_in_bound_kwargs = gamla.compose_left(
+_keep_not_in_bound_kwargs = opt_gamla.compose_left(
     opt_gamla.map(base_types.edge_key),
     gamla.filter(gamla.identity),
     frozenset,
@@ -151,15 +153,15 @@ def _replace_source_in_edges(
 traverse_forward: Callable[
     [base_types.GraphType],
     Callable[[base_types.CallableOrNode], Tuple[base_types.ComputationNode, ...]],
-] = gamla.compose_left(
+] = opt_gamla.compose_left(
     gamla.mapcat(
-        gamla.compose_left(
+        opt_gamla.compose_left(
             gamla.juxt(base_types.edge_sources, base_types.edge_destination),
             gamla.explode(0),
         )
     ),
     gamla.groupby_many_reduce(
-        gamla.compose_left(gamla.head, gamla.wrap_tuple),
+        opt_gamla.compose_left(gamla.head, gamla.wrap_tuple),
         lambda destinations, e: (*(destinations if destinations else ()), e[1]),
     ),
     gamla.dict_to_getter_with_default(()),
@@ -212,7 +214,8 @@ def transform_edges(
     edge_mapper: Callable[[base_types.ComputationEdge], base_types.ComputationEdge],
 ):
     return _operate_on_subgraph(
-        _split_by_condition(query), gamla.compose_left(gamla.map(edge_mapper), tuple)
+        _split_by_condition(query),
+        opt_gamla.compose_left(gamla.map(edge_mapper), tuple),
     )
 
 
@@ -283,7 +286,7 @@ def _operate_on_subgraph(selector, transformation):
 
 
 def _split_by_condition(condition):
-    return gamla.compose_left(
+    return opt_gamla.compose_left(
         gamla.bifurcate(gamla.filter(condition), gamla.remove(condition)),
         gamla.map(tuple),
         tuple,
