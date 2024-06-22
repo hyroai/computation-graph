@@ -162,7 +162,7 @@ traverse_forward: Callable[
     ),
     gamla.groupby_many_reduce(
         opt_gamla.compose_left(gamla.head, gamla.wrap_tuple),
-        lambda destinations, e: (*(destinations if destinations else ()), e[1]),
+        lambda destinations, e: {*(destinations if destinations else ()), e[1]},
     ),
     gamla.dict_to_getter_with_default(()),
     gamla.before(make_computation_node),
