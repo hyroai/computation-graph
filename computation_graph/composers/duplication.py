@@ -44,6 +44,7 @@ _duplicate_node = gamla.compose_left(
     graph.make_computation_node,
 )
 
+duplicate_node = _duplicate_node
 
 _node_to_duplicated_node = gamla.compose_left(
     gamla.remove(base_types.node_is_terminal),
@@ -104,4 +105,4 @@ def safe_replace_sources(
             g = graph.replace_source(source, get_node_replacement(source), g)
         return g
 
-    return gamla.reduce(lambda updated_cg, e: updated_cg + update_edge(e), (), cg)
+    return base_types.merge_graphs(*(update_edge(e) for e in cg))
