@@ -1,23 +1,37 @@
 import asyncio
 import dataclasses
 import functools
+import inspect
 import itertools
 import logging
 import os
 import time
 import typing
-from typing import Any, Callable, Dict, FrozenSet, Set, Tuple, Type
+from typing import (
+    Any,
+    Awaitable,
+    Callable,
+    Dict,
+    FrozenSet,
+    Iterable,
+    Mapping,
+    Optional,
+    Set,
+    Tuple,
+    Type,
+)
 
 import gamla
 import immutables
 import termcolor
 import toposort
 import typeguard
-from gamla.optimized import async_functions as opt_async_gamla
 from gamla.optimized import sync as opt_gamla
 
 from computation_graph import base_types, composers, graph, signature
 from computation_graph.composers import debug
+
+CG_NO_RESULT = "CG_NO_RESULT"
 
 
 class _DepNotFoundError(Exception):
@@ -27,7 +41,6 @@ class _DepNotFoundError(Exception):
 _NodeToResults = Dict[base_types.ComputationNode, base_types.Result]
 _ComputationInput = Tuple[Tuple[base_types.Result, ...], Dict[str, base_types.Result]]
 _SingleNodeSideEffect = Callable[[base_types.ComputationNode, Any], None]
-_NodeToComputationInput = Callable[[base_types.ComputationNode], _ComputationInput]
 _ComputationInputSpec = Tuple[
     Tuple[base_types.ComputationNode, ...], Dict[str, base_types.ComputationNode]
 ]
@@ -74,34 +87,7 @@ def _profile(node, time_started: float):
     )
 
 
-def _make_get_node_input_and_apply(
-    is_async: bool, side_effect: _SingleNodeSideEffect
-) -> Callable[..., base_types.Result]:
-    if is_async:
-
-        @opt_async_gamla.star
-        async def run_node(
-            node_to_input: _NodeToComputationInput, node: base_types.ComputationNode
-        ) -> base_types.Result:
-            args, kwargs = node_to_input(node)
-            before = time.perf_counter()
-            result = await gamla.to_awaitable(node.func(*args, **kwargs))
-            side_effect(node, result)
-            _profile(node, before)
-            return node, result
-
-    else:
-
-        @opt_gamla.star
-        def run_node(node_to_input: _NodeToComputationInput, node: base_types.ComputationNode) -> base_types.Result:  # type: ignore
-            args, kwargs = node_to_input(node)
-            before = time.perf_counter()
-            result = node.func(*args, **kwargs)
-            side_effect(node, result)
-            _profile(node, before)
-            return node, result
-
-    return run_node
+_group_by_is_async_result = opt_gamla.groupby(lambda k_v: inspect.isawaitable(k_v[1]))
 
 
 _is_graph_async = opt_gamla.compose_left(
@@ -205,35 +191,61 @@ def _to_callable_with_side_effect_for_single_and_multiple(
     placeholder_to_future_source = opt_gamla.pipe(
         future_source_to_placeholder, gamla.itemmap(lambda k_v: (k_v[1], k_v[0]))
     )
+    get_node_executor = _make_get_node_executor(
+        edges, handled_exceptions, single_node_side_effect
+    )
+
     topological_layers = opt_gamla.pipe(
         edges,
         _toposort_nodes,
         gamla.map_filter_empty(
             gamla.compose_left(
-                gamla.remove(gamla.contains(placeholder_to_future_source)), frozenset
+                gamla.remove(gamla.contains(placeholder_to_future_source)),
+                opt_gamla.map(opt_gamla.pair_right(get_node_executor)),
+                frozenset,
             )
         ),
         tuple,
     )
+
     translate_source_to_placeholder = opt_gamla.compose_left(
         opt_gamla.keyfilter(gamla.contains(future_sources)),
         opt_gamla.keymap(future_source_to_placeholder.__getitem__),
     )
-    all_node_side_effects_on_edges = all_nodes_side_effect(edges)
-    reduce_layers = _make_reduce_layers(
-        edges, handled_exceptions, is_async, single_node_side_effect
-    )
+    all_node_side_effects_on_edges = gamla.side_effect(all_nodes_side_effect(edges))
+
+    reduce_layers = _make_reduce_layers(handled_exceptions)
 
     if is_async:
 
         async def final_runner(sources_to_values):
-            return await gamla.pipe(
+            d = gamla.pipe(
                 topological_layers,
                 reduce_layers(
                     immutables.Map(translate_source_to_placeholder(sources_to_values))
                 ),
                 dict,
                 gamla.side_effect(all_node_side_effects_on_edges),
+            )
+            results_by_is_async = _group_by_is_async_result(d.items())
+            async_results = tuple(zip(*results_by_is_async.get(True, ())))
+            sync_results = dict(results_by_is_async.get(False, ()))
+            return all_node_side_effects_on_edges(
+                sync_results
+                | (
+                    {
+                        k: v
+                        for (k, v) in zip(
+                            async_results[0],
+                            await asyncio.gather(
+                                *async_results[1], return_exceptions=True
+                            ),
+                        )
+                        if not isinstance(v, Exception)
+                    }
+                    if async_results
+                    else {}
+                )
             )
 
     else:
@@ -245,7 +257,7 @@ def _to_callable_with_side_effect_for_single_and_multiple(
                     immutables.Map(translate_source_to_placeholder(sources_to_values))
                 ),
                 dict,
-                gamla.side_effect(all_node_side_effects_on_edges),
+                all_node_side_effects_on_edges,
             )
 
     return (_async_graph_reducer if is_async else _graph_reducer)(final_runner)
@@ -280,9 +292,9 @@ def _node_incoming_edges_to_input_spec(
     )
 
 
-def _edges_to_accumulated_results_to_node_to_first_possible_input(
-    edges,
-) -> Callable[[_NodeToResults], _NodeToComputationInput]:
+def _make_get_node_executor(
+    edges, handled_exceptions, single_node_side_effect: _SingleNodeSideEffect
+):
     node_to_incoming_edges = graph.get_incoming_edges_for_node(edges)
     node_to_computation_input_spec_options: Callable[
         [base_types.ComputationNode], Tuple[_ComputationInputSpec]
@@ -296,67 +308,237 @@ def _edges_to_accumulated_results_to_node_to_first_possible_input(
             opt_gamla.maptuple(_node_incoming_edges_to_input_spec),
         )
     )
-    # TODO(eli): Add sync.translate_exception/except that avoids inspect.iscoroutinefunction so this can be inlined (ENG-5212)
-    head_or_dep_not_found = gamla.translate_exception(
-        gamla.head, StopIteration, _DepNotFoundError
-    )
 
-    def make_node_to_first_possible_input(
-        accumulated_results: _NodeToResults,
-    ) -> _NodeToComputationInput:
-        return opt_gamla.compose_left(
-            node_to_computation_input_spec_options,
-            opt_gamla.map(
-                gamla.excepts(
-                    KeyError,
-                    lambda _: None,
-                    opt_gamla.packstack(
-                        opt_gamla.maptuple(accumulated_results.__getitem__),
-                        opt_gamla.valmap(accumulated_results.__getitem__),
-                    ),
-                )
-            ),
-            opt_gamla.remove(gamla.equals(None)),
-            head_or_dep_not_found,
-            tuple,
+    async def gather(
+        args: Iterable[Awaitable], kwargs: Mapping[str, Awaitable]
+    ) -> tuple[tuple[Any, ...], dict[str, Any]]:
+        try:
+            res_args = await asyncio.gather(*args) if args else ()
+            res_kwargs = (
+                dict(zip(kwargs.keys(), await asyncio.gather(*kwargs.values())))
+                if kwargs
+                else {}
+            )
+        except (
+            _DepNotFoundError,
+            base_types.SkipComputationError,
+            *handled_exceptions,
+        ):
+            # We delete the references to the upstream tasks to avoid circular reference (task->exception->traceback->task) and improve memory performance
+            del args, kwargs
+            raise _DepNotFoundError() from None
+        return res_args, res_kwargs
+
+    def node_to_input_sync(
+        accumulated_results: Mapping[base_types.ComputationNode, base_types.Result],
+        input_options: Iterable[_ComputationInputSpec],
+    ) -> Optional[_ComputationInput]:
+        for input_spec in input_options:
+            args, kwargs = input_spec
+            try:
+                return tuple(accumulated_results[arg] for arg in args), {
+                    k: accumulated_results[v] for k, v in kwargs.items()
+                }
+            except KeyError:
+                ...
+        return None
+
+    async def node_to_input_async(
+        accumulated_results: Mapping[
+            base_types.ComputationNode, base_types.Result | Awaitable[base_types.Result]
+        ],
+        input_options: Iterable[_ComputationInputSpec],
+    ) -> Optional[_ComputationInput]:
+        for input_spec in input_options:
+            args_spec, kwargs_spec = input_spec
+            if all(
+                accumulated_results.get(arg, CG_NO_RESULT) is not CG_NO_RESULT
+                for arg in args_spec
+            ) and all(
+                accumulated_results.get(kwarg, CG_NO_RESULT) is not CG_NO_RESULT
+                for kwarg in kwargs_spec.values()
+            ):
+                try:
+                    return await gather(
+                        tuple(
+                            gamla.to_awaitable(accumulated_results[a])
+                            if not inspect.isawaitable(accumulated_results[a])
+                            else accumulated_results[a]
+                            for a in args_spec
+                        ),
+                        {
+                            k: gamla.to_awaitable(accumulated_results[v])
+                            if not inspect.isawaitable(accumulated_results[v])
+                            else accumulated_results[v]
+                            for k, v in kwargs_spec.items()
+                        },
+                    )
+                except (
+                    _DepNotFoundError,
+                    base_types.SkipComputationError,
+                    *handled_exceptions,
+                ):
+                    ...
+        return None
+
+    @opt_gamla.after(asyncio.create_task)
+    async def await_deps_and_apply(
+        accumulated_results: Mapping[
+            base_types.ComputationNode, base_types.Result | Awaitable[base_types.Result]
+        ],
+        node: base_types.ComputationNode,
+    ) -> base_types.Result:
+        args_kwargs = await node_to_input_async(
+            accumulated_results, node_to_computation_input_spec_options(node)
         )
+        # We delete the references to the upstream tasks to avoid circular reference (task->exception->traceback->task) and improve memory performance
+        del accumulated_results
+        if args_kwargs is None:
+            raise _DepNotFoundError()
 
-    return make_node_to_first_possible_input
+        args, kwargs = args_kwargs
+        before = time.perf_counter()
+        result = node.func(*args, **kwargs)
+        single_node_side_effect(node, result)
+        if inspect.isawaitable(result):
+            raise Exception(
+                f"{node} returned an awaitable result but is not an async function"
+            )
+        _profile(node, before)
+        return result
+
+    @opt_gamla.after(asyncio.create_task)
+    async def await_deps_and_await(
+        accumulated_results: Mapping[
+            base_types.ComputationNode, base_types.Result | Awaitable[base_types.Result]
+        ],
+        node: base_types.ComputationNode,
+    ) -> base_types.Result:
+        args_kwargs = await node_to_input_async(
+            accumulated_results, node_to_computation_input_spec_options(node)
+        )
+        # We delete the references to the upstream tasks to avoid circular reference (task->exception->traceback->task) and improve memory performance
+        del accumulated_results
+        if args_kwargs is None:
+            raise _DepNotFoundError()
+
+        args, kwargs = args_kwargs
+        before = time.perf_counter()
+        result = await node.func(*args, **kwargs)
+        single_node_side_effect(node, result)
+        _profile(node, before)
+        return result
+
+    @opt_gamla.after(asyncio.create_task)
+    async def get_deps_and_await(
+        accumulated_results: Mapping[base_types.ComputationNode, base_types.Result],
+        node: base_types.ComputationNode,
+    ) -> base_types.Result:
+        args_kwargs = node_to_input_sync(
+            accumulated_results, node_to_computation_input_spec_options(node)
+        )
+        # We delete the references to the upstream tasks to avoid circular reference (task->exception->traceback->task) and improve memory performance
+        del accumulated_results
+        if args_kwargs is None:
+            raise _DepNotFoundError()
+
+        args, kwargs = args_kwargs
+        before = time.perf_counter()
+        result = await node.func(*args, **kwargs)
+        single_node_side_effect(node, result)
+        _profile(node, before)
+        return result
+
+    def get_deps_and_apply(
+        accumulated_results: Mapping[base_types.ComputationNode, base_types.Result],
+        node: base_types.ComputationNode,
+    ) -> base_types.Result:
+        args_kwargs = node_to_input_sync(
+            accumulated_results, node_to_computation_input_spec_options(node)
+        )
+        # We delete the references to the upstream tasks to avoid circular reference (task->exception->traceback->task) and improve memory performance
+        del accumulated_results
+        if args_kwargs is None:
+            raise _DepNotFoundError()
+
+        args, kwargs = args_kwargs
+        before = time.perf_counter()
+        result = node.func(*args, **kwargs)
+        single_node_side_effect(node, result)
+        if inspect.isawaitable(result):
+            raise Exception(
+                f"{node} returned an awaitable result but is not an async function"
+            )
+        _profile(node, before)
+        return result
+
+    all_nodes = graph.get_all_nodes(edges)
+    async_nodes = {n for n in all_nodes if asyncio.iscoroutinefunction(n.func)}
+    sync = all_nodes - async_nodes
+    tf = graph.traverse_forward(edges)
+    downstream_from_async = set(gamla.graph_traverse_many(async_nodes, tf))
+
+    async_and_downstream = async_nodes & downstream_from_async
+    async_not_downstream = async_nodes - downstream_from_async
+    sync_and_downstream = sync & downstream_from_async
+    sync_not_downstream = sync - downstream_from_async
+
+    def get_executor(
+        node: base_types.ComputationNode,
+    ) -> Callable[
+        [
+            Mapping[
+                base_types.ComputationNode,
+                base_types.Result | Awaitable[base_types.Result],
+            ],
+            base_types.ComputationNode,
+        ],
+        base_types.Result,
+    ]:
+        if node in async_and_downstream:
+            return await_deps_and_await
+        if node in async_not_downstream:
+            return get_deps_and_await
+        if node in sync_and_downstream:
+            return await_deps_and_apply
+        if node in sync_not_downstream:
+            # This is fully sync so it only uses sync results from the mapping, its typing says the whole mapping is sync.
+            return get_deps_and_apply  # type: ignore
+        raise Exception("no executor found")
+
+    return get_executor
 
 
 def _make_reduce_layers(
-    edges: base_types.GraphType,
-    handled_exceptions: Tuple[Type[Exception], ...],
-    is_async: bool,
-    single_node_side_effect: _SingleNodeSideEffect,
+    handled_exceptions: Tuple[Type[Exception], ...]
 ) -> Callable[[immutables.Map], Callable[[Tuple[FrozenSet, ...]], immutables.Map]]:
-    get_node_input_and_apply = _make_get_node_input_and_apply(
-        is_async, single_node_side_effect
-    )
-    accumulated_results_to_node_to_input = (
-        _edges_to_accumulated_results_to_node_to_first_possible_input(edges)
-    )
+    def apply_executor(accumulated_results, node, executor):
+        try:
+            return node, executor(accumulated_results, node)
+        except (
+            _DepNotFoundError,
+            base_types.SkipComputationError,
+            *handled_exceptions,
+        ):
+            # We delete the references to the upstream tasks to avoid circular reference (task->exception->traceback->task) and improve memory performance
+            del accumulated_results
+            return None
+
     single_layer_reducer = debug.name_callable(
         gamla.compose_left(
             gamla.pack,
             gamla.juxt(
                 gamla.head,
                 gamla.compose_left(
-                    opt_gamla.packstack(
-                        accumulated_results_to_node_to_input, gamla.identity
-                    ),
                     gamla.explode(1),
-                    gamla.map_filter_empty(
-                        gamla.first(
-                            get_node_input_and_apply,
-                            gamla.just(None),
-                            exception_type=(
-                                *handled_exceptions,
-                                base_types.SkipComputationError,
-                                _DepNotFoundError,
-                            ),
+                    opt_gamla.map(
+                        lambda results__node_executor: apply_executor(
+                            results__node_executor[0],
+                            results__node_executor[1][0],
+                            results__node_executor[1][1],
                         )
                     ),
+                    opt_gamla.filter(bool),
                     tuple,
                 ),
             ),
