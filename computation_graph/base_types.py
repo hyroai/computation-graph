@@ -96,9 +96,13 @@ class ComputationNode:
     func: Callable
     signature: NodeSignature
     is_terminal: bool
+    computed_hash: int = dataclasses.field(init=False)
+
+    def __post_init__(self):
+        object.__setattr__(self, "computed_hash", hash(self.func))
 
     def __hash__(self):
-        return hash(self.func)
+        return self.computed_hash
 
     def __repr__(self):
         return self.name

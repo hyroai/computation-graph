@@ -292,10 +292,18 @@ def _node_incoming_edges_to_input_spec(
     )
 
 
+def _to_awaitable(v) -> Awaitable:
+    if inspect.isawaitable(v):
+        return v
+    f = asyncio.get_event_loop().create_future()
+    f.set_result(v)
+    return f
+
+
 def _make_get_node_executor(
     edges, handled_exceptions, single_node_side_effect: _SingleNodeSideEffect
 ):
-    node_to_incoming_edges = graph.get_incoming_edges_for_node(edges)
+    node_to_incoming_edges = functools.cache(graph.get_incoming_edges_for_node(edges))
     node_to_computation_input_spec_options: Callable[
         [base_types.ComputationNode], Tuple[_ComputationInputSpec]
     ] = functools.cache(
@@ -310,24 +318,23 @@ def _make_get_node_executor(
     )
 
     async def gather(
-        args: Iterable[Awaitable], kwargs: Mapping[str, Awaitable]
+        args: Tuple[Awaitable, ...], kwargs: Mapping[str, Awaitable]
     ) -> tuple[tuple[Any, ...], dict[str, Any]]:
-        try:
-            res_args = await asyncio.gather(*args) if args else ()
-            res_kwargs = (
-                dict(zip(kwargs.keys(), await asyncio.gather(*kwargs.values())))
-                if kwargs
-                else {}
-            )
-        except (
-            _DepNotFoundError,
-            base_types.SkipComputationError,
-            *handled_exceptions,
-        ):
-            # We delete the references to the upstream tasks to avoid circular reference (task->exception->traceback->task) and improve memory performance
-            del args, kwargs
-            raise _DepNotFoundError() from None
-        return res_args, res_kwargs
+        if args or kwargs:
+            try:
+                gathered = await asyncio.gather(*args, *kwargs.values())
+                return gathered[: len(args)], dict(
+                    zip(kwargs.keys(), gathered[len(args) :])
+                )
+            except (
+                _DepNotFoundError,
+                base_types.SkipComputationError,
+                *handled_exceptions,
+            ):
+                # We delete the references to the upstream tasks to avoid circular reference (task->exception->traceback->task) and improve memory performance
+                del args, kwargs
+                raise _DepNotFoundError() from None
+        return (), {}
 
     def node_to_input_sync(
         accumulated_results: Mapping[base_types.ComputationNode, base_types.Result],
@@ -360,16 +367,9 @@ def _make_get_node_executor(
             ):
                 try:
                     return await gather(
-                        tuple(
-                            gamla.to_awaitable(accumulated_results[a])
-                            if not inspect.isawaitable(accumulated_results[a])
-                            else accumulated_results[a]
-                            for a in args_spec
-                        ),
+                        tuple(_to_awaitable(accumulated_results[a]) for a in args_spec),
                         {
-                            k: gamla.to_awaitable(accumulated_results[v])
-                            if not inspect.isawaitable(accumulated_results[v])
-                            else accumulated_results[v]
+                            k: _to_awaitable(accumulated_results[v])
                             for k, v in kwargs_spec.items()
                         },
                     )
