@@ -63,6 +63,55 @@ def test_simple():
         )
 
 
+async def test_async_run_as_soon_as_possible(capsys):
+    # This test is to make sure that the async node runs as soon as possible.
+    # nodes in different topological layers should run concurrently if not dependent on each other.
+    async def concurrent1(x):
+        print("start concurrent1")  # noqa
+        await asyncio.sleep(0.1)
+        print("end concurrent1")  # noqa
+        return "concurrent1"
+
+    async def concurrent2(x):
+        print("start concurrent2")  # noqa
+        await asyncio.sleep(0.1)
+        print("end concurrent2")  # noqa
+        return "concurrent2"
+
+    def sink(x, y):
+        return f"x={x}, y={y}"
+
+    g = base_types.merge_graphs(
+        composers.compose_unary(concurrent1, lambda: "x"),
+        composers.compose_unary(concurrent2, lambda y: y, lambda: "y"),
+        composers.compose_left(concurrent1, sink, key="x"),
+        composers.compose_left(concurrent2, sink, key="y"),
+    )
+
+    await graph_runners.nullary(g, sink)
+
+    # Capture the output
+    captured = capsys.readouterr()
+
+    # Assertions
+    assert "start concurrent1" in captured.out
+    assert "start concurrent2" in captured.out
+    assert "end concurrent1" in captured.out
+    assert "end concurrent2" in captured.out
+    assert captured.out.index("start concurrent1") < captured.out.index(
+        "end concurrent1"
+    )
+    assert captured.out.index("start concurrent2") < captured.out.index(
+        "end concurrent2"
+    )
+    assert captured.out.index("start concurrent1") < captured.out.index(
+        "end concurrent2"
+    )
+    assert captured.out.index("start concurrent2") < captured.out.index(
+        "end concurrent1"
+    )
+
+
 async def test_simple_async():
     assert (
         await graph_runners.unary(
