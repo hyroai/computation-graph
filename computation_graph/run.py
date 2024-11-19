@@ -43,6 +43,16 @@ _SingleNodeSideEffect = Callable[[base_types.ComputationNode, Any], None]
 _ComputationInputSpec = Tuple[
     Tuple[base_types.ComputationNode, ...], Dict[str, base_types.ComputationNode]
 ]
+_NodeExecutor = Callable[
+    [
+        Mapping[
+            base_types.ComputationNode,
+            base_types.Result | Awaitable[base_types.Result],
+        ],
+        base_types.ComputationNode,
+    ],
+    base_types.Result,
+]
 
 
 def _transpose_graph(
@@ -212,7 +222,7 @@ def _to_callable_with_side_effect_for_single_and_multiple(
         async def final_runner(sources_to_values):
             d = gamla.pipe(
                 topological_layers,
-                run_graph(
+                _run_graph(
                     translate_source_to_placeholder(sources_to_values),
                     handled_exceptions,
                 ),
@@ -244,7 +254,7 @@ def _to_callable_with_side_effect_for_single_and_multiple(
         def final_runner(sources_to_values):
             return gamla.pipe(
                 topological_layers,
-                run_graph(
+                _run_graph(
                     translate_source_to_placeholder(sources_to_values),
                     handled_exceptions,
                 ),
@@ -475,18 +485,7 @@ def _make_get_node_executor(
     sync_and_downstream = sync & downstream_from_async
     sync_not_downstream = sync - downstream_from_async
 
-    def get_executor(
-        node: base_types.ComputationNode,
-    ) -> Callable[
-        [
-            Mapping[
-                base_types.ComputationNode,
-                base_types.Result | Awaitable[base_types.Result],
-            ],
-            base_types.ComputationNode,
-        ],
-        base_types.Result,
-    ]:
+    def get_executor(node: base_types.ComputationNode) -> _NodeExecutor:
         if node in async_and_downstream:
             return await_deps_and_await
         if node in async_not_downstream:
@@ -501,8 +500,10 @@ def _make_get_node_executor(
     return get_executor
 
 
-def run_graph(inputs: dict, handled_exceptions: Tuple[Type[Exception], ...]):
-    def run_graph(nodes):
+def _run_graph(inputs: dict, handled_exceptions):
+    def run_graph(
+        nodes: tuple[tuple[base_types.ComputationNode, _NodeExecutor]]
+    ) -> _NodeToResults:
         accumulated_results = inputs.copy()
         for node_executor in nodes:
             try:
