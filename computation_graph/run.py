@@ -29,7 +29,6 @@ import typeguard
 from gamla.optimized import sync as opt_gamla
 
 from computation_graph import base_types, composers, graph, signature
-from computation_graph.composers import debug
 
 CG_NO_RESULT = "CG_NO_RESULT"
 
@@ -62,7 +61,7 @@ _toposort_nodes: Callable[
         opt_gamla.compose_left(opt_gamla.map(base_types.edge_destination), set)
     ),
     _transpose_graph,
-    toposort.toposort,
+    lambda g: toposort.toposort_flatten(g, sort=False),
 )
 
 
@@ -198,14 +197,8 @@ def _to_callable_with_side_effect_for_single_and_multiple(
     topological_layers = opt_gamla.pipe(
         edges,
         _toposort_nodes,
-        gamla.map_filter_empty(
-            gamla.compose_left(
-                gamla.remove(gamla.contains(placeholder_to_future_source)),
-                opt_gamla.map(opt_gamla.pair_right(get_node_executor)),
-                frozenset,
-            )
-        ),
-        tuple,
+        gamla.remove(gamla.contains(placeholder_to_future_source)),
+        opt_gamla.maptuple(opt_gamla.pair_right(get_node_executor)),
     )
 
     translate_source_to_placeholder = opt_gamla.compose_left(
@@ -214,18 +207,16 @@ def _to_callable_with_side_effect_for_single_and_multiple(
     )
     all_node_side_effects_on_edges = gamla.side_effect(all_nodes_side_effect(edges))
 
-    reduce_layers = _make_reduce_layers(handled_exceptions)
-
     if is_async:
 
         async def final_runner(sources_to_values):
             d = gamla.pipe(
                 topological_layers,
-                reduce_layers(
-                    immutables.Map(translate_source_to_placeholder(sources_to_values))
+                run_graph(
+                    translate_source_to_placeholder(sources_to_values),
+                    handled_exceptions,
                 ),
                 dict,
-                gamla.side_effect(all_node_side_effects_on_edges),
             )
             results_by_is_async = _group_by_is_async_result(d.items())
             async_results = tuple(zip(*results_by_is_async.get(True, ())))
@@ -253,8 +244,9 @@ def _to_callable_with_side_effect_for_single_and_multiple(
         def final_runner(sources_to_values):
             return gamla.pipe(
                 topological_layers,
-                reduce_layers(
-                    immutables.Map(translate_source_to_placeholder(sources_to_values))
+                run_graph(
+                    translate_source_to_placeholder(sources_to_values),
+                    handled_exceptions,
                 ),
                 dict,
                 all_node_side_effects_on_edges,
@@ -509,48 +501,23 @@ def _make_get_node_executor(
     return get_executor
 
 
-def _make_reduce_layers(
-    handled_exceptions: Tuple[Type[Exception], ...]
-) -> Callable[[immutables.Map], Callable[[Tuple[FrozenSet, ...]], immutables.Map]]:
-    def apply_executor(accumulated_results, node, executor):
-        try:
-            return node, executor(accumulated_results, node)
-        except (
-            _DepNotFoundError,
-            base_types.SkipComputationError,
-            *handled_exceptions,
-        ):
-            # We delete the references to the upstream tasks to avoid circular reference (task->exception->traceback->task) and improve memory performance
-            del accumulated_results
-            return None
-
-    single_layer_reducer = debug.name_callable(
-        gamla.compose_left(
-            gamla.pack,
-            gamla.juxt(
-                gamla.head,
-                gamla.compose_left(
-                    gamla.explode(1),
-                    opt_gamla.map(
-                        lambda results__node_executor: apply_executor(
-                            results__node_executor[0],
-                            results__node_executor[1][0],
-                            results__node_executor[1][1],
-                        )
-                    ),
-                    opt_gamla.filter(bool),
-                    tuple,
-                ),
-            ),
-            opt_gamla.star(
-                lambda prev_results, current_results: prev_results.update(
-                    current_results
+def run_graph(inputs: dict, handled_exceptions: Tuple[Type[Exception], ...]):
+    def run_graph(nodes):
+        accumulated_results = inputs.copy()
+        for node_executor in nodes:
+            try:
+                accumulated_results[node_executor[0]] = node_executor[1](
+                    accumulated_results, node_executor[0]
                 )
-            ),
-        ),
-        "single_layer_reducer",
-    )
-    return gamla.curry(gamla.reduce_curried)(single_layer_reducer)
+            except (
+                _DepNotFoundError,
+                base_types.SkipComputationError,
+                *handled_exceptions,
+            ):
+                pass
+        return accumulated_results
+
+    return run_graph
 
 
 def _graph_reducer(graph_callable):
