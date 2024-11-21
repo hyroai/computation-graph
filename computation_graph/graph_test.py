@@ -233,6 +233,17 @@ def test_first():
     )
 
 
+def test_raise_unhandled_exception():
+    class MyExceptionError(Exception):
+        ...
+
+    def raises():
+        raise MyExceptionError("BAD")
+
+    with pytest.raises(MyExceptionError, match="BAD"):
+        graph_runners.nullary_infer_sink(composers.make_first(raises, lambda: 1))
+
+
 def test_first_all_unactionable():
     def raises():
         raise base_types.SkipComputationError
