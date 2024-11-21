@@ -71,7 +71,13 @@ _toposort_nodes: Callable[
         opt_gamla.compose_left(opt_gamla.map(base_types.edge_destination), set)
     ),
     _transpose_graph,
-    lambda g: toposort.toposort_flatten(g, sort=False),
+    toposort.toposort,
+    # Make async functions come first in each layer so they'll start running before all the sync functions
+    opt_gamla.maptuple(
+        gamla.sort_by(lambda n: 0 if inspect.iscoroutinefunction(n.func) else 1)
+    ),
+    gamla.concat,
+    tuple,
 )
 
 
