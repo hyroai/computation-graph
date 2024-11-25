@@ -233,6 +233,18 @@ def test_first():
     )
 
 
+async def test_raise_handled_from_async():
+    async def raises():
+        raise base_types.SkipComputationError
+
+    assert (
+        await graph_runners.nullary_infer_sink(
+            composers.make_first(raises, lambda: 1, lambda: 2)
+        )
+        == 1
+    )
+
+
 def test_raise_unhandled_exception():
     class MyExceptionError(Exception):
         ...
