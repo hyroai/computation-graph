@@ -244,6 +244,32 @@ def test_raise_unhandled_exception():
         graph_runners.nullary_infer_sink(composers.make_first(raises, lambda: 1))
 
 
+async def test_raise_exception_in_sync_after_async():
+    def raises(x):
+        raise TypeError("BAD")
+
+    async def async_source():
+        return 4
+
+    with pytest.raises(TypeError, match="BAD"):
+        await run.to_callable_strict(
+            composers.compose_left(async_source, raises, lambda x: 1)
+        )({}, {})
+
+
+async def test_raise_exception_in_async_after_sync():
+    async def raises(x):
+        raise TypeError("BAD")
+
+    def source():
+        return 4
+
+    with pytest.raises(TypeError, match="BAD"):
+        await run.to_callable_strict(
+            composers.compose_left(source, raises, lambda x: 1)
+        )({}, {})
+
+
 def test_first_all_unactionable():
     def raises():
         raise base_types.SkipComputationError

@@ -102,7 +102,7 @@ def _profile(node, time_started: float):
     )
 
 
-_group_by_is_async_result = opt_gamla.groupby(lambda k_v: inspect.isawaitable(k_v[1]))
+_group_by_is_future = opt_gamla.groupby(lambda k_v: asyncio.isfuture(k_v[1]))
 
 
 _is_graph_async = opt_gamla.compose_left(
@@ -210,7 +210,7 @@ def _to_callable_with_side_effect_for_single_and_multiple(
         edges, handled_exceptions, single_node_side_effect
     )
 
-    topological_layers = opt_gamla.pipe(
+    topological_sorted_nodes = opt_gamla.pipe(
         edges,
         _toposort_nodes,
         gamla.remove(gamla.contains(placeholder_to_future_source)),
@@ -226,46 +226,37 @@ def _to_callable_with_side_effect_for_single_and_multiple(
     if is_async:
 
         async def final_runner(sources_to_values):
-            d = gamla.pipe(
-                topological_layers,
-                _run_graph(
-                    translate_source_to_placeholder(sources_to_values),
-                    handled_exceptions,
-                ),
-                dict,
+            node_to_task_or_result = _run_graph(
+                translate_source_to_placeholder(sources_to_values),
+                handled_exceptions,
+                topological_sorted_nodes,
             )
-            results_by_is_async = _group_by_is_async_result(d.items())
+            results_by_is_async = _group_by_is_future(node_to_task_or_result.items())
             async_results = tuple(zip(*results_by_is_async.get(True, ())))
             sync_results = dict(results_by_is_async.get(False, ()))
-            return all_node_side_effects_on_edges(
-                sync_results
-                | (
-                    {
-                        k: v
-                        for (k, v) in zip(
-                            async_results[0],
-                            await asyncio.gather(
-                                *async_results[1], return_exceptions=True
-                            ),
-                        )
-                        if not isinstance(v, Exception)
-                    }
-                    if async_results
-                    else {}
-                )
-            )
+
+            all_results = sync_results
+            if async_results:
+                for (node, node_result) in zip(
+                    async_results[0],
+                    await asyncio.gather(*async_results[1], return_exceptions=True),
+                ):
+                    e = node_to_task_or_result[node].exception()
+                    if e:
+                        raise e from e
+                    all_results[node] = node_result
+
+            return all_node_side_effects_on_edges(all_results)
 
     else:
 
         def final_runner(sources_to_values):
-            return gamla.pipe(
-                topological_layers,
+            return all_node_side_effects_on_edges(
                 _run_graph(
                     translate_source_to_placeholder(sources_to_values),
                     handled_exceptions,
-                ),
-                dict,
-                all_node_side_effects_on_edges,
+                    topological_sorted_nodes,
+                )
             )
 
     return (_async_graph_reducer if is_async else _graph_reducer)(final_runner)
@@ -506,25 +497,24 @@ def _make_get_node_executor(
     return get_executor
 
 
-def _run_graph(inputs: dict, handled_exceptions):
-    def run_graph(
-        nodes: tuple[tuple[base_types.ComputationNode, _NodeExecutor]]
-    ) -> _NodeToResults:
-        accumulated_results = inputs.copy()
-        for node_executor in nodes:
-            try:
-                accumulated_results[node_executor[0]] = node_executor[1](
-                    accumulated_results, node_executor[0]
-                )
-            except (
-                _DepNotFoundError,
-                base_types.SkipComputationError,
-                *handled_exceptions,
-            ):
-                pass
-        return accumulated_results
-
-    return run_graph
+def _run_graph(
+    inputs: dict,
+    handled_exceptions,
+    topological_sorted_nodes: tuple[tuple[base_types.ComputationNode, _NodeExecutor]],
+) -> _NodeToResults:
+    accumulated_results = inputs.copy()
+    for node_executor in topological_sorted_nodes:
+        try:
+            accumulated_results[node_executor[0]] = node_executor[1](
+                accumulated_results, node_executor[0]
+            )
+        except (
+            _DepNotFoundError,
+            base_types.SkipComputationError,
+            *handled_exceptions,
+        ):
+            pass
+    return accumulated_results
 
 
 def _graph_reducer(graph_callable):
