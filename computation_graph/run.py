@@ -242,7 +242,9 @@ def _to_callable_with_side_effect_for_single_and_multiple(
                     await asyncio.gather(*async_results[1], return_exceptions=True),
                 ):
                     e = node_to_task_or_result[node].exception()
-                    if e and not isinstance(
+                    if not e:
+                        all_results[node] = node_result
+                    elif not isinstance(
                         e,
                         (
                             _DepNotFoundError,
@@ -251,7 +253,6 @@ def _to_callable_with_side_effect_for_single_and_multiple(
                         ),
                     ):
                         raise e from e
-                    all_results[node] = node_result
 
             return all_node_side_effects_on_edges(all_results)
 
