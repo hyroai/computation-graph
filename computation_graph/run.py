@@ -242,7 +242,14 @@ def _to_callable_with_side_effect_for_single_and_multiple(
                     await asyncio.gather(*async_results[1], return_exceptions=True),
                 ):
                     e = node_to_task_or_result[node].exception()
-                    if e:
+                    if e and not isinstance(
+                        e,
+                        (
+                            _DepNotFoundError,
+                            base_types.SkipComputationError,
+                            *handled_exceptions,
+                        ),
+                    ):
                         raise e from e
                     all_results[node] = node_result
 
