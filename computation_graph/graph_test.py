@@ -245,6 +245,26 @@ async def test_raise_handled_from_async():
     )
 
 
+async def test_no_result_for_node_that_raised_handled_exception():
+    async def raises(x):
+        raise base_types.SkipComputationError
+
+    def sink(x):
+        return x
+
+    @graph.make_computation_node
+    def source():
+        return 4
+
+    res = await run.to_callable_strict(composers.compose_left(source, raises, sink))(
+        {}, {}
+    )
+
+    assert res[source] == 4
+    assert raises not in res
+    assert sink not in res
+
+
 def test_raise_unhandled_exception():
     class MyExceptionError(Exception):
         ...
