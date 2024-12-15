@@ -226,33 +226,10 @@ def _to_callable_with_side_effect_for_single_and_multiple(
     if is_async:
 
         async def final_runner(sources_to_values):
-            node_to_task_or_result = _run_graph(
-                translate_source_to_placeholder(sources_to_values),
-                handled_exceptions,
-                topological_sorted_nodes,
+            inputs = translate_source_to_placeholder(sources_to_values)
+            all_results = await _run_graph_async(
+                inputs, handled_exceptions, topological_sorted_nodes
             )
-            results_by_is_async = _group_by_is_future(node_to_task_or_result.items())
-            async_results = tuple(zip(*results_by_is_async.get(True, ())))
-            sync_results = dict(results_by_is_async.get(False, ()))
-
-            all_results = sync_results
-            if async_results:
-                for (node, node_result) in zip(
-                    async_results[0],
-                    await asyncio.gather(*async_results[1], return_exceptions=True),
-                ):
-                    e = node_to_task_or_result[node].exception()
-                    if not e:
-                        all_results[node] = node_result
-                    elif not isinstance(
-                        e,
-                        (
-                            _DepNotFoundError,
-                            base_types.SkipComputationError,
-                            *handled_exceptions,
-                        ),
-                    ):
-                        raise e from e
 
             return all_node_side_effects_on_edges(all_results)
 
@@ -503,6 +480,57 @@ def _make_get_node_executor(
         raise Exception("no executor found")
 
     return get_executor
+
+
+async def _run_graph_async(inputs, handled_exceptions, topological_sorted_nodes):
+    node_to_task_or_result = inputs.copy()
+    unhandled_exception = None
+    try:
+        for node_executor in topological_sorted_nodes:
+            try:
+                node_to_task_or_result[node_executor[0]] = node_executor[1](
+                    node_to_task_or_result, node_executor[0]
+                )
+            except (
+                _DepNotFoundError,
+                base_types.SkipComputationError,
+                *handled_exceptions,
+            ):
+                pass
+    except Exception as exc:
+        unhandled_exception = exc
+    finally:
+        results_by_is_async = _group_by_is_future(node_to_task_or_result.items())
+        async_results = tuple(zip(*results_by_is_async.get(True, ())))
+        sync_results = dict(results_by_is_async.get(False, ()))
+
+        all_results = sync_results
+        if async_results:
+            for (node, node_result) in zip(
+                async_results[0],
+                await asyncio.gather(*async_results[1], return_exceptions=True),
+            ):
+                task_e = node_to_task_or_result[node].exception()
+                if not task_e:
+                    all_results[node] = node_result
+                elif not unhandled_exception and not isinstance(
+                    task_e,
+                    (
+                        _DepNotFoundError,
+                        base_types.SkipComputationError,
+                        *handled_exceptions,
+                    ),
+                ):
+                    unhandled_exception = task_e
+        if unhandled_exception:
+            # this trick avoids cyclic reference and garbage collection issues
+            try:
+                raise unhandled_exception from unhandled_exception
+            except Exception as e:
+                del node_to_task_or_result
+                del unhandled_exception
+                raise e from e
+    return all_results
 
 
 def _run_graph(

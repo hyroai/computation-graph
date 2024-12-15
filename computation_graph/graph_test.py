@@ -276,6 +276,27 @@ def test_raise_unhandled_exception():
         graph_runners.nullary_infer_sink(composers.make_first(raises, lambda: 1))
 
 
+async def test_raise_unhandled_exception_async():
+    class MyExceptionError(Exception):
+        ...
+
+    @composers.compose_left_dict(
+        {"x": composers.compose_left_unary(lambda: 1, lambda x: 1)}
+    )
+    def raises(x):
+        raise MyExceptionError("BAD")
+
+    @composers.compose_left_dict({"x": lambda: 1})
+    async def not_awaited(x):
+        raise base_types.SkipComputationError("DAB")
+
+    with pytest.raises(MyExceptionError, match="BAD"):
+        await graph_runners.nullary_infer_sink(
+            composers.compose_left_dict({"y": raises, "x": not_awaited}, lambda x, y: 1)
+        )
+    assert len(asyncio.all_tasks()) == 1
+
+
 async def test_raise_exception_in_sync_after_async():
     def raises(x):
         raise TypeError("BAD")
@@ -704,11 +725,11 @@ def test_compose_future():
     )(([[{a: 2, b: 2, c: 2}, 9], [{a: 2, b: 2, c: 2}, 25]]))
 
 
-def test_compose_future_async():
+async def test_compose_future_async():
     a = graph.make_source()
     b = graph.make_source()
     c = graph.make_source()
-    graph_runners.variadic_with_state_and_expectations(
+    await graph_runners.variadic_with_state_and_expectations(
         base_types.merge_graphs(
             composers.compose_source_unary(_plus_1_async, c),
             composers.compose_source_unary(_times_2, b),
