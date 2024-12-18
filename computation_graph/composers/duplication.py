@@ -6,6 +6,7 @@ from typing import Dict
 import gamla
 
 from computation_graph import base_types, graph
+from computation_graph.composers import debug
 
 
 def duplicate_function(func):
@@ -15,14 +16,13 @@ def duplicate_function(func):
         async def inner(*args, **kwargs):
             return await func(*args, **kwargs)
 
-        return inner
+    else:
 
-    @functools.wraps(func)
-    def inner(*args, **kwargs):
-        return func(*args, **kwargs)
+        @functools.wraps(func)
+        def inner(*args, **kwargs):
+            return func(*args, **kwargs)
 
-    inner.__name__ = f"duplicate of {inner.__name__}"
-    return inner
+    return debug.name_callable(inner, f"duplicate of {func.__name__}")
 
 
 def _duplicate_computation_edge(get_duplicated_node):
