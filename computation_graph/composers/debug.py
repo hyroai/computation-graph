@@ -43,5 +43,6 @@ debug_log = _debug_with_frame(_debug_log_inner)
 
 
 def name_callable(f: Callable, name: str) -> Callable:
+    f.__code__ = f.__code__.replace(co_name=name)
     f.__name__ = name
     return f
