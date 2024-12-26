@@ -12,7 +12,7 @@ class _ComputationError:
 
 
 _callable_or_graph_type_to_node_or_graph_type = gamla.unless(
-    gamla.is_instance(tuple), graph.make_computation_node
+    gamla.is_instance((tuple, set, frozenset)), graph.make_computation_node
 )
 
 
@@ -20,7 +20,7 @@ def _get_edges_from_node_or_graph(
     node_or_graph: base_types.NodeOrGraph,
 ) -> base_types.GraphType:
     if isinstance(node_or_graph, base_types.ComputationNode):
-        return ()
+        return base_types.EMPTY_GRAPH
     return node_or_graph
 
 
@@ -145,7 +145,7 @@ def _infer_sink(graph_or_node: base_types.NodeOrGraph) -> base_types.Computation
             return gamla.head(result)
 
     assert len(_destinations(graph_or_node)) == 1, graph_or_node
-    return base_types.edge_destination(graph_or_node[0])
+    return base_types.edge_destination(gamla.head(graph_or_node))
 
 
 def make_first(*graphs: base_types.CallableOrNodeOrGraph) -> base_types.GraphType:

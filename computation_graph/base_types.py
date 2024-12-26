@@ -4,7 +4,7 @@ import dataclasses
 import functools
 import os
 import typing
-from typing import Callable, Hashable, Optional, Tuple, Union
+from typing import Callable, FrozenSet, Hashable, Optional, Tuple, Union
 
 import gamla
 
@@ -125,7 +125,7 @@ def edge_sources(edge: ComputationEdge) -> Tuple[ComputationNode, ...]:
 
 is_computation_graph = gamla.alljuxt(
     # Note that this cannot be set to `GraphType` (due to `is_instance` limitation).
-    gamla.is_instance(tuple),
+    gamla.is_instance((tuple, set, frozenset)),
     gamla.allmap(gamla.is_instance(ComputationEdge)),
 )
 
@@ -158,18 +158,17 @@ def _assert_no_unwanted_ambiguity_when_debug_set(graph):
         assert_no_unwanted_ambiguity(graph)
 
 
-merge_graphs = gamla.compose_left(
-    gamla.pack,
-    gamla.concat,
-    gamla.unique,
-    tuple,
-    _assert_no_unwanted_ambiguity_when_debug_set,
-)
+def merge_graphs(*graphs):
+    s = frozenset({})
+    s = s.union(*graphs)
+
+    return _assert_no_unwanted_ambiguity_when_debug_set(s)
+
 
 # We use a tuple to generate a unique id for each node based on the order of edges.
-GraphType = Tuple[ComputationEdge, ...]
+GraphType = FrozenSet[ComputationEdge]
 GraphOrCallable = Union[Callable, GraphType]
 CallableOrNode = Union[Callable, ComputationNode]
 CallableOrNodeOrGraph = Union[CallableOrNode, GraphType]
 NodeOrGraph = Union[ComputationNode, GraphType]
-EMPTY_GRAPH = ()
+EMPTY_GRAPH: GraphType = frozenset()
