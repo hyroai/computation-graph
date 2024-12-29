@@ -126,6 +126,7 @@ def edge_sources(edge: ComputationEdge) -> Tuple[ComputationNode, ...]:
 is_computation_graph = gamla.alljuxt(
     # Note that this cannot be set to `GraphType` (due to `is_instance` limitation).
     gamla.is_instance((tuple, set, frozenset)),
+    gamla.len_greater(0),
     gamla.allmap(gamla.is_instance(ComputationEdge)),
 )
 
