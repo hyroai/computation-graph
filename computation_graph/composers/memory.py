@@ -53,4 +53,13 @@ def reduce_with_past_result(
 
 @gamla.curry
 def with_state(key: str, default, f: Callable) -> base_types.GraphType:
-    return composers.make_compose_future(f, f, key, default)
+    # Include a bypass for last state if reducer (or its upstream) in current turn is unactionable
+    def passthrough(x):
+        return x
+
+    f_with_bypass = composers.make_first(f, passthrough)
+
+    return base_types.merge_graphs(
+        composers.make_compose_future(f, f_with_bypass, key, default),
+        composers.make_compose_future(passthrough, f_with_bypass, None, default),
+    )
