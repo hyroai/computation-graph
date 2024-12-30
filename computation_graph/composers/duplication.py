@@ -69,7 +69,7 @@ duplicate_graph = gamla.compose_left(
 )
 
 duplicate_function_or_graph = gamla.ternary(
-    gamla.is_instance(tuple), duplicate_graph, duplicate_function
+    gamla.is_instance((tuple, set, frozenset)), duplicate_graph, duplicate_function
 )
 
 
@@ -100,7 +100,7 @@ def safe_replace_sources(
 
     def update_edge(e: base_types.ComputationEdge) -> base_types.GraphType:
         dest = base_types.edge_destination(e)
-        g = graph.replace_node(dest, get_node_replacement(dest))((e,))
+        g = graph.replace_node(dest, get_node_replacement(dest))(frozenset((e,)))
         for source in base_types.edge_sources(e):
             g = graph.replace_source(source, get_node_replacement(source), g)
         return g

@@ -41,28 +41,22 @@ def make_computation_node(
 
 
 def get_leaves(edges: base_types.GraphType) -> FrozenSet[base_types.ComputationNode]:
-    return opt_gamla.pipe(
-        edges,
-        get_all_nodes,
-        opt_gamla.remove(
-            opt_gamla.pipe(
-                edges,
-                opt_gamla.mapcat(lambda edge: (edge.source, *edge.args)),
-                frozenset,
-                gamla.contains,
-            )
-        ),
-        frozenset,
+    all_nodes = get_all_nodes(edges)
+    all_destinations = frozenset(
+        gamla.concat((edge.source, *edge.args) for edge in edges)
     )
+    return all_nodes - all_destinations
 
 
-sink_excluding_terminals = opt_gamla.compose_left(
-    get_leaves,
-    opt_gamla.remove(base_types.node_is_terminal),
-    tuple,
-    gamla.assert_that(gamla.len_equals(1)),
-    gamla.head,
-)
+def sink_excluding_terminals(edges: base_types.GraphType) -> base_types.ComputationNode:
+    leaves_not_terminal = frozenset(
+        node for node in get_leaves(edges) if not node.is_terminal
+    )
+    assert (
+        len(leaves_not_terminal) == 1
+    ), f"Expected exactly one non-terminal sink, got {leaves_not_terminal}"
+    return gamla.head(leaves_not_terminal)
+
 
 get_incoming_edges_for_node = opt_gamla.compose_left(
     opt_gamla.groupby(base_types.edge_destination),
@@ -184,7 +178,7 @@ def replace_source(
     if base_types.is_computation_graph(replacement):
         return gamla.pipe(
             current_graph,
-            _replace_source_in_edges(original, sink_excluding_terminals(replacement)),
+            _replace_source_in_edges(original, sink_excluding_terminals(replacement)),  # type: ignore
             gamla.concat_with(replacement),
             tuple,
         )

@@ -834,30 +834,34 @@ def test_replace_source_with_args():
                 key="args",
             ),
         )
-    ) == (
-        base_types.ComputationEdge(
-            is_future=False,
-            priority=0,
-            source=None,
-            args=(
-                graph.make_computation_node(_node1_async),
-                graph.make_computation_node(_node2),
+    ) == frozenset(
+        (
+            base_types.ComputationEdge(
+                is_future=False,
+                priority=0,
+                source=None,
+                args=(
+                    graph.make_computation_node(_node1_async),
+                    graph.make_computation_node(_node2),
+                ),
+                destination=graph.make_computation_node(_merger),
+                key="args",
             ),
-            destination=graph.make_computation_node(_merger),
-            key="args",
-        ),
+        )
     )
 
 
 def test_replace_source_with_graph():
     a = graph.make_source()
 
-    assert graph.replace_source(
-        _node1, composers.compose_left_unary(_node1_async, _next_int)
-    )(
-        base_types.merge_graphs(
-            composers.compose_source_unary(_node1, a),
-            composers.compose_left_unary(_node1, _node2),
+    assert frozenset(
+        graph.replace_source(
+            _node1, composers.compose_left_unary(_node1_async, _next_int)
+        )(
+            base_types.merge_graphs(
+                composers.compose_source_unary(_node1, a),
+                composers.compose_left_unary(_node1, _node2),
+            )
         )
     ) == base_types.merge_graphs(
         composers.compose_source_unary(_node1, a),
@@ -970,12 +974,12 @@ def kuku():
 
 t = graph.make_terminal("t", lambda x: x)
 
-g = (
-    composers.compose_left(a, c)
-    + composers.compose_left(c, d, key="x")
-    + composers.compose_left(b, d, key="y")
-    + composers.compose_left_future(d, b, "x", "bla")
-    + composers.compose_left(a, t)
+g = base_types.merge_graphs(
+    composers.compose_left(a, c),
+    composers.compose_left(c, d, key="x"),
+    composers.compose_left(b, d, key="y"),
+    composers.compose_left_future(d, b, "x", "bla"),
+    composers.compose_left(a, t),
 )
 
 
