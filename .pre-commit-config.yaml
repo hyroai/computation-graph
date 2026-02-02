@@ -6,25 +6,20 @@ repos:
       - id: debug-statements
       - id: check-json
       - id: pretty-format-json
-        args: [ "--autofix", "--no-ensure-ascii", "--no-sort-keys" ]
-
-  - repo: https://github.com/asottile/seed-isort-config
-    rev: v2.2.0
-    hooks:
-      - id: seed-isort-config
+        args: ["--autofix", "--no-ensure-ascii", "--no-sort-keys"]
 
   - repo: https://github.com/PyCQA/isort
     rev: 5.12.0
     hooks:
       - id: isort
 
-  - repo: https://github.com/ambv/black
-    rev: 22.3.0
+  - repo: https://github.com/psf/black
+    rev: 24.10.0
     hooks:
       - id: black
 
   - repo: https://github.com/pycqa/flake8
-    rev: 3.9.2
+    rev: 7.0.0
     hooks:
       - id: flake8
         additional_dependencies:
@@ -38,13 +33,13 @@ repos:
           ]
 
   - repo: https://github.com/pre-commit/mirrors-mypy
-    rev: v0.942
+    rev: v1.5.1
     hooks:
       - id: mypy
         additional_dependencies: [types-termcolor]
 
   - repo: https://github.com/hyroai/lint
-    rev: 96a6998defb11e34d1057cc79616481565f568e3
+    rev: 29f3032e3a69fb69845210b14661628de72e4ef3
     hooks:
       - id: static-analysis
 
@@ -55,11 +50,11 @@ repos:
         entry: codespell --ignore-words=.codespell_ignore --quiet-level=4 --check-filenames
         exclude: \.(csv|json|txt)$
 
-  - repo: https://github.com/myint/autoflake
-    rev: v1.4
+  - repo: https://github.com/PyCQA/autoflake
+    rev: v2.3.1
     hooks:
       - id: autoflake
-        entry: autoflake -i --remove-all-unused-imports
+        args: [--in-place, --remove-all-unused-imports]
 
   - repo: https://github.com/alan-turing-institute/CleverCSV-pre-commit
     rev: v0.7.5
