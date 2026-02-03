@@ -46,8 +46,7 @@ _ComputationInputSpec = Tuple[
 _NodeExecutor = Callable[
     [
         Mapping[
-            base_types.ComputationNode,
-            base_types.Result | Awaitable[base_types.Result],
+            base_types.ComputationNode, base_types.Result | Awaitable[base_types.Result]
         ],
         base_types.ComputationNode,
     ],
@@ -154,15 +153,19 @@ def _merge_edges_pointing_to_terminals(g: base_types.GraphType) -> base_types.Gr
             gamla.star(
                 lambda dest, edges_for_dest: (
                     dest,
-                    base_types.merge_graphs(
-                        composers.make_or(
-                            opt_gamla.maptuple(base_types.edge_source)(edges_for_dest),
-                            merge_fn=(aggregate := lambda args: args),
-                        ),
-                        composers.compose_left_unary(aggregate, dest),
-                    )
-                    if dest.is_terminal
-                    else edges_for_dest,
+                    (
+                        base_types.merge_graphs(
+                            composers.make_or(
+                                opt_gamla.maptuple(base_types.edge_source)(
+                                    edges_for_dest
+                                ),
+                                merge_fn=(aggregate := lambda args: args),
+                            ),
+                            composers.compose_left_unary(aggregate, dest),
+                        )
+                        if dest.is_terminal
+                        else edges_for_dest
+                    ),
                 )
             )
         ),
@@ -506,7 +509,7 @@ async def _run_graph_async(inputs, handled_exceptions, topological_sorted_nodes)
 
         all_results = sync_results
         if async_results:
-            for (node, node_result) in zip(
+            for node, node_result in zip(
                 async_results[0],
                 await asyncio.gather(*async_results[1], return_exceptions=True),
             ):

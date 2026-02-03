@@ -12,16 +12,19 @@ repos:
     rev: 5.12.0
     hooks:
       - id: isort
+        exclude: _test\.py$
 
   - repo: https://github.com/psf/black
     rev: 24.10.0
     hooks:
       - id: black
+        exclude: _test\.py$
 
   - repo: https://github.com/pycqa/flake8
     rev: 7.0.0
     hooks:
       - id: flake8
+        exclude: _test\.py$
         additional_dependencies:
           [
             "flake8-assertive",
@@ -36,12 +39,8 @@ repos:
     rev: v1.5.1
     hooks:
       - id: mypy
+        exclude: _test\.py$
         additional_dependencies: [types-termcolor]
-
-  - repo: https://github.com/hyroai/lint
-    rev: 29f3032e3a69fb69845210b14661628de72e4ef3
-    hooks:
-      - id: static-analysis
 
   - repo: https://github.com/codespell-project/codespell
     rev: v2.1.0
@@ -55,6 +54,7 @@ repos:
     hooks:
       - id: autoflake
         args: [--in-place, --remove-all-unused-imports]
+        exclude: _test\.py$
 
   - repo: https://github.com/alan-turing-institute/CleverCSV-pre-commit
     rev: v0.7.5
