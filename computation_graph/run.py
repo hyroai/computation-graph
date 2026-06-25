@@ -565,6 +565,64 @@ def _run_graph(
     return accumulated_results
 
 
+# eager tasks (run a coroutine synchronously to its first real suspension) are
+# native on Python 3.12+. The inline scheduler relies on them so a
+# short-circuiting async node completes immediately and its downstream collapses
+# to inline execution. On 3.11 we drive the coroutine manually to get the same
+# behaviour (synchronous completion is detected via StopIteration on the first
+# send; a genuinely-suspending coroutine is handed to a normal task that resumes
+# it). nlu-runtime runs 3.11, so this fallback is load-bearing there.
+_EAGER_TASKS_NATIVE = hasattr(asyncio, "eager_task_factory")
+
+
+def _eager_task(coro, loop):
+    """Start `coro` eagerly: run it synchronously up to its first real
+    suspension. Returns a future that is ALREADY done if the coroutine completed
+    (or raised) synchronously -- the short-circuit case that makes downstream
+    nodes inline-eligible -- else a future that resolves when it finishes.
+
+    On 3.12+ this is native eager-start. On 3.11 we drive the coroutine with a
+    faithful copy of asyncio's Task.__step: step it, and on a yielded future
+    register `add_done_callback` to resume (NOT re-`await`, which fights the
+    future-blocking protocol); a bare `None` yield reschedules via call_soon.
+    Cancellation is not used by CG so it is not modelled."""
+    if _EAGER_TASKS_NATIVE:
+        return asyncio.Task(coro, loop=loop, eager_start=True)
+
+    result_future = loop.create_future()
+
+    def step(exc=None):
+        try:
+            y = coro.throw(exc) if exc is not None else coro.send(None)
+        except StopIteration as e:
+            if not result_future.done():
+                result_future.set_result(e.value)
+            return
+        except Exception as e:  # noqa: BLE001 -- coroutine raised; surface it
+            if not result_future.done():
+                result_future.set_exception(e)
+            return
+        if y is None:
+            loop.call_soon(step)  # bare yield (e.g. asyncio.sleep(0))
+            return
+        # `y` is a Future the coroutine awaits; resume when it resolves (mirrors
+        # Task.__step: consume the blocking flag, then add a done-callback).
+        y._asyncio_future_blocking = False
+
+        def wakeup(fut):
+            try:
+                fut.result()
+            except Exception as e:  # noqa: BLE001
+                step(exc=e)
+            else:
+                step()
+
+        y.add_done_callback(wakeup)
+
+    step()  # first step runs synchronously -> short-circuit completes here
+    return result_future
+
+
 def _build_inline_plan(edges, ordered_nodes):
     """Per-node (node, is_async, input-spec-options) for the inline async runner.
     Same spec-options as `_make_get_node_executor`, exposed as data."""
@@ -708,19 +766,13 @@ async def _run_graph_async_inline(
                 unhandled = decision[1]
                 break
             if kind == "defer":
-                t = asyncio.Task(
-                    compute_deferred(node, is_async_node, options),
-                    loop=loop,
-                    eager_start=True,
-                )
+                t = _eager_task(compute_deferred(node, is_async_node, options), loop)
                 results[node] = t
                 tasks.append(t)
                 continue
             _, args, kwargs = decision
             if is_async_node:
-                t = asyncio.Task(
-                    run_async_inline(node, args, kwargs), loop=loop, eager_start=True
-                )
+                t = _eager_task(run_async_inline(node, args, kwargs), loop)
                 results[node] = t
                 tasks.append(t)
             else:
