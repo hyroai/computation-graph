@@ -223,7 +223,19 @@ def _to_callable_with_side_effect_for_single_and_multiple(
     )
     all_node_side_effects_on_edges = gamla.side_effect(all_nodes_side_effect(edges))
 
-    if is_async:
+    if is_async and os.getenv("CG_ASYNC_INLINE") == "1":
+        inline_plan = _build_inline_plan(
+            edges, tuple(n for n, _ in topological_sorted_nodes)
+        )
+
+        async def final_runner(sources_to_values):
+            inputs = translate_source_to_placeholder(sources_to_values)
+            all_results = await _run_graph_async_inline(
+                inputs, handled_exceptions, inline_plan, single_node_side_effect
+            )
+            return all_node_side_effects_on_edges(all_results)
+
+    elif is_async:
 
         async def final_runner(sources_to_values):
             inputs = translate_source_to_placeholder(sources_to_values)
@@ -551,6 +563,211 @@ def _run_graph(
         ):
             pass
     return accumulated_results
+
+
+def _build_inline_plan(edges, ordered_nodes):
+    """Per-node (node, is_async, input-spec-options) for the inline async runner.
+    Same spec-options as `_make_get_node_executor`, exposed as data."""
+    node_to_incoming_edges = functools.cache(graph.get_incoming_edges_for_node(edges))
+
+    def options(node):
+        groups: dict = {}
+        for e in node_to_incoming_edges(node):
+            groups.setdefault(base_types.edge_key(e), []).append(e)
+        for k in groups:
+            groups[k].sort(key=base_types.edge_priority)
+        return tuple(
+            _node_incoming_edges_to_input_spec(combo)
+            for combo in itertools.product(*groups.values())
+        )
+
+    return tuple(
+        (n, asyncio.iscoroutinefunction(n.func), options(n)) for n in ordered_nodes
+    )
+
+
+async def _run_graph_async_inline(
+    inputs, handled_exceptions, plan, single_node_side_effect
+):
+    """Async runner that executes a node INLINE when its dependencies are
+    already resolved values, instead of task-wrapping every node downstream of
+    an async node. Behaviour-equivalent to `_run_graph_async`; opt-in via the
+    CG_ASYNC_INLINE env flag. Only nodes that truly depend on a still-pending
+    async result take the task path; everything else runs inline.
+
+    Semantics preserved: priority option-fallback on handled raises (the
+    deferred path mirrors `node_to_input_async`), side-effect/_profile hooks,
+    the sync isawaitable guard, concurrency of independent async ops (eager
+    tasks), and the unhandled-exception cyclic-ref cleanup dance."""
+    handled = (_DepNotFoundError, base_types.SkipComputationError, *handled_exceptions)
+    loop = asyncio.get_running_loop()
+    results = inputs.copy()
+    tasks = []
+    unhandled = None
+
+    def present(node):
+        # a node "produced a value" (or is still pending) if present & not a
+        # handled-failed task. Pruned nodes are absent from `results`.
+        if node not in results:
+            return False
+        v = results[node]
+        if asyncio.isfuture(v) and v.done() and not v.cancelled():
+            e = v.exception()
+            if e is not None and isinstance(e, handled):
+                return False
+        return True
+
+    async def resolve_async(options):
+        # faithful copy of node_to_input_async: priority order, fall through on
+        # a handled raise.
+        for args_spec, kwargs_spec in options:
+            if all(present(a) for a in args_spec) and all(
+                present(v) for v in kwargs_spec.values()
+            ):
+                try:
+                    gathered = await asyncio.gather(
+                        *(_to_awaitable(results[a]) for a in args_spec),
+                        *(_to_awaitable(results[v]) for v in kwargs_spec.values()),
+                    )
+                except handled:
+                    continue
+                na = len(args_spec)
+                return tuple(gathered[:na]), dict(
+                    zip(kwargs_spec.keys(), gathered[na:])
+                )
+        return None
+
+    async def compute_deferred(node, is_async_node, options):
+        got = await resolve_async(options)
+        if got is None:
+            raise _DepNotFoundError()
+        args, kwargs = got
+        before = time.perf_counter()
+        result = node.func(*args, **kwargs)
+        if is_async_node:
+            result = await result
+        single_node_side_effect(node, result)
+        _profile(node, before)
+        return result
+
+    async def run_async_inline(node, args, kwargs):
+        before = time.perf_counter()
+        result = await node.func(*args, **kwargs)
+        single_node_side_effect(node, result)
+        _profile(node, before)
+        return result
+
+    def fast_resolve(options):
+        # ('run', args, kwargs) | ('defer',) | ('prune',) | ('error', exc)
+        for args_spec, kwargs_spec in options:
+            pending = pruned = False
+            err = None
+            for d in (*args_spec, *kwargs_spec.values()):
+                if d not in results:
+                    pruned = True
+                    break
+                v = results[d]
+                if asyncio.isfuture(v):
+                    if not v.done():
+                        pending = True
+                        break
+                    if v.cancelled():
+                        pruned = True
+                        break
+                    e = v.exception()
+                    if e is not None:
+                        if isinstance(e, handled):
+                            pruned = True
+                        else:
+                            err = e
+                        break
+            if err is not None:
+                return ("error", err)
+            if pending:
+                return ("defer",)
+            if pruned:
+                continue
+            args = tuple(
+                results[a].result() if asyncio.isfuture(results[a]) else results[a]
+                for a in args_spec
+            )
+            kwargs = {
+                k: (results[v].result() if asyncio.isfuture(results[v]) else results[v])
+                for k, v in kwargs_spec.items()
+            }
+            return ("run", args, kwargs)
+        return ("prune",)
+
+    try:
+        for node, is_async_node, options in plan:
+            decision = fast_resolve(options)
+            kind = decision[0]
+            if kind == "prune":
+                continue
+            if kind == "error":
+                unhandled = decision[1]
+                break
+            if kind == "defer":
+                t = asyncio.Task(
+                    compute_deferred(node, is_async_node, options),
+                    loop=loop,
+                    eager_start=True,
+                )
+                results[node] = t
+                tasks.append(t)
+                continue
+            _, args, kwargs = decision
+            if is_async_node:
+                t = asyncio.Task(
+                    run_async_inline(node, args, kwargs), loop=loop, eager_start=True
+                )
+                results[node] = t
+                tasks.append(t)
+            else:
+                before = time.perf_counter()
+                try:
+                    result = node.func(*args, **kwargs)
+                except handled:
+                    continue  # produced no value
+                except Exception as e:  # noqa: BLE001
+                    unhandled = e
+                    break
+                single_node_side_effect(node, result)
+                if inspect.isawaitable(result):
+                    raise Exception(
+                        f"{node} returned an awaitable result but is not an async function"
+                    )
+                _profile(node, before)
+                results[node] = result
+    except Exception as exc:  # noqa: BLE001
+        unhandled = exc
+    finally:
+        if tasks:
+            await asyncio.gather(*tasks, return_exceptions=True)
+        all_results = {}
+        for node, v in results.items():
+            if asyncio.isfuture(v):
+                if v.cancelled():
+                    continue
+                task_e = v.exception()
+                if task_e is None:
+                    all_results[node] = v.result()
+                elif isinstance(task_e, handled):
+                    continue
+                elif unhandled is None:
+                    unhandled = task_e
+            else:
+                all_results[node] = v
+        if unhandled is not None:
+            # this trick avoids cyclic reference and garbage collection issues
+            try:
+                raise unhandled from unhandled
+            except Exception as e:
+                del results
+                del tasks
+                del unhandled
+                raise e from e
+    return all_results
 
 
 def _graph_reducer(graph_callable):
