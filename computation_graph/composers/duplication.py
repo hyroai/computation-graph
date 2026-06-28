@@ -1,11 +1,13 @@
 import asyncio
 import functools
 import inspect
-from typing import Dict
+from typing import Dict, Callable
 
 import gamla
+from toolz.curried import get_in
 
 from computation_graph import base_types, graph
+from computation_graph.base_types import GraphType
 from computation_graph.composers import debug
 
 
@@ -53,23 +55,31 @@ _node_to_duplicated_node = gamla.compose_left(
     gamla.dict_to_getter_with_default(None),
 )
 
-duplicate_graph = gamla.compose_left(
-    gamla.pair_with(gamla.compose_left(graph.get_all_nodes, _node_to_duplicated_node)),
-    gamla.star(
-        lambda get_duplicated_node, graph: gamla.pipe(
-            graph,
+
+def duplicate_graph(original: base_types.GraphType) -> base_types.GraphType:
+
+    _node_to_duplicated_node_index = gamla.pipe(
+        original.edges, graph.get_all_nodes, _node_to_duplicated_node
+    )
+    get_duplicated_node = gamla.when(
+        _node_to_duplicated_node_index, _node_to_duplicated_node_index
+    )
+    return base_types.GraphType(
+        edges=gamla.pipe(
+            original.edges,
             gamla.map(
                 _duplicate_computation_edge(
                     gamla.when(get_duplicated_node, get_duplicated_node)
                 )
             ),
-            tuple,
-        )
-    ),
-)
+            frozenset,
+        ),
+        sink=get_duplicated_node(original.sink),
+    )
+
 
 duplicate_function_or_graph = gamla.ternary(
-    gamla.is_instance((tuple, set, frozenset)), duplicate_graph, duplicate_function
+    gamla.is_instance(base_types.GraphType), duplicate_graph, duplicate_function
 )
 
 
@@ -79,12 +89,15 @@ def safe_replace_sources(
     ],
     cg: base_types.GraphType,
 ) -> base_types.GraphType:
+    if not len(source_to_replacement_dict):
+        return cg
+
     source_to_replacement_dict = gamla.keymap(graph.make_computation_node)(
         source_to_replacement_dict
     )
     reachable_to_duplicate_map = gamla.pipe(
         gamla.graph_traverse_many(
-            source_to_replacement_dict.keys(), graph.traverse_forward(cg)
+            source_to_replacement_dict.keys(), graph.traverse_forward(cg.edges)
         ),
         gamla.remove(gamla.contains(source_to_replacement_dict.keys())),
         _node_to_duplicated_node,
@@ -100,9 +113,14 @@ def safe_replace_sources(
 
     def update_edge(e: base_types.ComputationEdge) -> base_types.GraphType:
         dest = base_types.edge_destination(e)
-        g = graph.replace_node(dest, get_node_replacement(dest))(frozenset((e,)))
+        g = graph.replace_node(dest, get_node_replacement(dest))(
+            base_types.GraphType(edges=frozenset((e,)), sink=dest)
+        )
         for source in base_types.edge_sources(e):
             g = graph.replace_source(source, get_node_replacement(source), g)
         return g
 
-    return base_types.merge_graphs(*(update_edge(e) for e in cg))
+    return base_types.GraphType(
+        edges=frozenset(edge for e in cg.edges for edge in update_edge(e).edges),
+        sink=get_node_replacement(cg.sink),
+    )

@@ -3,14 +3,7 @@ from typing import Callable, Union
 
 import gamla
 
-from computation_graph import base_types, composers, graph, run
-
-
-def _infer_graph_sink(edges: base_types.GraphType) -> base_types.ComputationNode:
-    assert edges, "Empty graphs have no sink."
-    leaves = graph.get_leaves(edges)
-    assert len(leaves) == 1, f"Cannot determine sink for {edges}, got: {tuple(leaves)}."
-    return gamla.head(leaves)
+from computation_graph import base_types, composers, graph, run, infer_sink
 
 
 def unary(g: base_types.GraphType, source: Callable, sink: Callable) -> Callable:
@@ -24,8 +17,8 @@ def unary_bare(g, source):
     return gamla.compose(
         gamla.star(
             run.to_callable_strict(
-                base_types.merge_graphs(
-                    g, composers.compose_left_future(real_source, source, None, None)
+                graph.merge_graphs(
+                    g, composers.compose_left_future(real_source, source, None, None), sink_node_or_graph=g
                 )
             )
         ),
@@ -41,8 +34,8 @@ def unary_with_state(
 ) -> Callable:
     real_source = graph.make_source()
     f = run.to_callable_strict(
-        base_types.merge_graphs(
-            g, composers.compose_left_future(real_source, source, None, None)
+        graph.merge_graphs(
+            g, composers.compose_left_future(real_source, source, None, None), sink_node_or_graph=g
         )
     )
 
@@ -56,7 +49,7 @@ def unary_with_state(
 
 
 def unary_with_state_infer_sink(g: base_types.GraphType, source: Callable) -> Callable:
-    return unary_with_state(g, source, _infer_graph_sink(g))
+    return unary_with_state(g, source, g.sink)
 
 
 def unary_with_state_and_expectations(
@@ -65,8 +58,9 @@ def unary_with_state_and_expectations(
     real_source = graph.make_source()
     return gamla.compose(
         variadic_with_state_and_expectations(
-            base_types.merge_graphs(
-                g, composers.compose_left_future(real_source, source, None, None)
+            graph.merge_graphs(
+                g, composers.compose_left_future(real_source, source, None, None),
+                sink_node_or_graph=g
             ),
             sink,
         ),
@@ -114,12 +108,12 @@ def variadic_bare(g):
 
 
 def variadic_infer_sink(g):
-    return gamla.compose_left(variadic_bare(g), gamla.itemgetter(_infer_graph_sink(g)))
+    return gamla.compose_left(variadic_bare(g), gamla.itemgetter(infer_sink.infer_sink(g.edges)))
 
 
 def variadic_stateful_infer_sink(g):
     f = run.to_callable_strict(g)
-    sink = _infer_graph_sink(g)
+    sink = infer_sink.infer_sink(g.edges)
 
     def inner(*turns):
         prev = {}
@@ -137,12 +131,12 @@ def nullary(g, sink):
 
 
 def nullary_infer_sink(g):
-    return nullary(g, _infer_graph_sink(g))
+    return nullary(g, infer_sink.infer_sink(g.edges))
 
 
 def nullary_infer_sink_with_state_and_expectations(g):
     f = run.to_callable_strict(g)
-    sink = _infer_graph_sink(g)
+    sink = infer_sink.infer_sink(g.edges)
 
     def inner(*expectations):
         prev = {}

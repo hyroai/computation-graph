@@ -24,8 +24,12 @@ def handle_state(
         assert isinstance(x, ComputationResult), x
         return x.state
 
-    return base_types.merge_graphs(
+    def sink(r:ComputationResult):
+        return r.result
+
+    return graph.merge_graphs(
         composers.make_compose_future(g, retrieve_state, key, default),
         composers.compose_unary(retrieve_state, g),
-        composers.compose_unary(gamla.attrgetter("result"), g),
+        composers.compose_unary(sink, g),
+        sink_node_or_graph=graph.make_computation_node(sink)
     )

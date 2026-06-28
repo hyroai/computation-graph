@@ -5,17 +5,10 @@ import gamla
 import pytest
 
 from computation_graph import base_types, composers, graph, graph_runners, legacy, run
+from computation_graph.infer_sink import infer_sink
 from computation_graph.composers import duplication, memory
 
 
-def _infer_graph_sink_excluding_terminals(
-    edges: base_types.GraphType,
-) -> base_types.ComputationNode:
-    leaves = gamla.pipe(
-        edges, graph.get_leaves, gamla.remove(base_types.node_is_terminal), tuple
-    )
-    assert len(leaves) == 1, f"computation graph has more than one sink: {leaves}"
-    return gamla.head(leaves)
 
 
 def _node1(arg1):
@@ -81,11 +74,12 @@ async def test_async_run_as_soon_as_possible(capsys):
     def sink(x, y):
         return f"x={x}, y={y}"
 
-    g = base_types.merge_graphs(
+    g = graph.merge_graphs(
         composers.compose_unary(concurrent1, lambda: "x"),
         composers.compose_unary(concurrent2, lambda y: y, lambda: "y"),
         composers.compose_left(concurrent1, sink, key="x"),
         composers.compose_left(concurrent2, sink, key="y"),
+        sink_node_or_graph=graph.make_computation_node(sink)
     )
 
     await graph_runners.nullary(g, sink)
@@ -127,10 +121,11 @@ def test_kwargs():
 
     assert (
         graph_runners.unary(
-            base_types.merge_graphs(
+            graph.merge_graphs(
                 composers.compose_unary(_node1, source),
                 composers.compose_unary(_node2, source),
                 composers.compose_dict(_node3, {"arg1": _node1, "arg2": _node2}),
+                sink_node_or_graph=graph.make_computation_node(_node3)
             ),
             source,
             _node3,
@@ -150,9 +145,10 @@ def _node_with_state_as_arg(arg1, state):
 
 def test_state():
     f = graph_runners.unary_with_state(
-        base_types.merge_graphs(
+        graph.merge_graphs(
             composers.compose_left(_node1, _node_with_state_as_arg, key="arg1"),
             composers.compose_left_unary(_node_with_state_as_arg, _node2),
+            sink_node_or_graph=graph.make_computation_node(_node2)
         ),
         _node1,
         _node2,
@@ -162,12 +158,13 @@ def test_state():
 
 def test_self_future_edge():
     f = graph_runners.unary_with_state(
-        base_types.merge_graphs(
+        graph.merge_graphs(
             composers.compose_dict(
                 _reducer_node, {"arg1": _node1, "cur_int": _next_int}
             ),
             composers.compose_unary(_node2, _reducer_node),
             composers.compose_left_future(_next_int, _next_int, "x", None),
+            sink_node_or_graph=graph.make_computation_node(_node2)
         ),
         _node1,
         _node2,
@@ -207,13 +204,14 @@ def test_optional_with_future_edge():
         return x
 
     f = graph_runners.unary_with_state(
-        base_types.merge_graphs(
+        graph.merge_graphs(
             composers.make_compose(_reducer_node, input, key="arg1"),
             composers.compose_unary(
                 output, composers.make_optional(_reducer_node, None)
             ),
             composers.make_compose(_reducer_node, _next_int, key="cur_int"),
             composers.compose_left_future(_next_int, _next_int, None, None),
+            sink_node_or_graph=graph.make_computation_node(output)
         ),
         input,
         output,
@@ -266,8 +264,7 @@ async def test_no_result_for_node_that_raised_handled_exception():
 
 
 def test_raise_unhandled_exception():
-    class MyExceptionError(Exception):
-        ...
+    class MyExceptionError(Exception): ...
 
     def raises():
         raise MyExceptionError("BAD")
@@ -277,8 +274,7 @@ def test_raise_unhandled_exception():
 
 
 async def test_raise_unhandled_exception_async():
-    class MyExceptionError(Exception):
-        ...
+    class MyExceptionError(Exception): ...
 
     @composers.compose_left_dict(
         {"x": composers.compose_left_unary(lambda: 1, lambda x: 1)}
@@ -335,13 +331,15 @@ def test_first_with_future_edge():
     def input_node(x):
         return x
 
+    combined_graph = composers.make_first(_node_that_raises, _reducer_node, _node1)
     f = graph_runners.unary_with_state(
-        base_types.merge_graphs(
+        graph.merge_graphs(
             composers.make_compose(_reducer_node, input_node, key="arg1"),
             composers.make_compose(_node1, input_node, key="arg1"),
-            composers.make_first(_node_that_raises, _reducer_node, _node1),
+            combined_graph,
             composers.make_compose(_reducer_node, _next_int, key="cur_int"),
             composers.make_compose_future(_next_int, _next_int, "x", None),
+            sink_node_or_graph=combined_graph
         ),
         input_node,
         _reducer_node,
@@ -352,14 +350,15 @@ def test_first_with_future_edge():
 def test_and_with_future():
     source1 = graph.make_source()
     source2 = graph.make_source()
-    g = base_types.merge_graphs(
-        composers.make_and((_reducer_node, _node2, _node1), _merger),
+    g = graph.merge_graphs(
         composers.compose_source(_merger, key="side_effects", source=source2),
         composers.compose_source(_node1, key="arg1", source=source1),
         composers.compose_source(_node2, key="arg1", source=source1),
         composers.compose_source(_reducer_node, key="arg1", source=source1),
         composers.make_compose(_reducer_node, _next_int, key="cur_int"),
         composers.compose_unary_future(_next_int, _next_int, None),
+        composers.make_and((_reducer_node, _node2, _node1), _merger),
+        sink_node_or_graph=graph.make_computation_node(_merger)
     )
     assert (
         graph_runners.variadic_stateful_infer_sink(g)(
@@ -374,15 +373,37 @@ def test_and_with_future():
 def test_and_with_unactionable():
     source1 = graph.make_source()
     source2 = graph.make_source()
-    g = base_types.merge_graphs(
-        composers.make_and((_reducer_node, _node_that_raises), _merger),
+
+    g = graph.merge_graphs(
+        composers.compose_unary_future(_next_int, _next_int, None),
         composers.compose_source(_merger, key="side_effects", source=source2),
         composers.compose_source(_reducer_node, key="arg1", source=source1),
         composers.make_compose(_reducer_node, _next_int, key="cur_int"),
-        composers.compose_unary_future(_next_int, _next_int, None),
+        composers.make_and((_reducer_node, _node_that_raises), _merger),
+        sink_node_or_graph=graph.make_computation_node(_merger)
     )
     with pytest.raises(KeyError):
         graph_runners.variadic_infer_sink(g)({source1: "root", source2: "bla"})
+
+
+def test_and_with_graphs():
+    source = graph.make_source()
+    g = composers.compose_source_unary(_node1, source)
+
+    graph_with_and = composers.make_and(
+        [
+            duplication.duplicate_graph(g),
+            duplication.duplicate_graph(g),
+            duplication.duplicate_graph(g),
+        ],
+        merge_fn=lambda args: args,
+    )
+
+    assert graph_runners.variadic_infer_sink(graph_with_and)({source: 1234}) == (
+        "node1(1234)",
+        "node1(1234)",
+        "node1(1234)",
+    )
 
 
 def test_or():
@@ -390,9 +411,10 @@ def test_or():
         return " ".join(map(str, args))
 
     f = graph_runners.variadic_stateful_infer_sink(
-        base_types.merge_graphs(
-            composers.make_or((_next_int, lambda: "node1", _node_that_raises), merger),
+        graph.merge_graphs(
             composers.compose_unary_future(_next_int, _next_int, 0),
+            composers.make_or((_next_int, lambda: "node1", _node_that_raises), merger),
+            sink_node_or_graph=graph.make_computation_node(merger)
         )
     )
 
@@ -408,11 +430,12 @@ def test_compose():
 
 def test_compose_with_future_edge():
     f = graph_runners.unary_with_state(
-        base_types.merge_graphs(
+        graph.merge_graphs(
             composers.make_compose(_node1, _node2),
             composers.make_compose(_reducer_node, _node1, key="arg1"),
             composers.make_compose(_reducer_node, _next_int, key="cur_int"),
             composers.make_compose_future(_next_int, _next_int, None, None),
+            sink_node_or_graph=graph.make_computation_node(_reducer_node)
         ),
         _node2,
         _reducer_node,
@@ -429,12 +452,14 @@ def test_optional_memory_sometimes_raises():
     def input_source(x):
         return x
 
+    optional_graph = composers.make_optional(sometimes_raises, None)
     f = graph_runners.unary_with_state_infer_sink(
-        base_types.merge_graphs(
-            composers.make_compose(sometimes_raises, input_source, key="x"),
-            composers.make_optional(sometimes_raises, None),
-            composers.make_compose(sometimes_raises, _next_int, key="cur_int"),
+        graph.merge_graphs(
+            optional_graph,
             composers.compose_unary_future(_next_int, _next_int, None),
+            composers.make_compose(sometimes_raises, input_source, key="x"),
+            composers.make_compose(sometimes_raises, _next_int, key="cur_int"),
+            sink_node_or_graph=optional_graph
         ),
         input_source,
     )
@@ -514,40 +539,47 @@ def test_or_with_sink_that_raises():
     )
 
 
-def test_unambiguous_composition_using_terminal():
+def test_unambiguous_composition_using_terminal(monkeypatch):
     terminal = graph.make_terminal("1", lambda x: x[0])
 
     def source():
         return 1
 
+    monkeypatch.setenv(base_types.COMPUTATION_GRAPH_DEBUG_ENV_KEY, "1")
+    ambig1 = composers.compose_unary(lambda x: x + 1, source)
     with pytest.raises(AssertionError):
         composers.compose_unary(
             lambda x: x + 1,
-            base_types.merge_graphs(
-                composers.compose_unary(lambda x: x + 1, source),
+            graph.merge_graphs(
+                ambig1,
                 composers.compose_unary(lambda x: x, source),
+                sink_node_or_graph=ambig1,
             ),
         )
+    monkeypatch.delenv(base_types.COMPUTATION_GRAPH_DEBUG_ENV_KEY)
 
+    unambig = composers.compose_unary(lambda x: x + 1, source)
     g = composers.compose_unary(
         lambda x: x + 1,
-        base_types.merge_graphs(
-            composers.compose_unary(lambda x: x + 1, source),
+        graph.merge_graphs(
+            unambig,
             composers.compose_unary(terminal, source),
+            sink_node_or_graph=unambig,
         ),
     )
     x = run.to_callable_strict(g)({}, {})
     assert x[terminal] == 1
-    assert x[_infer_graph_sink_excluding_terminals(g)] == 3
+    assert x[infer_sink(g.edges)] == 3
 
 
 def test_two_terminals():
     terminal1 = graph.make_terminal("1", lambda x: x)
     terminal2 = graph.make_terminal("2", lambda x: x)
     result = graph_runners.unary_bare(
-        base_types.merge_graphs(
+        graph.merge_graphs(
             composers.compose_unary(terminal1, composers.make_compose(_node2, _node1)),
             composers.compose_unary(terminal2, _node1),
+            sink_node_or_graph=graph.make_computation_node(_node2)
         ),
         _node1,
     )("hi")
@@ -559,15 +591,17 @@ def test_two_paths_succeed():
     source = graph.make_source()
     terminal1 = graph.make_terminal("1", lambda x: x)
     terminal2 = graph.make_terminal("2", lambda x: x)
+    make_first_graph = composers.make_first(
+        composers.compose_source_unary(_node1, source),
+        composers.compose_unary(
+            terminal1, composers.compose_source_unary(_node2, source)
+        ),
+    )
     result = graph_runners.variadic_bare(
-        base_types.merge_graphs(
-            composers.make_first(
-                composers.compose_source_unary(_node1, source),
-                composers.compose_unary(
-                    terminal1, composers.compose_source_unary(_node2, source)
-                ),
-            ),
+        graph.merge_graphs(
+            make_first_graph,
             composers.compose_unary(terminal2, _node1),
+            sink_node_or_graph=make_first_graph,
         )
     )({source: "hi"})
     assert result[terminal1][0] == "node2(hi)"
@@ -658,10 +692,11 @@ def _sum(args):
 
 def test_future_edges():
     graph_runners.unary_with_state_and_expectations(
-        base_types.merge_graphs(
+        graph.merge_graphs(
             composers.compose_unary(_plus_1, _times_2),
             composers.make_compose(_multiply, _plus_1, key="a"),
             composers.make_compose_future(_multiply, _times_2, "b", None),
+            sink_node_or_graph=graph.make_computation_node(_multiply)
         ),
         _times_2,
         _multiply,
@@ -673,11 +708,12 @@ def test_future_edges_with_circuit():
         return x
 
     f = graph_runners.unary_with_state(
-        base_types.merge_graphs(
+        graph.merge_graphs(
             composers.make_compose(_plus_1, _multiply),
             composers.make_compose(_times_2, _plus_1),
             composers.make_compose(_multiply, some_input, key="a"),
             composers.make_compose_future(_multiply, _times_2, "b", None),
+            sink_node_or_graph=graph.make_computation_node(_times_2)
         ),
         some_input,
         _times_2,
@@ -695,9 +731,10 @@ def test_sink_with_incoming_future_edge():
         return f"x={x}, y={y}"
 
     f = graph_runners.unary(
-        base_types.merge_graphs(
+        graph.merge_graphs(
             composers.make_compose(g, f, key="x"),
             composers.make_compose_future(g, g, "y", None),
+            sink_node_or_graph=graph.make_computation_node(g),
         ),
         f,
         g,
@@ -709,8 +746,9 @@ def test_compose_future():
     a = graph.make_source()
     b = graph.make_source()
     c = graph.make_source()
+
     graph_runners.variadic_with_state_and_expectations(
-        base_types.merge_graphs(
+        graph.merge_graphs(
             composers.compose_source_unary(_plus_1, c),
             composers.compose_source_unary(_times_2, b),
             composers.compose_source(_multiply, "a", a),
@@ -720,6 +758,7 @@ def test_compose_future():
                 "b",
                 None,
             ),
+            sink_node_or_graph=graph.make_computation_node(_sum)
         ),
         _sum,
     )(([[{a: 2, b: 2, c: 2}, 9], [{a: 2, b: 2, c: 2}, 25]]))
@@ -730,7 +769,7 @@ async def test_compose_future_async():
     b = graph.make_source()
     c = graph.make_source()
     await graph_runners.variadic_with_state_and_expectations(
-        base_types.merge_graphs(
+        graph.merge_graphs(
             composers.compose_source_unary(_plus_1_async, c),
             composers.compose_source_unary(_times_2, b),
             composers.compose_source(_multiply, "a", a),
@@ -740,6 +779,7 @@ async def test_compose_future_async():
                 "b",
                 None,
             ),
+            sink_node_or_graph=graph.make_computation_node(_sum),
         ),
         _sum,
     )(([[{a: 2, b: 2, c: 2}, 9], [{a: 2, b: 2, c: 2}, 25]]))
@@ -754,6 +794,29 @@ def test_dont_duplicate_sources():
             )
         )({a: 2})
         == 3
+    )
+
+
+def test_duplication_with_args():
+    graph = composers.compose_unary(
+        lambda x: x,
+        composers.make_and([_node1, _node2], merge_fn=lambda args: args),
+        lambda: 1234,
+    )
+    duplicated = duplication.duplicate_graph(graph)
+
+    assert (
+        graph_runners.variadic_bare(graph)({})[graph.sink]
+        == graph_runners.variadic_bare(duplicated)({})[duplicated.sink]
+    )
+
+
+def test_duplication():
+    graph = composers.compose_unary(_node1, lambda: 1234)
+    duplicated = duplication.duplicate_graph(graph)
+    assert (
+        graph_runners.variadic_bare(graph)({})[graph.sink]
+        == graph_runners.variadic_bare(duplicated)({})[duplicated.sink]
     )
 
 
@@ -775,8 +838,8 @@ def test_memory_persists_when_unactionable():
         return x or upstream
 
     remember_first = memory.with_state("x", None, skipper)
-    skip_or_passthrough = (
-        lambda input: input
+    skip_or_passthrough = lambda input: (
+        input
         if input != "skip state"
         else gamla.just_raise(base_types.SkipComputationError)
     )
@@ -809,32 +872,39 @@ def test_replace_source():
     a = graph.make_source()
 
     assert graph.replace_source(_node1, _node1_async)(
-        base_types.merge_graphs(
+        graph.merge_graphs(
             composers.compose_source_unary(_node1, a),
             composers.compose_left_unary(_node1, _node2),
+            sink_node_or_graph=graph.make_computation_node(_node2)
         )
-    ) == base_types.merge_graphs(
+    ) == graph.merge_graphs(
         composers.compose_source_unary(_node1, a),
         composers.compose_left_unary(_node1_async, _node2),
+        sink_node_or_graph=graph.make_computation_node(_node2)
     )
 
 
 def test_replace_source_with_args():
     assert graph.replace_source(_node1, _node1_async)(
-        (
-            base_types.ComputationEdge(
-                is_future=False,
-                priority=0,
-                source=None,
-                args=(
-                    graph.make_computation_node(_node1),
-                    graph.make_computation_node(_node2),
-                ),
-                destination=graph.make_computation_node(_merger),
-                key="args",
+        base_types.GraphType(
+            frozenset(
+                [
+                    base_types.ComputationEdge(
+                        is_future=False,
+                        priority=0,
+                        source=None,
+                        args=(
+                            graph.make_computation_node(_node1),
+                            graph.make_computation_node(_node2),
+                        ),
+                        destination=graph.make_computation_node(_merger),
+                        key="args",
+                    )
+                ]
             ),
+            graph.make_computation_node(_merger),
         )
-    ) == frozenset(
+    ).edges == frozenset(
         (
             base_types.ComputationEdge(
                 is_future=False,
@@ -854,19 +924,21 @@ def test_replace_source_with_args():
 def test_replace_source_with_graph():
     a = graph.make_source()
 
-    assert frozenset(
+    assert (
         graph.replace_source(
             _node1, composers.compose_left_unary(_node1_async, _next_int)
         )(
-            base_types.merge_graphs(
+            graph.merge_graphs(
                 composers.compose_source_unary(_node1, a),
                 composers.compose_left_unary(_node1, _node2),
+                sink_node_or_graph=graph.make_computation_node(_node2)
             )
         )
-    ) == base_types.merge_graphs(
+    ) == graph.merge_graphs(
         composers.compose_source_unary(_node1, a),
-        composers.compose_left_unary(_next_int, _node2),
         composers.compose_left_unary(_node1_async, _next_int),
+        composers.compose_left_unary(_next_int, _node2),
+        sink_node_or_graph=graph.make_computation_node(_node2)
     )
 
 
@@ -876,53 +948,51 @@ def test_replace_source_that_doesnt_exist():
     assert graph.replace_source(
         lambda x: x, composers.compose_left_unary(_node1_async, _next_int)
     )(
-        base_types.merge_graphs(
+        graph.merge_graphs(
             composers.compose_source_unary(_node1, a),
             composers.compose_left_unary(_node1, _node2),
+            sink_node_or_graph=graph.make_computation_node(_node2)
         )
-    ) == base_types.merge_graphs(
+    ) == graph.merge_graphs(
         composers.compose_source_unary(_node1, a),
         composers.compose_left_unary(_node1, _node2),
+        sink_node_or_graph=graph.make_computation_node(_node2)
     )
+
+
+def test_replace_destination_that_is_a_sink():
+    assert graph.replace_destination(_node1, _node1_async)(
+        composers.compose_unary(_node1, _node2)
+    ) == composers.compose_unary(_node1_async, _node2)
 
 
 def test_replace_destination():
-    assert graph.replace_destination(_node1, _node1_async)(
-        (
-            base_types.ComputationEdge(
-                is_future=False,
-                priority=0,
-                source=graph.make_computation_node(_node2),
-                args=(),
-                destination=graph.make_computation_node(_node1),
-                key="arg1",
-            ),
-        )
-    ) == base_types.merge_graphs(
-        (
-            base_types.ComputationEdge(
-                is_future=False,
-                priority=0,
-                source=graph.make_computation_node(_node2),
-                args=(),
-                destination=graph.make_computation_node(_node1_async),
-                key="arg1",
-            ),
-        )
+    def identity(x):
+        return x
+
+    # Not a "legal" graph (disconnected chains) — constructed directly to bypass infer_sink.
+    illegal_graph = base_types.GraphType(
+        composers.compose_unary(_node1, _node2).edges | composers.compose_unary(identity, _node1_async).edges,
+        graph.make_computation_node(identity),
     )
+    result = graph.replace_destination(_node1, _node1_async)(illegal_graph)
+    assert result == composers.compose_unary(identity, _node1_async, _node2)
+    assert result.sink == infer_sink(result.edges)
 
 
 def test_replace_node():
     a = graph.make_source()
 
     assert graph.replace_node(_node1, _node1_async)(
-        base_types.merge_graphs(
+        graph.merge_graphs(
             composers.compose_source_unary(_node1, a),
             composers.compose_left_unary(_node1, _node2),
+            sink_node_or_graph=graph.make_computation_node(_node2),
         )
-    ) == base_types.merge_graphs(
+    ) == graph.merge_graphs(
         composers.compose_source_unary(_node1_async, a),
         composers.compose_left_unary(_node1_async, _node2),
+        sink_node_or_graph=graph.make_computation_node(_node2),
     )
 
 
@@ -933,18 +1003,20 @@ def test_ambig_edges_assertion_in_merge_graphs_active_only_when_env_var_is_activ
         pass
 
     monkeypatch.delenv(base_types.COMPUTATION_GRAPH_DEBUG_ENV_KEY, raising=False)
-    base_types.merge_graphs(
+    graph.merge_graphs(
         composers.compose_left_unary(lambda: 1, a),
         composers.compose_left_unary(lambda: 1, a),
+        sink_node_or_graph=graph.make_computation_node(a),
     )
 
     monkeypatch.setenv(base_types.COMPUTATION_GRAPH_DEBUG_ENV_KEY, "1")
     with pytest.raises(
         Exception, match=r".*There are multiple edges with the same destination.*"
     ):
-        base_types.merge_graphs(
+        graph.merge_graphs(
             composers.compose_left_unary(lambda: 1, a),
             composers.compose_left_unary(lambda: 1, a),
+            sink_node_or_graph=graph.make_computation_node(a),
         )
 
 
@@ -974,12 +1046,13 @@ def kuku():
 
 t = graph.make_terminal("t", lambda x: x)
 
-g = base_types.merge_graphs(
+g = graph.merge_graphs(
     composers.compose_left(a, c),
-    composers.compose_left(c, d, key="x"),
-    composers.compose_left(b, d, key="y"),
     composers.compose_left_future(d, b, "x", "bla"),
     composers.compose_left(a, t),
+    composers.compose_left(c, d, key="x"),
+    composers.compose_left(b, d, key="y"),
+    sink_node_or_graph=graph.make_computation_node(d)
 )
 
 
@@ -989,48 +1062,48 @@ g = base_types.merge_graphs(
         pytest.param(
             {a: kuky},
             {
-                "kuky----x---->duplicate of c",
-                "kuky----x---->t",
-                "duplicate of c----x---->duplicate of d",
-                "when_memory_unavailable----x---->duplicate of b",
-                "duplicate of d....x....>duplicate of b",
-                "duplicate of b----y---->duplicate of d",
+                "<CompuationNode kuky() >----x----><CompuationNode duplicate of c(x) >",
+                "<CompuationNode kuky() >----x----><CompuationNode t(x) >",
+                "<CompuationNode duplicate of c(x) >----x----><CompuationNode duplicate of d(x,y) >",
+                "<CompuationNode when_memory_unavailable() >----x----><CompuationNode duplicate of b(x) >",
+                "<CompuationNode duplicate of d(x,y) >....x....><CompuationNode duplicate of b(x) >",
+                "<CompuationNode duplicate of b(x) >----y----><CompuationNode duplicate of d(x,y) >",
             },
             id="replace source node",
         ),
         pytest.param(
             {c: kuky},
             {
-                "a----x---->kuky",
-                "a----x---->t",
-                "kuky----x---->duplicate of d",
-                "when_memory_unavailable----x---->duplicate of b",
-                "duplicate of d....x....>duplicate of b",
-                "duplicate of b----y---->duplicate of d",
+                "<CompuationNode a() >----x----><CompuationNode kuky() >",
+                "<CompuationNode a() >----x----><CompuationNode t(x) >",
+                "<CompuationNode kuky() >----x----><CompuationNode duplicate of d(x,y) >",
+                "<CompuationNode when_memory_unavailable() >----x----><CompuationNode duplicate of b(x) >",
+                "<CompuationNode duplicate of d(x,y) >....x....><CompuationNode duplicate of b(x) >",
+                "<CompuationNode duplicate of b(x) >----y----><CompuationNode duplicate of d(x,y) >",
             },
             id="replace node not in cycle",
         ),
         pytest.param(
             {b: kuky},
             {
-                "a----x---->c",
-                "a----x---->t",
-                "c----x---->duplicate of d",
-                "when_memory_unavailable----x---->kuky",
-                "duplicate of d....x....>kuky",
-                "kuky----y---->duplicate of d",
+                "<CompuationNode a() >----x----><CompuationNode c(x) >",
+                "<CompuationNode a() >----x----><CompuationNode t(x) >",
+                "<CompuationNode c(x) >----x----><CompuationNode duplicate of d(x,y) >",
+                "<CompuationNode when_memory_unavailable() >----x----><CompuationNode kuky() >",
+                "<CompuationNode duplicate of d(x,y) >....x....><CompuationNode kuky() >",
+                "<CompuationNode kuky() >----y----><CompuationNode duplicate of d(x,y) >",
             },
             id="replace node in cycle",
         ),
         pytest.param(
             {a: kuku, b: kuky},
             {
-                "duplicate of c----x---->duplicate of d",
-                "duplicate of d....x....>kuky",
-                "kuku----x---->duplicate of c",
-                "kuku----x---->t",
-                "kuky----y---->duplicate of d",
-                "when_memory_unavailable----x---->kuky",
+                "<CompuationNode duplicate of c(x) >----x----><CompuationNode duplicate of d(x,y) >",
+                "<CompuationNode duplicate of d(x,y) >....x....><CompuationNode kuky() >",
+                "<CompuationNode kuku() >----x----><CompuationNode duplicate of c(x) >",
+                "<CompuationNode kuku() >----x----><CompuationNode t(x) >",
+                "<CompuationNode kuky() >----y----><CompuationNode duplicate of d(x,y) >",
+                "<CompuationNode when_memory_unavailable() >----x----><CompuationNode kuky() >",
             },
             id="replace multiple nodes - duplicate reachables once",
         ),
@@ -1041,5 +1114,5 @@ def test_safe_replace_node(
     expected_edges_strs: str,
 ):
     assert expected_edges_strs == {
-        str(e) for e in duplication.safe_replace_sources(to_replace, g)
+        str(e) for e in duplication.safe_replace_sources(to_replace, g).edges
     }
