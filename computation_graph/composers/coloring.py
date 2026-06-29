@@ -3,13 +3,13 @@ while you BUILD the graph, and derive the runner's `run.NodeActivation` from it 
 instead of reconstructing colors from a post-assembly graph's shape (`_core_reach`).
 
 The runner already speaks coloring (`run.NodeActivation`, `run.ChangeActiveColors`,
-`run.to_callable_with_node_activation`); this module produces that spec.
+`run.to_callable_with_coloring`); this module produces that spec.
 
 Colors are stamped as TAGS on the func's `__dict__`, so they ride through
 `duplicate_function` for free (functools.wraps copies `__dict__`) and survive any
 amount of duplication -- provenance by tag, not by shape. `add_colors(COLORS,
 subgraph, empty=...)` stamps `func.__cg_origin__` (+ an optional `__cg_empty__`),
-`mark_observer` / `observer` stamp `__cg_observer__`, and `pin_core*` stamps the
+`observer` stamps `__cg_observer__`, and `_pin_core_func` stamps the
 absorbing `_CORE` marker. `build_node_activation_from_edges` then recovers the whole
 `run.NodeActivation` from the final graph's tags: the SINGLE-COLOR RULE (>=2 colors =
 shared = always-on), a tolerance-aware must-run closure, and combiner-aware boundary
@@ -65,11 +65,14 @@ def _sinks(edges: base_types.GraphType) -> FrozenSet[base_types.ComputationNode]
 _CORE = "\x00cg-core"  # absorbing marker; not a usable color token
 
 
-def _set_tag(node: base_types.ComputationNode, value) -> None:
+def _tag_func(func, attr: str, value) -> None:
+    # The one guarded stamp: write `attr = value` onto the func's __dict__ so it rides
+    # `duplicate_function` (functools.wraps copies __dict__). No-op on an un-taggable
+    # builtin / C callable -> it stays tag-less, which the readers treat as core.
     try:
-        setattr(node.func, _ORIGIN_ATTR, value)
+        setattr(func, attr, value)
     except (AttributeError, TypeError):
-        pass  # builtin / C func -> untaggable -> stays tag-less (treated as core)
+        pass
 
 
 def add_colors(
@@ -90,17 +93,10 @@ def add_colors(
         current = getattr(node.func, _ORIGIN_ATTR, None)
         if current == _CORE:
             continue
-        _set_tag(node, (current or frozenset()) | colors)
+        _tag_func(node.func, _ORIGIN_ATTR, (current or frozenset()) | colors)
     if empty is not _UNSET:
         tag_empty(empty, subgraph)
     return subgraph
-
-
-def _set_empty(node: base_types.ComputationNode, value) -> None:
-    try:
-        setattr(node.func, _EMPTY_ATTR, value)
-    except (AttributeError, TypeError):
-        pass  # builtin / C func -> untaggable
 
 
 def tag_empty(empty: Any, subgraph: base_types.GraphType) -> base_types.GraphType:
@@ -109,11 +105,11 @@ def tag_empty(empty: Any, subgraph: base_types.GraphType) -> base_types.GraphTyp
     producer is pruned. Standalone analogue of `add_colors(..., empty=...)` for
     when the empty is attached independently of coloring."""
     for sink in _sinks(subgraph):
-        _set_empty(sink, empty)
+        _tag_func(sink.func, _EMPTY_ATTR, empty)
     return subgraph
 
 
-def read_empties(
+def _read_empties(
     edges: base_types.GraphType,
 ) -> Dict[base_types.ComputationNode, Any]:
     """node -> its typed-empty, for every node whose func carries an `empty` tag."""
@@ -125,18 +121,15 @@ def read_empties(
     return out
 
 
-def pin_core_func(func):
-    """Pin a single callable CORE (the func-level analogue of `pin_core`). The CORE
-    tag rides func.__dict__ through duplicate_function, so copies stay core too.
-    Returns the func. No-op on un-taggable (builtin/C) callables."""
-    try:
-        setattr(func, _ORIGIN_ATTR, _CORE)
-    except (AttributeError, TypeError):
-        pass
+def _pin_core_func(func):
+    # Pin a single callable CORE (absorbing -- a later color sweep leaves it alone).
+    # The CORE tag rides func.__dict__ through duplicate_function, so copies stay core
+    # too. Returns the func. No-op on un-taggable (builtin/C) callables.
+    _tag_func(func, _ORIGIN_ATTR, _CORE)
     return func
 
 
-def read_colors(
+def _read_colors(
     edges: base_types.GraphType,
 ) -> Mapping[base_types.ComputationNode, FrozenSet]:
     """node -> its color set, for every colored node (core / untagged omitted)."""
@@ -150,8 +143,8 @@ def read_colors(
 
 # --------------------------------------------------------------------------- #
 # Observers: nodes that compare-or-accumulate across turns (lag / changed / ever /
-# accumulate, and any domain combinator that does the same). `mark_observer` tags
-# them and `observer` also pins their future-state machinery core. NOTE:
+# accumulate, and any domain combinator that does the same). `observer` tags them
+# (via `_mark_observer`) and also pins their future-state machinery core. NOTE:
 # `build_node_activation_from_edges` does NOT exempt observers -- a skill-private
 # observer prunes WITH its skill (it feeds the tolerant EVENT path so an inactive
 # skill emits no event, and its accumulated state survives the pruned turn via the
@@ -161,27 +154,24 @@ def read_colors(
 # observer's input; the machinery pin is defensive (a same-color when_memory_unavailable
 # wouldn't create a frontier anyway).
 # --------------------------------------------------------------------------- #
-def mark_observer(func):
-    """Mark a node func as a must-tick observer (rides `func.__dict__` through
-    duplication). Returns the func."""
-    try:
-        setattr(func, _OBSERVER_ATTR, True)
-    except (AttributeError, TypeError):
-        pass
+def _mark_observer(func):
+    # Mark a node func as a must-tick observer (rides `func.__dict__` through
+    # duplication). Returns the func. Internal: applied by `observer` below.
+    _tag_func(func, _OBSERVER_ATTR, True)
     return func
 
 
 def observer(result: base_types.GraphType, inner: Callable) -> base_types.GraphType:
     """Declare `inner` (the across-turns node of the observer combinator `result`) an
-    observer: `mark_observer` it and pin its own future-state machinery CORE (the
+    observer: `_mark_observer` it and pin its own future-state machinery CORE (the
     `when_memory_unavailable` default node its future self-edge creates). See the note
     above -- observers are NOT exempted by the activation builder; the mark drives
     diagnostics / an optional caller-built must-tick latch, and the pin is defensive.
     Use for any domain combinator that compares-or-accumulates across turns."""
-    mark_observer(inner)
+    _mark_observer(inner)
     for node in graph.get_all_nodes(result):
         if getattr(node.func, "__name__", "") == "when_memory_unavailable":
-            pin_core_func(node.func)
+            _pin_core_func(node.func)
     return result
 
 
@@ -227,8 +217,8 @@ def latch(
     # default node + the pass-through) -- shared carry-forward infra that must run every
     # turn; `current`'s subgraph stays colored/prunable.
     for node in _colorable_nodes(self_edge):
-        _set_tag(node, _CORE)
-    pin_core_func(latched)
+        _pin_core_func(node.func)
+    _pin_core_func(latched)
     return g
 
 
@@ -318,7 +308,7 @@ def build_node_activation_from_edges(
     """Derive `run.NodeActivation` from an assembled, possibly-duplicated graph using
     only the author tags carried on the node funcs:
 
-      * COLORS  (`read_colors`)  -- the per-node color sets.
+      * COLORS  (`_read_colors`)  -- the per-node color sets.
       * SINGLE-COLOR RULE -- by default only nodes with EXACTLY ONE color are colored
         (prunable); a node with >=2 colors is SHARED and always-runs (an authoring-time
         proxy for "shared -> feeds core"), an untagged node is CORE. With
@@ -349,17 +339,17 @@ def build_node_activation_from_edges(
     intolerant core consumer is caught by the generic closure above, like any producer.
     (Forcing observer cones always-on was measured to drag in ~the whole graph, since
     observers transitively depend on nearly everything -- it defeats pruning entirely.)
-    `mark_observer` / `observer_nodes` remain available for a caller that needs an
-    explicit must-tick latch on an observer's input.
+    The `__cg_observer__` mark (stamped by `observer`) is available to a caller that
+    wants to build an explicit must-tick latch on an observer's input.
 
     `strict=True` instead RAISES `BoundaryDefaultRequired` listing the untagged
     intolerant frontiers (an audit of what falls back to always-on) rather than forcing
     them core. Mirrors `build_node_activation` (the Tier-1 path) sourced from tags."""
-    colors = read_colors(edges)
+    colors = _read_colors(edges)
     node_to_colors = (
         dict(colors) if prune_shared else {n: c for n, c in colors.items() if len(c) == 1}
     )
-    empties = read_empties(edges)
+    empties = _read_empties(edges)
 
     untagged = [
         (p, c) for p, c, defaultable in _intolerant_frontiers(edges, node_to_colors, empties)

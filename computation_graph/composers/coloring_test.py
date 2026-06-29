@@ -5,6 +5,7 @@ The color / empty / observer tags ride `func.__dict__` through duplication, and
 tags: the single-color rule, the tolerance-aware must-run closure, and combiner-aware
 boundary defaults. `latch` carries a value across the turn its producer prunes.
 """
+import gamla
 import pytest
 
 from computation_graph import base_types, composers, graph, run
@@ -23,7 +24,7 @@ def test_color_tag_survives_duplication():
     coloring.add_colors(frozenset({"skill-X"}), sub)
 
     duplicated = duplication.duplicate_graph(sub)
-    colors = coloring.read_colors(duplicated)
+    colors = coloring._read_colors(duplicated)
 
     colorable = [
         n for n in graph.get_all_nodes(duplicated)
@@ -49,7 +50,7 @@ def test_add_colors_unions_shared_by_reference():
     coloring.add_colors(frozenset({"A"}), sub_a)
     coloring.add_colors(frozenset({"B"}), sub_b)  # `shared` is in both -> union
 
-    colors = coloring.read_colors(sub_b)
+    colors = coloring._read_colors(sub_b)
     assert colors[graph.make_computation_node(shared)] == frozenset({"A", "B"})
     assert colors[graph.make_computation_node(private)] == frozenset({"B"})
 
@@ -61,11 +62,11 @@ def test_pin_core_func_is_absorbing():
     def private(y):
         return y
 
-    coloring.pin_core_func(shared)  # the shared building block pins itself core first
+    coloring._pin_core_func(shared)  # the shared building block pins itself core first
     skill = composers.compose_left_unary(shared, private)
     coloring.add_colors(frozenset({"skill-X"}), skill)  # sweep can't color `shared`
 
-    colors = coloring.read_colors(skill)
+    colors = coloring._read_colors(skill)
     assert graph.make_computation_node(shared) not in colors  # stayed core
     assert colors[graph.make_computation_node(private)] == frozenset({"skill-X"})
 
@@ -159,7 +160,10 @@ def test_prune_shared_colors_multicolor_nodes():
     n_shared = graph.make_computation_node(shared)
     assert activation.node_to_colors[n_shared] == frozenset({"A", "B"})
     # it feeds nothing intolerant -> the must-run closure does not force it on.
-    f = run.to_callable_with_node_activation(sub, frozenset(), activation)
+    # (explicit activation -> compile via the null-side-effect curry directly.)
+    f = run.to_callable_with_side_effect(
+        gamla.just(gamla.just(None)), sub, frozenset(), activation
+    )
     assert f({}, {x: 7}, frozenset({"A"}))[n_shared] == 7  # A active -> shared runs
     assert n_shared not in f({}, {x: 7}, frozenset({"C"}))  # all colors inactive -> pruned
 
@@ -168,7 +172,7 @@ def test_observer_prunes_with_its_skill():
     def watched(v):
         return bool(v)
 
-    coloring.pin_core_func(watched)  # the watched value is core (always-on)
+    coloring._pin_core_func(watched)  # the watched value is core (always-on)
     x = graph.make_source()
     obs = memory.ever(composers.compose_left_unary(x, watched))
     coloring.add_colors(frozenset({"A"}), obs)  # colors ever_inner A

@@ -13,7 +13,19 @@ new color set (nodes skipped on the first pass may now need to run). Validates:
 """
 import asyncio
 
+import gamla
+
 from computation_graph import base_types, composers, graph, run
+
+
+def _to_callable(edges, activation):
+    # Compile a graph with an explicit, hand-built NodeActivation (production derives
+    # one from tags via `run.to_callable_with_coloring`; these tests drive the runner
+    # skipping directly). Same null-side-effect path as `run.to_callable`, with the
+    # activation forwarded as its trailing argument.
+    return run.to_callable_with_side_effect(
+        gamla.just(gamla.just(None)), edges, frozenset(), activation
+    )
 
 
 # --------------------------------------------------------------------------- #
@@ -56,7 +68,7 @@ def _activation(nodes):
 def test_initial_color_runs_matching_skill():
     calls = []
     g, x_source, nodes = _build(calls)
-    f = run.to_callable_with_node_activation(g, frozenset(), _activation(nodes))
+    f = _to_callable(g, _activation(nodes))
 
     result = f({}, {x_source: 5}, frozenset({"A"}))  # caller provides color A
 
@@ -67,7 +79,7 @@ def test_initial_color_runs_matching_skill():
 def test_other_initial_color():
     calls = []
     g, x_source, nodes = _build(calls)
-    f = run.to_callable_with_node_activation(g, frozenset(), _activation(nodes))
+    f = _to_callable(g, _activation(nodes))
 
     result = f({}, {x_source: 7}, frozenset({"B"}))
 
@@ -78,7 +90,7 @@ def test_other_initial_color():
 def test_no_initial_color_skips_all_colored():
     calls = []
     g, x_source, nodes = _build(calls)
-    f = run.to_callable_with_node_activation(g, frozenset(), _activation(nodes))
+    f = _to_callable(g, _activation(nodes))
 
     result = f({}, {x_source: 5})  # no color -> only no-color nodes run
 
@@ -102,7 +114,7 @@ def test_interior_node_prunes_when_skipped():
     activation = run.NodeActivation(
         node_to_colors={worker_node: frozenset({"A"})}, boundary_defaults={}
     )
-    f = run.to_callable_with_node_activation(g, frozenset(), activation)
+    f = _to_callable(g, activation)
 
     skipped = f({}, {x_source: 9}, frozenset({"B"}))  # B active -> worker(A) prunes
     assert calls == []
@@ -135,7 +147,7 @@ def test_sync_change_event_restarts():
     activation = run.NodeActivation(
         node_to_colors={worker_node: frozenset({"A"})}, boundary_defaults={}
     )
-    f = run.to_callable_with_node_activation(g, frozenset(), activation)
+    f = _to_callable(g, activation)
 
     # No initial color -> worker(A) skipped on pass 0; router emits A -> restart.
     result = f({}, {sel_source: "A", x_source: 9})
@@ -203,7 +215,7 @@ def _async_activation(nodes):
 
 async def test_async_change_event_routes_to_chosen_skill():
     g, u, s, nodes, calls = _build_async()
-    f = run.to_callable_with_node_activation(g, frozenset(), _async_activation(nodes))
+    f = _to_callable(g, _async_activation(nodes))
 
     result = await f({}, {u: 0, s: 5})  # no initial color; event resolves skill 0
     assert calls == ["A"]
@@ -212,7 +224,7 @@ async def test_async_change_event_routes_to_chosen_skill():
 
 async def test_async_greeting_no_skill_skips_all():
     g, u, s, nodes, calls = _build_async()
-    f = run.to_callable_with_node_activation(g, frozenset(), _async_activation(nodes))
+    f = _to_callable(g, _async_activation(nodes))
 
     result = await f({}, {u: None, s: 5})  # event resolves empty -> skip all colored
     assert calls == []
@@ -221,7 +233,7 @@ async def test_async_greeting_no_skill_skips_all():
 
 async def test_async_initial_color_single_pass():
     g, u, s, nodes, calls = _build_async()
-    f = run.to_callable_with_node_activation(g, frozenset(), _async_activation(nodes))
+    f = _to_callable(g, _async_activation(nodes))
 
     # Caller seeds color 0 and the route event agrees -> single pass, no restart.
     result = await f({}, {u: 0, s: 5}, frozenset({0}))
@@ -231,7 +243,7 @@ async def test_async_initial_color_single_pass():
 
 async def test_async_reroute_restarts():
     g, u, s, nodes, calls = _build_async()
-    f = run.to_callable_with_node_activation(g, frozenset(), _async_activation(nodes))
+    f = _to_callable(g, _async_activation(nodes))
 
     # Caller seeds color 0, but the route event resolves color 1 -> restart to B.
     result = await f({}, {u: 1, s: 5}, frozenset({0}))
