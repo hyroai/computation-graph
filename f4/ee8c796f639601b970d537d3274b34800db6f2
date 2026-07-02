@@ -1,0 +1,50 @@
+computation_graph/infer_sink.py
+  s_f26c09793ff109::t_5271df5f037b8e 1,6,8,124
+  s_f26c09793ff109::t_69a63c312aaa3a 7
+computation_graph/composers/__init__.py
+  s_f26c09793ff109::t_81fd4a9eb1f760 323-325
+  s_f26c09793ff109::t_a13c9b693292cf 208,212,216,220,228
+  s_f26c09793ff109::t_9a9c55e6b6270a 378,381,384,386
+computation_graph/base_types.py
+  s_f26c09793ff109::t_1d6f7a5f60304d 188-190
+  s_f26c09793ff109::t_ab2d1b5499bb58 197
+  s_f26c09793ff109::t_0cbff4ede0c72b 182
+  s_f26c09793ff109::t_0ebf64dbf24bfb 187
+computation_graph/graph.py
+  s_f26c09793ff109::t_202b7c8bac366b 191
+  s_f26c09793ff109::t_5271df5f037b8e 20,27,35,342,350-353
+  s_f26c09793ff109::t_e94cc94ebd2fa8 336
+  s_f26c09793ff109::t_240bdfda107cdb 355
+  s_f26c09793ff109::t_5a829bfd227876 2-3,8-10
+computation_graph/infer_sink_test.py
+  s_f26c09793ff109::t_5271df5f037b8e 10-18,24-29,38-46,57-65,81-86,97-99,114-125,135-143,156-164,175-178,192-203,215-223,243-248,257-259,265-267,276-278,284-286,295-305,308-310,316-324,333-337,349-360,368-373,403
+  s_f26c09793ff109::t_bf84f53d913d74 306-307
+  s_f26c09793ff109::t_d88f1acb73130f 338
+  s_f26c09793ff109::t_41465acdadc6a7 348
+  s_f26c09793ff109::t_701f0a5c99934a 374
+computation_graph/legacy.py
+  s_f26c09793ff109::t_5271df5f037b8e 27
+computation_graph/graph_test.py
+  s_f26c09793ff109::t_5271df5f037b8e 265-266,276-277,978-979
+  s_f26c09793ff109::t_7070c06e499020 842-848
+  s_f26c09793ff109::t_08470e3683e721 841
+computation_graph/run.py
+  s_f26c09793ff109::t_5271df5f037b8e 169-170
+  s_f26c09793ff109::t_09b92399107acb 171
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.8",
+  "base_commit_sha": "f4ee8c796f639601b970d537d3274b34800db6f2",
+  "prompts": {},
+  "sessions": {
+    "s_f26c09793ff109": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "198bb47b-147e-4e67-bf67-0faf13fe7b0f",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Yinon Eliraz <yinon.e@hyro.ai>"
+    }
+  }
+}
