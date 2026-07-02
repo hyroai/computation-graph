@@ -180,11 +180,24 @@ class ChangeActiveColors:
     the caller's concern).
 
     The colors are opaque hashable tokens, matched against `node_to_colors`. An
-    EMPTY set means "no color is active" -> every colored node skips (e.g. a turn
-    that resolved to no skill).
+    EMPTY set means "this declarer resolved no color" -> alone it activates nothing
+    (e.g. a turn that resolved to no skill).
+
+    Declarations COMPOSE: independent subgraphs may each declare the colors they
+    resolved (e.g. one declarer per routing context), and the runner activates the
+    UNION of every declaration observed in a pass (replacing the caller's initial
+    seed). One turn can thus activate several colors at once; a declarer that
+    resolved nothing contributes nothing rather than vetoing the others.
     """
 
     colors: FrozenSet
+
+
+class ColorDeclarationsDidNotConverge(Exception):
+    """The unioned `ChangeActiveColors` declarations cycled back to an active set
+    this run already had -- the declarations depend on the active colors themselves,
+    so the restart loop can never settle. Declarers must derive their colors from
+    always-on (uncolored) inputs only."""
 
 
 @dataclasses.dataclass(frozen=True, eq=False)
@@ -207,11 +220,13 @@ class NodeActivation:
     (the `active_colors` argument of the compiled reducer; optional). The run then
     proceeds layer by layer skipping colored nodes whose color is not in the active
     set -- when no initial color is given, ONLY the no-color (uncolored) nodes run.
-    If a `ChangeActiveColors` event then appears in a node result with a DIFFERENT
-    color set, the run STARTS OVER with the new active set (nodes that were skipped
-    may now need to run); only the colored nodes + everything downstream of them are
-    recomputed, the rest (e.g. an upstream routing model call) is carried over so it
-    is never repeated. The restart happens at most once (the color resolves once).
+    If `ChangeActiveColors` events then appear in node results whose UNION differs
+    from the active set, the run STARTS OVER with that union as the new active set
+    (nodes that were skipped may now need to run); only the colored nodes +
+    everything downstream of them are recomputed, the rest (e.g. an upstream routing
+    model call) is carried over so it is never repeated. The run restarts until the
+    unioned declaration stabilizes (normally once); a union cycling back to an
+    earlier active set raises `ColorDeclarationsDidNotConverge`.
     """
 
     node_to_colors: Mapping[base_types.ComputationNode, FrozenSet]
@@ -595,11 +610,19 @@ async def _run_graph_async(
     # set, disjoint from every color, so only the no-color (uncolored) nodes run.
     active = initial_colors if initial_colors is not None else frozenset()
 
+    _skip_filter = os.getenv("CG_SKIP_TRACE")
+
     def _schedule_or_skip(node_executor):
         node = node_executor[0]
         colors = node_to_colors.get(node)
         if colors and colors.isdisjoint(active):
             # colored but not active: frontier -> boundary default; interior -> prune.
+            if _skip_filter and any(
+                s in str(node) for s in _skip_filter.split("|")
+            ):
+                logging.error(
+                    f"[CG-SKIP] {node} colors={sorted(map(str, colors))} active={sorted(map(str, active))}"
+                )
             if node in boundary_defaults:
                 node_to_task_or_result[node] = boundary_defaults[node]
             return
@@ -636,6 +659,7 @@ async def _run_graph_async(
         # Same restart loop as the sync runner, but a node's result is a Task we must
         # await. We schedule the whole pass first (the tasks run CONCURRENTLY), then
         # gather them together (not one-by-one) before checking for a color change.
+        seen_active_sets = {active}
         while True:
             for node_executor in topological_sorted_nodes:
                 if node_executor[0] in node_to_task_or_result:
@@ -646,15 +670,30 @@ async def _run_graph_async(
             harvested = await _gather_pending()
             if harvested is not None:
                 raise harvested
-            # The LAST change-color event in the pass wins.
-            observed = None
-            for node_executor in topological_sorted_nodes:
-                value = node_to_task_or_result.get(node_executor[0], CG_NO_RESULT)
-                if isinstance(value, ChangeActiveColors):
-                    observed = value.colors
-            if observed is None or observed == active:
+            # Declarations COMPOSE: the pass's active set is the UNION of every
+            # ChangeActiveColors observed (independent declarers each contribute the
+            # colors they resolved; an empty declaration contributes nothing).
+            declarations = frozenset(
+                value
+                for node_executor in topological_sorted_nodes
+                for value in (
+                    node_to_task_or_result.get(node_executor[0], CG_NO_RESULT),
+                )
+                if isinstance(value, ChangeActiveColors)
+            )
+            if not declarations:
+                break  # nothing declared -> the seed stands
+            observed = frozenset().union(*(d.colors for d in declarations))
+            if observed == active:
                 break  # no new color -> done
-            # A different color was declared -> START OVER with it, recomputing only
+            # Revisiting an earlier active set means the declarations depend on the
+            # active colors themselves -> the loop can never settle; fail loudly.
+            if observed in seen_active_sets:
+                raise ColorDeclarationsDidNotConverge(
+                    f"{sorted(map(str, observed))} was already active this run"
+                )
+            seen_active_sets.add(observed)
+            # A new color set was declared -> START OVER with it, recomputing only
             # the color-dependent nodes; the rest (routing / async work) carry over.
             active = observed
             for node in tuple(node_to_task_or_result):
@@ -695,9 +734,11 @@ def _run_graph(
     # the rest over. With no coloring (`to_callable`) the loop runs the whole graph
     # once, exactly as before.
     active = initial_colors if initial_colors is not None else frozenset()
-    restart = True
-    while restart:
-        restart = False
+    # Same restart loop as the async runner: run the WHOLE pass, then union the
+    # declarations (a later declarer in the toposort must be seen before deciding
+    # the active set), and start over if a new color set was declared.
+    seen_active_sets = {active}
+    while True:
         for node_executor in topological_sorted_nodes:
             node = node_executor[0]
             if node in accumulated_results:
@@ -709,20 +750,35 @@ def _run_graph(
                     accumulated_results[node] = boundary_defaults[node]
                 continue
             _schedule_node(node_executor, accumulated_results, handled_exceptions)
-            value = accumulated_results.get(node, CG_NO_RESULT)
-            # A node that declares a NEW active color -> start over with it,
-            # recomputing only the color-dependent nodes (routing/core carry over).
-            if (
-                color_dependent
-                and isinstance(value, ChangeActiveColors)
-                and value.colors != active
-            ):
-                active = value.colors
-                for n in tuple(accumulated_results):
-                    if n in color_dependent:
-                        del accumulated_results[n]
-                restart = True
-                break
+        if not color_dependent:
+            break  # no colored nodes -> nothing to restart for
+        # Declarations COMPOSE: the pass's active set is the UNION of every
+        # ChangeActiveColors observed (independent declarers each contribute the
+        # colors they resolved; an empty declaration contributes nothing).
+        declarations = frozenset(
+            value
+            for node_executor in topological_sorted_nodes
+            for value in (accumulated_results.get(node_executor[0], CG_NO_RESULT),)
+            if isinstance(value, ChangeActiveColors)
+        )
+        if not declarations:
+            break  # nothing declared -> the seed stands
+        observed = frozenset().union(*(d.colors for d in declarations))
+        if observed == active:
+            break  # no new color -> done
+        # Revisiting an earlier active set means the declarations depend on the
+        # active colors themselves -> the loop can never settle; fail loudly.
+        if observed in seen_active_sets:
+            raise ColorDeclarationsDidNotConverge(
+                f"{sorted(map(str, observed))} was already active this run"
+            )
+        seen_active_sets.add(observed)
+        # A new color set was declared -> start over with it, recomputing only the
+        # color-dependent nodes (routing/core carry over).
+        active = observed
+        for n in tuple(accumulated_results):
+            if n in color_dependent:
+                del accumulated_results[n]
     return accumulated_results
 
 

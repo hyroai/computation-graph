@@ -129,6 +129,21 @@ def _pin_core_func(func):
     return func
 
 
+def pin_core(subgraph: base_types.GraphType) -> base_types.GraphType:
+    """Pin every colorable node of `subgraph` CORE (absorbing): a later `add_colors`
+    sweep passing over these funcs -- or over any DUPLICATE of them -- leaves them
+    uncolored, so they always run. Use at the AUTHORING SITE of shared machinery
+    that skills later compose into their own channels (routing state, shared event
+    chains): without the pin, each per-skill duplicate ends up inside exactly one
+    skill's closure -> single color -> pruned on every other skill's turn, starving
+    core flows (e.g. a routing event chain that must fire on a turn whose active
+    color is a different skill). The tag rides func.__dict__ through duplication.
+    Returns the graph unchanged."""
+    for node in _colorable_nodes(subgraph):
+        _pin_core_func(node.func)
+    return subgraph
+
+
 def _read_colors(
     edges: base_types.GraphType,
 ) -> Mapping[base_types.ComputationNode, FrozenSet]:

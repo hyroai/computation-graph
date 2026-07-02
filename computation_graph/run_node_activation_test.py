@@ -250,3 +250,109 @@ async def test_async_reroute_restarts():
     assert calls == ["A", "B"]  # A ran on the seeded pass, then restarted to B
     assert result[nodes["select"]] == ("B", 5)
 
+
+
+# --------------------------------------------------------------------------- #
+# Composing declarations: independent declarers (e.g. one per routing context) each
+# contribute the colors they resolved; the runner activates the UNION observed in
+# the pass. Two declarers resolving different skills in one turn activate BOTH --
+# the multi-routing-context bug shape (one declaration silently cancelling the
+# other) cannot happen.
+# --------------------------------------------------------------------------- #
+def _build_two_declarers(calls, colors_one, colors_two):
+    def declarer_one(v):
+        return run.ChangeActiveColors(colors_one)
+
+    def declarer_two(v):
+        return run.ChangeActiveColors(colors_two)
+
+    def skill_a(x):
+        calls.append("A")
+        return ("A", x)
+
+    def skill_b(x):
+        calls.append("B")
+        return ("B", x)
+
+    u = graph.make_source()
+    s = graph.make_source()
+    g = base_types.merge_graphs(
+        composers.compose_left_future(u, declarer_one, None, None),
+        composers.compose_left_future(u, declarer_two, None, None),
+        composers.compose_left_future(s, skill_a, None, None),
+        composers.compose_left_future(s, skill_b, None, None),
+    )
+    activation = run.NodeActivation(
+        node_to_colors={
+            graph.make_computation_node(skill_a): frozenset({"A"}),
+            graph.make_computation_node(skill_b): frozenset({"B"}),
+        },
+        boundary_defaults={},
+    )
+    return g, u, s, activation
+
+
+def test_sync_declarations_union():
+    calls = []
+    g, u, s, activation = _build_two_declarers(
+        calls, frozenset({"A"}), frozenset({"B"})
+    )
+    f = _to_callable(g, activation)
+
+    f({}, {u: 1, s: 5})
+    assert sorted(calls) == ["A", "B"]  # both declared colors activated
+
+
+def test_sync_empty_declaration_does_not_veto():
+    # A declarer that resolved nothing contributes nothing; the other's color runs.
+    calls = []
+    g, u, s, activation = _build_two_declarers(
+        calls, frozenset({"A"}), frozenset()
+    )
+    f = _to_callable(g, activation)
+
+    f({}, {u: 1, s: 5})
+    assert calls == ["A"]
+
+
+async def test_async_declarations_union():
+    calls = []
+
+    async def vic(v):
+        await asyncio.sleep(0)
+        return v
+
+    def declarer_one(v):
+        return run.ChangeActiveColors(frozenset({"A"}))
+
+    def declarer_two(v):
+        return run.ChangeActiveColors(frozenset({"B"}))
+
+    def skill_a(x):
+        calls.append("A")
+        return ("A", x)
+
+    def skill_b(x):
+        calls.append("B")
+        return ("B", x)
+
+    u = graph.make_source()
+    s = graph.make_source()
+    g = base_types.merge_graphs(
+        composers.compose_left_future(u, vic, None, None),
+        composers.compose_left_unary(vic, declarer_one),
+        composers.compose_left_unary(vic, declarer_two),
+        composers.compose_left_future(s, skill_a, None, None),
+        composers.compose_left_future(s, skill_b, None, None),
+    )
+    activation = run.NodeActivation(
+        node_to_colors={
+            graph.make_computation_node(skill_a): frozenset({"A"}),
+            graph.make_computation_node(skill_b): frozenset({"B"}),
+        },
+        boundary_defaults={},
+    )
+    f = _to_callable(g, activation)
+
+    await f({}, {u: 1, s: 5})
+    assert sorted(calls) == ["A", "B"]  # both declared colors activated
