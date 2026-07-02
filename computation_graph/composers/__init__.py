@@ -18,7 +18,7 @@ _to_computation_node_if_callable = gamla.unless(
 )
 
 
-# TODO: Rename
+# TODO(nitzo): Rename
 def _get_edges_from_node_or_graph(
     node_or_graph: base_types.NodeOrGraph,
 ) -> base_types.GraphType:
@@ -147,7 +147,6 @@ def make_or(
     )
 
 
-
 def make_first(*graphs: base_types.CallableOrNodeOrGraph) -> base_types.GraphType:
     """Returns a graph that when run, returns the first value that doesn't raise an exception.
     >>> def raise_some_exception():
@@ -194,18 +193,25 @@ def make_first(*graphs: base_types.CallableOrNodeOrGraph) -> base_types.GraphTyp
             frozenset,
             lambda edges: GraphType(edges, sink),
         ),
-        sink_node_or_graph=sink
+        sink_node_or_graph=sink,
     )
 
 
 def last(*args) -> base_types.GraphType:
     return make_first(*reversed(args))
 
-def _determine_sink(source: base_types.NodeOrGraph, destination: base_types.NodeOrGraph, is_future: bool) -> base_types.ComputationNode:
+
+def _determine_sink(
+    source: base_types.NodeOrGraph, destination: base_types.NodeOrGraph, is_future: bool
+) -> base_types.ComputationNode:
     if is_future:
         if base_types.is_computation_graph(source):
             return source.sink
-        return destination.sink if base_types.is_computation_graph(destination) else destination
+        return (
+            destination.sink
+            if base_types.is_computation_graph(destination)
+            else destination
+        )
 
     if base_types.is_computation_graph(destination):
         return destination.sink
@@ -215,7 +221,9 @@ def _determine_sink(source: base_types.NodeOrGraph, destination: base_types.Node
     return destination
 
 
-def _determine_composition_sink(graphs: Tuple[base_types.NodeOrGraph,...]) -> base_types.NodeOrGraph:
+def _determine_composition_sink(
+    graphs: Tuple[base_types.NodeOrGraph, ...]
+) -> base_types.NodeOrGraph:
     for graph_or_node in reversed(graphs):
         if base_types.is_computation_graph(graph_or_node):
             return graph_or_node.sink
@@ -223,8 +231,8 @@ def _determine_composition_sink(graphs: Tuple[base_types.NodeOrGraph,...]) -> ba
         if graph_or_node.is_terminal:
             continue
 
-
     raise AssertionError("Could not compose, failed to. find a sink")
+
 
 @gamla.curry
 def _try_connect(
@@ -316,9 +324,8 @@ def _infer_composition_edges(
         ),
         _get_edges_from_node_or_graph(source),
         destination,
-        sink_node_or_graph=_determine_sink(source, destination, is_future)
+        sink_node_or_graph=_determine_sink(source, destination, is_future),
     )
-
 
 
 def _make_compose_inner(
@@ -337,7 +344,9 @@ def _make_compose_inner(
         gamla.sliding_window(2),
         gamla.sync.map(gamla.star(_infer_composition_edges(priority, key, is_future))),
         tuple,
-        lambda graphs: graph.merge_graphs(*graphs, sink_node_or_graph=_determine_composition_sink(graphs)),
+        lambda graphs: graph.merge_graphs(
+            *graphs, sink_node_or_graph=_determine_composition_sink(graphs)
+        ),
     )
 
 
@@ -361,7 +370,6 @@ def make_compose_future(
     key: Optional[str],
     default: base_types.Result,
 ) -> base_types.GraphType:
-
     def when_memory_unavailable():
         return default
 
@@ -384,7 +392,6 @@ def make_compose_future(
         ),
         sink_node_or_graph=sink_node_or_graph,
     )
-
 
 
 def compose_unary_future(
@@ -459,7 +466,9 @@ def compose_dict(
         dict.items,
         gamla.sync.map(gamla.star(lambda key, fn: make_compose(f, fn, key=key))),
         tuple,
-        lambda graphs: graph.merge_graphs(*graphs, sink_node_or_graph=graphs[-1]) # TODO(nitzo): Use the new _determine_sink_function.
+        lambda graphs: graph.merge_graphs(
+            *graphs, sink_node_or_graph=graphs[-1]
+        ),  # TODO(nitzo): Use the new _determine_sink_function.
     ) or compose_left_unary(f, lambda x: x)
 
 

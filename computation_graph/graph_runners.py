@@ -18,7 +18,9 @@ def unary_bare(g, source):
         gamla.star(
             run.to_callable_strict(
                 graph.merge_graphs(
-                    g, composers.compose_left_future(real_source, source, None, None), sink_node_or_graph=g
+                    g,
+                    composers.compose_left_future(real_source, source, None, None),
+                    sink_node_or_graph=g,
                 )
             )
         ),
@@ -35,7 +37,9 @@ def unary_with_state(
     real_source = graph.make_source()
     f = run.to_callable_strict(
         graph.merge_graphs(
-            g, composers.compose_left_future(real_source, source, None, None), sink_node_or_graph=g
+            g,
+            composers.compose_left_future(real_source, source, None, None),
+            sink_node_or_graph=g,
         )
     )
 
@@ -59,8 +63,9 @@ def unary_with_state_and_expectations(
     return gamla.compose(
         variadic_with_state_and_expectations(
             graph.merge_graphs(
-                g, composers.compose_left_future(real_source, source, None, None),
-                sink_node_or_graph=g
+                g,
+                composers.compose_left_future(real_source, source, None, None),
+                sink_node_or_graph=g,
             ),
             sink,
         ),
