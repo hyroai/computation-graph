@@ -102,9 +102,6 @@ def _profile(node, time_started: float):
     )
 
 
-_group_by_is_future = opt_gamla.groupby(lambda k_v: asyncio.isfuture(k_v[1]))
-
-
 _is_graph_async = opt_gamla.compose_left(
     opt_gamla.mapcat(lambda edge: (edge.source, *edge.args)),
     opt_gamla.remove(gamla.equals(None)),
@@ -172,11 +169,63 @@ def _merge_edges_pointing_to_terminals(g: base_types.GraphType) -> base_types.Gr
     )(g)
 
 
+
+
+@dataclasses.dataclass(frozen=True)
+class ChangeActiveColors:
+    """The CG-native CHANGE-COLOR EVENT. A node RETURNS this value to declare the
+    set of colors that are active for node-activation skipping. The runner reads it
+    out of node results -- it is the ONLY way the active colors are set, so the
+    engine never needs to know what colors mean (skills, etc. -- that is entirely
+    the caller's concern).
+
+    The colors are opaque hashable tokens, matched against `node_to_colors`. An
+    EMPTY set means "no color is active" -> every colored node skips (e.g. a turn
+    that resolved to no skill).
+    """
+
+    colors: FrozenSet
+
+
+@dataclasses.dataclass(frozen=True, eq=False)
+class NodeActivation:
+    """Opt-in spec for runner-level node skipping (per-node "coloring").
+
+    The engine stays domain-agnostic: it knows only COLORS (opaque tokens) and the
+    `ChangeActiveColors` event. The caller colors the nodes and emits the event from
+    its own nodes; nothing skill/route/VIC-specific reaches the engine.
+
+    SKIP RULE -- when a node's color-set is DISJOINT from the active colors:
+      * if the node is in `boundary_defaults` (a colored->uncolored frontier that
+        feeds shared recombination, e.g. an aggregation/terminal), its typed-empty
+        default value is returned so downstream make_and/aggregation stays
+        well-formed (the per-node, build-time, correctly-typed sentinel);
+      * otherwise `_DepNotFoundError` is raised so the node prunes and the graph
+        reducer's `{**prev, **computed}` merge latches its previous value for free.
+
+    ACTIVE COLORS: the CALLER provides an initial color set when it starts the run
+    (the `active_colors` argument of the compiled reducer; optional). The run then
+    proceeds layer by layer skipping colored nodes whose color is not in the active
+    set -- when no initial color is given, ONLY the no-color (uncolored) nodes run.
+    If a `ChangeActiveColors` event then appears in a node result with a DIFFERENT
+    color set, the run STARTS OVER with the new active set (nodes that were skipped
+    may now need to run); only the colored nodes + everything downstream of them are
+    recomputed, the rest (e.g. an upstream routing model call) is carried over so it
+    is never repeated. The restart happens at most once (the color resolves once).
+    """
+
+    node_to_colors: Mapping[base_types.ComputationNode, FrozenSet]
+    boundary_defaults: Mapping[base_types.ComputationNode, Any] = dataclasses.field(
+        default_factory=dict
+    )
+
+
 def _to_callable_with_side_effect_for_single_and_multiple(
     single_node_side_effect: _SingleNodeSideEffect,
     all_nodes_side_effect: Callable,
     edges: base_types.GraphType,
     handled_exceptions: Tuple[Type[Exception], ...],
+    node_activation: Optional[NodeActivation] = None,
 ) -> Callable[[_NodeToResults, _NodeToResults], _NodeToResults]:
     edges = _merge_edges_pointing_to_terminals(edges)
     single_node_side_effect = (
@@ -217,6 +266,31 @@ def _to_callable_with_side_effect_for_single_and_multiple(
         opt_gamla.maptuple(opt_gamla.pair_right(get_node_executor)),
     )
 
+    # Per-node skipping ("coloring"), opt-in by construction: it applies only when a
+    # NodeActivation is supplied (via `to_callable_with_coloring` / the side-effect
+    # curry with a trailing activation). The runner
+    # itself does the skip (no executor wrapping): a colored node whose color is not
+    # active returns its boundary default (frontier) or is pruned (interior). Plain
+    # `to_callable` passes empty maps -> the runner runs the whole graph (zero
+    # behavior change for every existing caller). `color_dependent` = colored nodes
+    # + everything downstream of them (recomputed on a restart; the rest carries
+    # over so upstream async work is never repeated).
+    node_to_colors: Mapping = (
+        node_activation.node_to_colors if node_activation is not None else {}
+    )
+    boundary_defaults: Mapping = (
+        node_activation.boundary_defaults if node_activation is not None else {}
+    )
+    color_dependent: FrozenSet = (
+        frozenset(
+            gamla.graph_traverse_many(
+                tuple(node_to_colors), graph.traverse_forward(edges)
+            )
+        )
+        if node_to_colors
+        else frozenset()
+    )
+
     translate_source_to_placeholder = opt_gamla.compose_left(
         opt_gamla.keyfilter(gamla.contains(future_sources)),
         opt_gamla.keymap(future_source_to_placeholder.__getitem__),
@@ -225,22 +299,32 @@ def _to_callable_with_side_effect_for_single_and_multiple(
 
     if is_async:
 
-        async def final_runner(sources_to_values):
+        async def final_runner(sources_to_values, active_colors=None):
             inputs = translate_source_to_placeholder(sources_to_values)
             all_results = await _run_graph_async(
-                inputs, handled_exceptions, topological_sorted_nodes
+                inputs,
+                handled_exceptions,
+                topological_sorted_nodes,
+                node_to_colors,
+                boundary_defaults,
+                color_dependent,
+                active_colors,
             )
 
             return all_node_side_effects_on_edges(all_results)
 
     else:
 
-        def final_runner(sources_to_values):
+        def final_runner(sources_to_values, active_colors=None):
             return all_node_side_effects_on_edges(
                 _run_graph(
                     translate_source_to_placeholder(sources_to_values),
                     handled_exceptions,
                     topological_sorted_nodes,
+                    node_to_colors,
+                    boundary_defaults,
+                    color_dependent,
+                    active_colors,
                 )
             )
 
@@ -465,46 +549,108 @@ def _make_get_node_executor(
     return get_executor
 
 
-async def _run_graph_async(inputs, handled_exceptions, topological_sorted_nodes):
+def _schedule_node(node_executor, node_to_task_or_result, handled_exceptions):
+    try:
+        node_to_task_or_result[node_executor[0]] = node_executor[1](
+            node_to_task_or_result, node_executor[0]
+        )
+    except (_DepNotFoundError, base_types.SkipComputationError, *handled_exceptions):
+        pass
+
+
+async def _run_graph_async(
+    inputs,
+    handled_exceptions,
+    topological_sorted_nodes,
+    node_to_colors,
+    boundary_defaults,
+    color_dependent,
+    initial_colors,
+):
     node_to_task_or_result = inputs.copy()
     unhandled_exception = None
+    skip_exceptions = (
+        _DepNotFoundError,
+        base_types.SkipComputationError,
+        *handled_exceptions,
+    )
+    # The caller provides the initial active colors; no initial color -> the empty
+    # set, disjoint from every color, so only the no-color (uncolored) nodes run.
+    active = initial_colors if initial_colors is not None else frozenset()
+
+    def _schedule_or_skip(node_executor):
+        node = node_executor[0]
+        colors = node_to_colors.get(node)
+        if colors and colors.isdisjoint(active):
+            # colored but not active: frontier -> boundary default; interior -> prune.
+            if node in boundary_defaults:
+                node_to_task_or_result[node] = boundary_defaults[node]
+            return
+        _schedule_node(node_executor, node_to_task_or_result, handled_exceptions)
+
+    async def _gather_pending():
+        # Await every pending future in `node_to_task_or_result` in ONE gather, folding
+        # each result back in place: success -> value, skip-exception -> pruned (absent).
+        # Returns the first unhandled (non-skip) exception, or None. Every future is
+        # awaited regardless of outcome, so no task's exception goes unretrieved. Shared
+        # by the restart loop (which reads results before checking for a color change)
+        # and the final harvest below.
+        pending = [
+            node
+            for node, value in node_to_task_or_result.items()
+            if asyncio.isfuture(value)
+        ]
+        first_unhandled = None
+        for node, result in zip(
+            pending,
+            await asyncio.gather(
+                *(node_to_task_or_result[n] for n in pending), return_exceptions=True
+            ),
+        ):
+            if not isinstance(result, Exception):
+                node_to_task_or_result[node] = result
+            elif isinstance(result, skip_exceptions):
+                node_to_task_or_result.pop(node, None)
+            elif first_unhandled is None:
+                first_unhandled = result
+        return first_unhandled
+
     try:
-        for node_executor in topological_sorted_nodes:
-            try:
-                node_to_task_or_result[node_executor[0]] = node_executor[1](
-                    node_to_task_or_result, node_executor[0]
-                )
-            except (
-                _DepNotFoundError,
-                base_types.SkipComputationError,
-                *handled_exceptions,
-            ):
-                pass
+        # Same restart loop as the sync runner, but a node's result is a Task we must
+        # await. We schedule the whole pass first (the tasks run CONCURRENTLY), then
+        # gather them together (not one-by-one) before checking for a color change.
+        while True:
+            for node_executor in topological_sorted_nodes:
+                if node_executor[0] in node_to_task_or_result:
+                    continue  # carried over (color-independent) or already scheduled
+                _schedule_or_skip(node_executor)
+            if not color_dependent:
+                break  # no colored nodes -> nothing to restart for
+            harvested = await _gather_pending()
+            if harvested is not None:
+                raise harvested
+            # The LAST change-color event in the pass wins.
+            observed = None
+            for node_executor in topological_sorted_nodes:
+                value = node_to_task_or_result.get(node_executor[0], CG_NO_RESULT)
+                if isinstance(value, ChangeActiveColors):
+                    observed = value.colors
+            if observed is None or observed == active:
+                break  # no new color -> done
+            # A different color was declared -> START OVER with it, recomputing only
+            # the color-dependent nodes; the rest (routing / async work) carry over.
+            active = observed
+            for node in tuple(node_to_task_or_result):
+                if node in color_dependent:
+                    del node_to_task_or_result[node]
     except Exception as exc:
         unhandled_exception = exc
     finally:
-        results_by_is_async = _group_by_is_future(node_to_task_or_result.items())
-        async_results = tuple(zip(*results_by_is_async.get(True, ())))
-        sync_results = dict(results_by_is_async.get(False, ()))
-
-        all_results = sync_results
-        if async_results:
-            for (node, node_result) in zip(
-                async_results[0],
-                await asyncio.gather(*async_results[1], return_exceptions=True),
-            ):
-                task_e = node_to_task_or_result[node].exception()
-                if not task_e:
-                    all_results[node] = node_result
-                elif not unhandled_exception and not isinstance(
-                    task_e,
-                    (
-                        _DepNotFoundError,
-                        base_types.SkipComputationError,
-                        *handled_exceptions,
-                    ),
-                ):
-                    unhandled_exception = task_e
+        # Harvest any futures still pending (the whole graph when uncolored / the
+        # color-independent ones when the restart loop broke without gathering).
+        harvested = await _gather_pending()
+        if unhandled_exception is None:
+            unhandled_exception = harvested
         if unhandled_exception:
             # this trick avoids cyclic reference and garbage collection issues
             try:
@@ -513,39 +659,72 @@ async def _run_graph_async(inputs, handled_exceptions, topological_sorted_nodes)
                 del node_to_task_or_result
                 del unhandled_exception
                 raise e from e
-    return all_results
+    return node_to_task_or_result
 
 
 def _run_graph(
     inputs: dict,
     handled_exceptions,
     topological_sorted_nodes: tuple[tuple[base_types.ComputationNode, _NodeExecutor]],
+    node_to_colors,
+    boundary_defaults,
+    color_dependent,
+    initial_colors,
 ) -> _NodeToResults:
     accumulated_results = inputs.copy()
-    for node_executor in topological_sorted_nodes:
-        try:
-            accumulated_results[node_executor[0]] = node_executor[1](
-                accumulated_results, node_executor[0]
-            )
-        except (
-            _DepNotFoundError,
-            base_types.SkipComputationError,
-            *handled_exceptions,
-        ):
-            pass
+    # The caller provides the initial active colors (no color -> empty set -> only
+    # no-color nodes run); a ChangeActiveColors event that declares a different set
+    # starts the run over, recomputing only the color-dependent nodes and carrying
+    # the rest over. With no coloring (`to_callable`) the loop runs the whole graph
+    # once, exactly as before.
+    active = initial_colors if initial_colors is not None else frozenset()
+    restart = True
+    while restart:
+        restart = False
+        for node_executor in topological_sorted_nodes:
+            node = node_executor[0]
+            if node in accumulated_results:
+                continue  # carried over (color-independent) or already run this pass
+            colors = node_to_colors.get(node)
+            if colors and colors.isdisjoint(active):
+                # colored but not active: frontier -> boundary default; interior -> prune.
+                if node in boundary_defaults:
+                    accumulated_results[node] = boundary_defaults[node]
+                continue
+            _schedule_node(node_executor, accumulated_results, handled_exceptions)
+            value = accumulated_results.get(node, CG_NO_RESULT)
+            # A node that declares a NEW active color -> start over with it,
+            # recomputing only the color-dependent nodes (routing/core carry over).
+            if (
+                color_dependent
+                and isinstance(value, ChangeActiveColors)
+                and value.colors != active
+            ):
+                active = value.colors
+                for n in tuple(accumulated_results):
+                    if n in color_dependent:
+                        del accumulated_results[n]
+                restart = True
+                break
     return accumulated_results
 
 
 def _graph_reducer(graph_callable):
-    def reducer(prev: _NodeToResults, sources: _NodeToResults) -> _NodeToResults:
-        return {**prev, **(graph_callable({**prev, **sources}))}
+    # `active_colors` (optional) is the initial color set the caller provides when
+    # it starts the run; ignored unless the graph has node-activation coloring.
+    def reducer(
+        prev: _NodeToResults, sources: _NodeToResults, active_colors=None
+    ) -> _NodeToResults:
+        return {**prev, **(graph_callable({**prev, **sources}, active_colors))}
 
     return reducer
 
 
 def _async_graph_reducer(graph_callable):
-    async def reducer(prev: _NodeToResults, sources: _NodeToResults) -> _NodeToResults:
-        return {**prev, **(await graph_callable({**prev, **sources}))}
+    async def reducer(
+        prev: _NodeToResults, sources: _NodeToResults, active_colors=None
+    ) -> _NodeToResults:
+        return {**prev, **(await graph_callable({**prev, **sources}, active_colors))}
 
     return reducer
 
@@ -557,6 +736,35 @@ to_callable_with_side_effect = gamla.curry(
 # Use the second line if you want to see the winning path in the computation graph (a little slower).
 to_callable = to_callable_with_side_effect(gamla.just(gamla.just(None)))
 # to_callable = to_callable_with_side_effect(graphviz.computation_trace('utterance_computation.dot'))
+
+
+def to_callable_with_coloring(
+    edges: base_types.GraphType,
+    handled_exceptions: Tuple[Type[Exception], ...],
+) -> Callable[[_NodeToResults, _NodeToResults], _NodeToResults]:
+    """Like `to_callable`, but with per-node skipping ("coloring") derived ENTIRELY
+    from the author tags carried on the graph's node funcs (colors / empties /
+    observer marks). The caller only tags the graph at composition time
+    (`coloring.add_colors` / `add_colors(..., empty=...)` / `coloring.observer`) and
+    emits the `run.ChangeActiveColors` event from its own node; this derives the
+    `NodeActivation` generically and compiles with it. The compiled reducer takes an
+    extra optional `active_colors` argument (the initial color set the caller
+    provides at run start). Uncolored graphs / plain `to_callable` behave identically
+    to before.
+
+    Callers that already hold a `NodeActivation` (the engine's own tests, dev
+    diagnostics) compile it directly via `to_callable_with_side_effect`."""
+    # Local import: `coloring` imports `run`, so importing it at module load would
+    # be circular.
+    from computation_graph.composers import coloring
+
+    return _to_callable_with_side_effect_for_single_and_multiple(
+        _type_check,
+        gamla.just(gamla.just(None)),
+        edges,
+        handled_exceptions,
+        coloring.build_node_activation_from_edges(edges),
+    )
 
 
 def _node_is_properly_composed(
