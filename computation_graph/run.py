@@ -590,6 +590,47 @@ def _schedule_node(node_executor, node_to_task_or_result, handled_exceptions):
         pass
 
 
+def _next_active_colors(
+    topological_sorted_nodes, results, active: FrozenSet, seen_active_sets: Set
+) -> Optional[FrozenSet]:
+    """Decide the restart loop's next active set from the pass's results.
+
+    Declarations COMPOSE: independent declarers each contribute the colors they
+    resolved, and the pass's active set is the UNION of every `ChangeActiveColors`
+    observed (an empty declaration contributes nothing). Returns the NEW active set
+    (the caller restarts with it), or None when the run has settled -- nothing was
+    declared (the seed stands) or the union already matches `active`. A union that
+    revisits an earlier active set means the declarations depend on the active
+    colors themselves, so the loop can never settle -> raises
+    `ColorDeclarationsDidNotConverge`. Mutates `seen_active_sets`."""
+    declarations = frozenset(
+        value
+        for node_executor in topological_sorted_nodes
+        for value in (results.get(node_executor[0], CG_NO_RESULT),)
+        if isinstance(value, ChangeActiveColors)
+    )
+    if not declarations:
+        return None
+    observed = frozenset().union(*(d.colors for d in declarations))
+    if observed == active:
+        return None
+    if observed in seen_active_sets:
+        raise ColorDeclarationsDidNotConverge(
+            f"{sorted(map(str, observed))} was already active this run"
+        )
+    seen_active_sets.add(observed)
+    return observed
+
+
+def _drop_color_dependent(results, color_dependent: FrozenSet) -> None:
+    # Start a restarted pass clean: forget the color-dependent results (they are
+    # recomputed under the new active set); everything else (e.g. upstream routing /
+    # async work) carries over so it is never repeated.
+    for node in tuple(results):
+        if node in color_dependent:
+            del results[node]
+
+
 async def _run_graph_async(
     inputs,
     handled_exceptions,
@@ -670,35 +711,17 @@ async def _run_graph_async(
             harvested = await _gather_pending()
             if harvested is not None:
                 raise harvested
-            # Declarations COMPOSE: the pass's active set is the UNION of every
-            # ChangeActiveColors observed (independent declarers each contribute the
-            # colors they resolved; an empty declaration contributes nothing).
-            declarations = frozenset(
-                value
-                for node_executor in topological_sorted_nodes
-                for value in (
-                    node_to_task_or_result.get(node_executor[0], CG_NO_RESULT),
-                )
-                if isinstance(value, ChangeActiveColors)
+            observed = _next_active_colors(
+                topological_sorted_nodes,
+                node_to_task_or_result,
+                active,
+                seen_active_sets,
             )
-            if not declarations:
-                break  # nothing declared -> the seed stands
-            observed = frozenset().union(*(d.colors for d in declarations))
-            if observed == active:
-                break  # no new color -> done
-            # Revisiting an earlier active set means the declarations depend on the
-            # active colors themselves -> the loop can never settle; fail loudly.
-            if observed in seen_active_sets:
-                raise ColorDeclarationsDidNotConverge(
-                    f"{sorted(map(str, observed))} was already active this run"
-                )
-            seen_active_sets.add(observed)
-            # A new color set was declared -> START OVER with it, recomputing only
-            # the color-dependent nodes; the rest (routing / async work) carry over.
+            if observed is None:
+                break  # settled: nothing declared, or the union matches
+            # A new color set was declared -> START OVER with it.
             active = observed
-            for node in tuple(node_to_task_or_result):
-                if node in color_dependent:
-                    del node_to_task_or_result[node]
+            _drop_color_dependent(node_to_task_or_result, color_dependent)
     except Exception as exc:
         unhandled_exception = exc
     finally:
@@ -752,33 +775,14 @@ def _run_graph(
             _schedule_node(node_executor, accumulated_results, handled_exceptions)
         if not color_dependent:
             break  # no colored nodes -> nothing to restart for
-        # Declarations COMPOSE: the pass's active set is the UNION of every
-        # ChangeActiveColors observed (independent declarers each contribute the
-        # colors they resolved; an empty declaration contributes nothing).
-        declarations = frozenset(
-            value
-            for node_executor in topological_sorted_nodes
-            for value in (accumulated_results.get(node_executor[0], CG_NO_RESULT),)
-            if isinstance(value, ChangeActiveColors)
+        observed = _next_active_colors(
+            topological_sorted_nodes, accumulated_results, active, seen_active_sets
         )
-        if not declarations:
-            break  # nothing declared -> the seed stands
-        observed = frozenset().union(*(d.colors for d in declarations))
-        if observed == active:
-            break  # no new color -> done
-        # Revisiting an earlier active set means the declarations depend on the
-        # active colors themselves -> the loop can never settle; fail loudly.
-        if observed in seen_active_sets:
-            raise ColorDeclarationsDidNotConverge(
-                f"{sorted(map(str, observed))} was already active this run"
-            )
-        seen_active_sets.add(observed)
-        # A new color set was declared -> start over with it, recomputing only the
-        # color-dependent nodes (routing/core carry over).
+        if observed is None:
+            break  # settled: nothing declared, or the union matches
+        # A new color set was declared -> start over with it.
         active = observed
-        for n in tuple(accumulated_results):
-            if n in color_dependent:
-                del accumulated_results[n]
+        _drop_color_dependent(accumulated_results, color_dependent)
     return accumulated_results
 
 
