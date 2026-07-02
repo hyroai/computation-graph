@@ -1,0 +1,30 @@
+computation_graph/composers/__init__.py
+  s_f26c09793ff109::t_f76e5bd1e629fd 112-114,125-138,144-146
+  s_f26c09793ff109::t_54f63f73745ff8 53-55,82,85,91-93
+computation_graph/graph_runners.py
+  s_f26c09793ff109::t_62e2d6e8bb2de0 111,116
+  h_738e1775e47e41 144
+  s_f26c09793ff109::t_29dc46ee3d4d25 134
+  s_f26c09793ff109::t_346d1af62c2ca4 6
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.8",
+  "base_commit_sha": "fd01944a4a0033b4394913645464729c7039911d",
+  "prompts": {},
+  "humans": {
+    "h_738e1775e47e41": {
+      "author": "Yinon Eliraz <yinon.e@hyro.ai>"
+    }
+  },
+  "sessions": {
+    "s_f26c09793ff109": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "198bb47b-147e-4e67-bf67-0faf13fe7b0f",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Yinon Eliraz <yinon.e@hyro.ai>"
+    }
+  }
+}
