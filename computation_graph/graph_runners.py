@@ -3,7 +3,7 @@ from typing import Callable, Union
 
 import gamla
 
-from computation_graph import base_types, composers, graph, run, infer_sink
+from computation_graph import base_types, composers, graph, run
 
 
 def unary(g: base_types.GraphType, source: Callable, sink: Callable) -> Callable:
@@ -108,12 +108,12 @@ def variadic_bare(g):
 
 
 def variadic_infer_sink(g):
-    return gamla.compose_left(variadic_bare(g), gamla.itemgetter(infer_sink.infer_sink(g.edges)))
+    return gamla.compose_left(variadic_bare(g), gamla.itemgetter(g.sink))
 
 
 def variadic_stateful_infer_sink(g):
     f = run.to_callable_strict(g)
-    sink = infer_sink.infer_sink(g.edges)
+    sink = g.sink
 
     def inner(*turns):
         prev = {}
@@ -131,17 +131,16 @@ def nullary(g, sink):
 
 
 def nullary_infer_sink(g):
-    return nullary(g, infer_sink.infer_sink(g.edges))
+    return nullary(g, g.sink)
 
 
 def nullary_infer_sink_with_state_and_expectations(g):
     f = run.to_callable_strict(g)
-    sink = infer_sink.infer_sink(g.edges)
 
     def inner(*expectations):
         prev = {}
         for expectation in expectations:
             prev = f(prev, {})
-            assert prev[sink] == expectation
+            assert prev[g.sink] == expectation
 
     return inner

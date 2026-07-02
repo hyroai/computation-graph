@@ -50,6 +50,9 @@ def make_and(
         return args
 
     merge_node = graph.make_computation_node(args_to_tuple)
+    # `merge_fn` may be a callable/node or a whole graph; `make_compose` handles
+    # both, connecting `merge_node`'s output into `merge_fn` under key "args".
+    merge_fn_graph = make_compose(merge_fn, merge_node, key="args")
 
     return gamla.sync.pipe(
         funcs,
@@ -76,24 +79,18 @@ def make_and(
                                 args=nodes,
                                 destination=merge_node,
                                 key="*args",
-                            ),
-                            base_types.ComputationEdge(
-                                is_future=False,
-                                priority=0,
-                                source=merge_node,
-                                args=(),
-                                destination=graph.make_computation_node(merge_fn),
-                                key="args",
-                            ),
+                            )
                         ]
                     ),
-                    graph.make_computation_node(merge_fn),
+                    merge_node,
                 ),
                 gamla.wrap_tuple,
             ),
         ),
         tuple,
-        lambda graphs: graph.merge_graphs(*graphs, sink_node_or_graph=graphs[-1]), # TODO(nitzo): Use the new _determine_sink_function.
+        lambda graphs: graph.merge_graphs(
+            *graphs, merge_fn_graph, sink_node_or_graph=merge_fn_graph
+        ),
     )
 
 
@@ -112,7 +109,9 @@ def make_or(
         )
 
     filter_node = graph.make_computation_node(filter_computation_errors)
-    merge_node = graph.make_computation_node(merge_fn)
+    # `merge_fn` may be a callable/node or a whole graph; `make_compose` handles
+    # both, connecting `filter_node`'s output into `merge_fn` under key "args".
+    merge_fn_graph = make_compose(merge_fn, filter_node, key="args")
 
     return gamla.sync.pipe(
         nodes_or_graphs,
@@ -123,32 +122,28 @@ def make_or(
             gamla.sync.compose_left(
                 gamla.sync.map(gamla.attrgetter("sink")),
                 tuple,
-                lambda sinks: frozenset(
-                    [
-                        base_types.ComputationEdge(
-                            is_future=False,
-                            priority=0,
-                            source=None,
-                            args=sinks,
-                            destination=filter_node,
-                            key="*args",
-                        ),
-                        base_types.ComputationEdge(
-                            is_future=False,
-                            source=filter_node,
-                            destination=merge_node,
-                            key="args",
-                            args=(),
-                            priority=0,
-                        ),
-                    ]
+                lambda sinks: GraphType(
+                    frozenset(
+                        [
+                            base_types.ComputationEdge(
+                                is_future=False,
+                                priority=0,
+                                source=None,
+                                args=sinks,
+                                destination=filter_node,
+                                key="*args",
+                            )
+                        ]
+                    ),
+                    filter_node,
                 ),
-                lambda edges: GraphType(edges, merge_node),
                 gamla.wrap_tuple,
             ),
         ),
         tuple,
-        lambda graphs: graph.merge_graphs(*graphs, sink_node_or_graph=graphs[-1]), # TODO(nitzo): Use the new _determine_sink_function.
+        lambda graphs: graph.merge_graphs(
+            *graphs, merge_fn_graph, sink_node_or_graph=merge_fn_graph
+        ),
     )
 
 
