@@ -5,10 +5,8 @@ import gamla
 import pytest
 
 from computation_graph import base_types, composers, graph, graph_runners, legacy, run
-from computation_graph.infer_sink import infer_sink
 from computation_graph.composers import duplication, memory
-
-
+from computation_graph.infer_sink import infer_sink
 
 
 def _node1(arg1):
@@ -79,7 +77,7 @@ async def test_async_run_as_soon_as_possible(capsys):
         composers.compose_unary(concurrent2, lambda y: y, lambda: "y"),
         composers.compose_left(concurrent1, sink, key="x"),
         composers.compose_left(concurrent2, sink, key="y"),
-        sink_node_or_graph=graph.make_computation_node(sink)
+        sink_node_or_graph=graph.make_computation_node(sink),
     )
 
     await graph_runners.nullary(g, sink)
@@ -125,7 +123,7 @@ def test_kwargs():
                 composers.compose_unary(_node1, source),
                 composers.compose_unary(_node2, source),
                 composers.compose_dict(_node3, {"arg1": _node1, "arg2": _node2}),
-                sink_node_or_graph=graph.make_computation_node(_node3)
+                sink_node_or_graph=graph.make_computation_node(_node3),
             ),
             source,
             _node3,
@@ -148,7 +146,7 @@ def test_state():
         graph.merge_graphs(
             composers.compose_left(_node1, _node_with_state_as_arg, key="arg1"),
             composers.compose_left_unary(_node_with_state_as_arg, _node2),
-            sink_node_or_graph=graph.make_computation_node(_node2)
+            sink_node_or_graph=graph.make_computation_node(_node2),
         ),
         _node1,
         _node2,
@@ -164,7 +162,7 @@ def test_self_future_edge():
             ),
             composers.compose_unary(_node2, _reducer_node),
             composers.compose_left_future(_next_int, _next_int, "x", None),
-            sink_node_or_graph=graph.make_computation_node(_node2)
+            sink_node_or_graph=graph.make_computation_node(_node2),
         ),
         _node1,
         _node2,
@@ -211,7 +209,7 @@ def test_optional_with_future_edge():
             ),
             composers.make_compose(_reducer_node, _next_int, key="cur_int"),
             composers.compose_left_future(_next_int, _next_int, None, None),
-            sink_node_or_graph=graph.make_computation_node(output)
+            sink_node_or_graph=graph.make_computation_node(output),
         ),
         input,
         output,
@@ -264,7 +262,8 @@ async def test_no_result_for_node_that_raised_handled_exception():
 
 
 def test_raise_unhandled_exception():
-    class MyExceptionError(Exception): ...
+    class MyExceptionError(Exception):
+        ...
 
     def raises():
         raise MyExceptionError("BAD")
@@ -274,7 +273,8 @@ def test_raise_unhandled_exception():
 
 
 async def test_raise_unhandled_exception_async():
-    class MyExceptionError(Exception): ...
+    class MyExceptionError(Exception):
+        ...
 
     @composers.compose_left_dict(
         {"x": composers.compose_left_unary(lambda: 1, lambda x: 1)}
@@ -339,7 +339,7 @@ def test_first_with_future_edge():
             combined_graph,
             composers.make_compose(_reducer_node, _next_int, key="cur_int"),
             composers.make_compose_future(_next_int, _next_int, "x", None),
-            sink_node_or_graph=combined_graph
+            sink_node_or_graph=combined_graph,
         ),
         input_node,
         _reducer_node,
@@ -358,7 +358,7 @@ def test_and_with_future():
         composers.make_compose(_reducer_node, _next_int, key="cur_int"),
         composers.compose_unary_future(_next_int, _next_int, None),
         composers.make_and((_reducer_node, _node2, _node1), _merger),
-        sink_node_or_graph=graph.make_computation_node(_merger)
+        sink_node_or_graph=graph.make_computation_node(_merger),
     )
     assert (
         graph_runners.variadic_stateful_infer_sink(g)(
@@ -380,7 +380,7 @@ def test_and_with_unactionable():
         composers.compose_source(_reducer_node, key="arg1", source=source1),
         composers.make_compose(_reducer_node, _next_int, key="cur_int"),
         composers.make_and((_reducer_node, _node_that_raises), _merger),
-        sink_node_or_graph=graph.make_computation_node(_merger)
+        sink_node_or_graph=graph.make_computation_node(_merger),
     )
     with pytest.raises(KeyError):
         graph_runners.variadic_infer_sink(g)({source1: "root", source2: "bla"})
@@ -414,7 +414,7 @@ def test_or():
         graph.merge_graphs(
             composers.compose_unary_future(_next_int, _next_int, 0),
             composers.make_or((_next_int, lambda: "node1", _node_that_raises), merger),
-            sink_node_or_graph=graph.make_computation_node(merger)
+            sink_node_or_graph=graph.make_computation_node(merger),
         )
     )
 
@@ -435,7 +435,7 @@ def test_compose_with_future_edge():
             composers.make_compose(_reducer_node, _node1, key="arg1"),
             composers.make_compose(_reducer_node, _next_int, key="cur_int"),
             composers.make_compose_future(_next_int, _next_int, None, None),
-            sink_node_or_graph=graph.make_computation_node(_reducer_node)
+            sink_node_or_graph=graph.make_computation_node(_reducer_node),
         ),
         _node2,
         _reducer_node,
@@ -459,7 +459,7 @@ def test_optional_memory_sometimes_raises():
             composers.compose_unary_future(_next_int, _next_int, None),
             composers.make_compose(sometimes_raises, input_source, key="x"),
             composers.make_compose(sometimes_raises, _next_int, key="cur_int"),
-            sink_node_or_graph=optional_graph
+            sink_node_or_graph=optional_graph,
         ),
         input_source,
     )
@@ -579,7 +579,7 @@ def test_two_terminals():
         graph.merge_graphs(
             composers.compose_unary(terminal1, composers.make_compose(_node2, _node1)),
             composers.compose_unary(terminal2, _node1),
-            sink_node_or_graph=graph.make_computation_node(_node2)
+            sink_node_or_graph=graph.make_computation_node(_node2),
         ),
         _node1,
     )("hi")
@@ -696,7 +696,7 @@ def test_future_edges():
             composers.compose_unary(_plus_1, _times_2),
             composers.make_compose(_multiply, _plus_1, key="a"),
             composers.make_compose_future(_multiply, _times_2, "b", None),
-            sink_node_or_graph=graph.make_computation_node(_multiply)
+            sink_node_or_graph=graph.make_computation_node(_multiply),
         ),
         _times_2,
         _multiply,
@@ -713,7 +713,7 @@ def test_future_edges_with_circuit():
             composers.make_compose(_times_2, _plus_1),
             composers.make_compose(_multiply, some_input, key="a"),
             composers.make_compose_future(_multiply, _times_2, "b", None),
-            sink_node_or_graph=graph.make_computation_node(_times_2)
+            sink_node_or_graph=graph.make_computation_node(_times_2),
         ),
         some_input,
         _times_2,
@@ -758,7 +758,7 @@ def test_compose_future():
                 "b",
                 None,
             ),
-            sink_node_or_graph=graph.make_computation_node(_sum)
+            sink_node_or_graph=graph.make_computation_node(_sum),
         ),
         _sum,
     )(([[{a: 2, b: 2, c: 2}, 9], [{a: 2, b: 2, c: 2}, 25]]))
@@ -838,11 +838,14 @@ def test_memory_persists_when_unactionable():
         return x or upstream
 
     remember_first = memory.with_state("x", None, skipper)
-    skip_or_passthrough = lambda input: (
-        input
-        if input != "skip state"
-        else gamla.just_raise(base_types.SkipComputationError)
-    )
+
+    def skip_or_passthrough(input):
+        return (
+            input
+            if input != "skip state"
+            else gamla.just_raise(base_types.SkipComputationError)
+        )
+
     graph_runners.unary_with_state_and_expectations(
         composers.compose_left(
             composers.make_first(
@@ -875,12 +878,12 @@ def test_replace_source():
         graph.merge_graphs(
             composers.compose_source_unary(_node1, a),
             composers.compose_left_unary(_node1, _node2),
-            sink_node_or_graph=graph.make_computation_node(_node2)
+            sink_node_or_graph=graph.make_computation_node(_node2),
         )
     ) == graph.merge_graphs(
         composers.compose_source_unary(_node1, a),
         composers.compose_left_unary(_node1_async, _node2),
-        sink_node_or_graph=graph.make_computation_node(_node2)
+        sink_node_or_graph=graph.make_computation_node(_node2),
     )
 
 
@@ -931,14 +934,14 @@ def test_replace_source_with_graph():
             graph.merge_graphs(
                 composers.compose_source_unary(_node1, a),
                 composers.compose_left_unary(_node1, _node2),
-                sink_node_or_graph=graph.make_computation_node(_node2)
+                sink_node_or_graph=graph.make_computation_node(_node2),
             )
         )
     ) == graph.merge_graphs(
         composers.compose_source_unary(_node1, a),
         composers.compose_left_unary(_node1_async, _next_int),
         composers.compose_left_unary(_next_int, _node2),
-        sink_node_or_graph=graph.make_computation_node(_node2)
+        sink_node_or_graph=graph.make_computation_node(_node2),
     )
 
 
@@ -951,12 +954,12 @@ def test_replace_source_that_doesnt_exist():
         graph.merge_graphs(
             composers.compose_source_unary(_node1, a),
             composers.compose_left_unary(_node1, _node2),
-            sink_node_or_graph=graph.make_computation_node(_node2)
+            sink_node_or_graph=graph.make_computation_node(_node2),
         )
     ) == graph.merge_graphs(
         composers.compose_source_unary(_node1, a),
         composers.compose_left_unary(_node1, _node2),
-        sink_node_or_graph=graph.make_computation_node(_node2)
+        sink_node_or_graph=graph.make_computation_node(_node2),
     )
 
 
@@ -972,7 +975,8 @@ def test_replace_destination():
 
     # Not a "legal" graph (disconnected chains) — constructed directly to bypass infer_sink.
     illegal_graph = base_types.GraphType(
-        composers.compose_unary(_node1, _node2).edges | composers.compose_unary(identity, _node1_async).edges,
+        composers.compose_unary(_node1, _node2).edges
+        | composers.compose_unary(identity, _node1_async).edges,
         graph.make_computation_node(identity),
     )
     result = graph.replace_destination(_node1, _node1_async)(illegal_graph)
@@ -1052,7 +1056,7 @@ g = graph.merge_graphs(
     composers.compose_left(a, t),
     composers.compose_left(c, d, key="x"),
     composers.compose_left(b, d, key="y"),
-    sink_node_or_graph=graph.make_computation_node(d)
+    sink_node_or_graph=graph.make_computation_node(d),
 )
 
 

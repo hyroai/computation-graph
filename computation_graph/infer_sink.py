@@ -1,15 +1,11 @@
-import functools
-from typing import FrozenSet, Callable, Optional
-
-import gamla
+from typing import FrozenSet
 
 from computation_graph import base_types, graph
-from gamla.optimized import sync as opt_gamla
-
-from computation_graph.base_types import ComputationEdge
 
 
-def infer_sink(edges: FrozenSet[base_types.ComputationEdge]) -> base_types.ComputationNode:
+def infer_sink(
+    edges: FrozenSet[base_types.ComputationEdge],
+) -> base_types.ComputationNode:
     future_edges = tuple(e for e in edges if e.is_future)
     non_future_edges = tuple(e for e in edges if not e.is_future)
 

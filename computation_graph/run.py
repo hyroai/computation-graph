@@ -26,10 +26,10 @@ import immutables
 import termcolor
 import toposort
 import typeguard
-from computation_graph.base_types import GraphType
 from gamla.optimized import sync as opt_gamla
 
 from computation_graph import base_types, composers, graph, signature
+from computation_graph.base_types import GraphType
 
 CG_NO_RESULT = "CG_NO_RESULT"
 
@@ -56,7 +56,7 @@ _NodeExecutor = Callable[
 
 
 def _transpose_graph(
-    graph: Dict[base_types.ComputationNode, Set[base_types.ComputationNode]],
+    graph: Dict[base_types.ComputationNode, Set[base_types.ComputationNode]]
 ) -> Dict[base_types.ComputationNode, Set[base_types.ComputationNode]]:
     return opt_gamla.pipe(
         graph, dict.keys, opt_gamla.groupby_many(graph.get), opt_gamla.valmap(set)
@@ -114,7 +114,7 @@ _is_graph_async = opt_gamla.compose_left(
 
 
 def _future_edge_to_regular_edge_with_placeholder(
-    source_to_placeholder: dict[base_types.ComputationNode, base_types.ComputationNode],
+    source_to_placeholder: dict[base_types.ComputationNode, base_types.ComputationNode]
 ) -> Callable[[base_types.ComputationEdge], base_types.ComputationEdge]:
     def replace_source(edge):
         assert edge.source, "only supports singular edges for now"
@@ -166,7 +166,9 @@ def _merge_edges_pointing_to_terminals(g: base_types.GraphType) -> base_types.Gr
                                     merge_fn=(aggregate := lambda args: args),
                                 ),
                                 composers.compose_left_unary(aggregate, dest),
-                                sink_node_or_graph=graph.make_computation_node(aggregate)
+                                sink_node_or_graph=graph.make_computation_node(
+                                    aggregate
+                                ),
                             ).edges
                             if dest.is_terminal
                             else edges_for_dest

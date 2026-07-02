@@ -1,12 +1,13 @@
 import dataclasses
-from typing import Callable, FrozenSet, Tuple, Optional
+import functools
+from typing import Callable, FrozenSet, Optional, Tuple
 
 import gamla
-import functools
 from gamla.optimized import sync as opt_gamla
 
-from computation_graph import base_types, infer_sink as _infer_sink_module, signature
-
+from computation_graph import base_types
+from computation_graph import infer_sink as _infer_sink_module
+from computation_graph import signature
 
 get_edge_nodes = opt_gamla.ternary(
     base_types.edge_args,
@@ -16,15 +17,14 @@ get_edge_nodes = opt_gamla.ternary(
 
 
 def get_all_nodes_with_filter(
-    filter_nodes: Optional[Callable[[base_types.ComputationNode], bool]],
+    filter_nodes: Optional[Callable[[base_types.ComputationNode], bool]]
 ):
     f = opt_gamla.mapcat(get_edge_nodes)
 
     if filter_nodes is not None:
         f = opt_gamla.compose_left(f, frozenset, opt_gamla.filter(filter_nodes))
 
-    return functools.cache(
-            opt_gamla.compose_left(f, frozenset))
+    return functools.cache(opt_gamla.compose_left(f, frozenset))
 
 
 get_all_nodes = get_all_nodes_with_filter(None)
@@ -32,7 +32,7 @@ get_all_nodes = get_all_nodes_with_filter(None)
 
 # TODO(nitzo): Rethink the API here.
 def get_all_nodes_from_graph_with_filter(
-    filter_nodes: Optional[Callable[[base_types.ComputationNode], bool]],
+    filter_nodes: Optional[Callable[[base_types.ComputationNode], bool]]
 ) -> Callable[[base_types.GraphType], FrozenSet[base_types.ComputationNode]]:
     return opt_gamla.compose_left(
         gamla.attrgetter("edges"), get_all_nodes_with_filter(filter_nodes)
@@ -188,7 +188,7 @@ def replace_source(
     if gamla.is_instance(base_types.CallableOrNode)(replacement):
         return _replace_source_in_edges(original, replacement)(current_graph)  # type: ignore
 
-    if base_types.is_computation_graph(replacement):
+    if isinstance(replacement, base_types.GraphType):
         return gamla.pipe(
             current_graph,
             _replace_source_in_edges(original, replacement.sink),
@@ -333,14 +333,13 @@ def merge_graphs(
         gamla.pair_right(
             gamla.just(
                 sink_node_or_graph.sink
-                if base_types.is_computation_graph(sink_node_or_graph)
+                if isinstance(sink_node_or_graph, base_types.GraphType)
                 else sink_node_or_graph
             )
         ),
         gamla.packstack(
             gamla.compose_left(
-                gamla.map(gamla.attrgetter("edges")),
-                gamla.star(base_types.merge_edges),
+                gamla.map(gamla.attrgetter("edges")), gamla.star(base_types.merge_edges)
             ),
             gamla.identity,
         ),
@@ -348,7 +347,9 @@ def merge_graphs(
     )
 
     if base_types.is_debug_mode():
-        assert new_g.sink == _infer_sink_module.infer_sink(new_g.edges), f"Infer sink (new) mismatch: graph.sink: {new_g.sink}, infer_sink: {_infer_sink_module.infer_sink(new_g.edges)}"
-    #assert new_g.sink == _infer_sink_module.infer_sink_old(new_g.edges),  f"Infer sink (old) mismatch: graph.sink: {new_g.sink}, infer_sink: {_infer_sink_module.infer_sink_old(new_g.edges)}"
+        assert new_g.sink == _infer_sink_module.infer_sink(
+            new_g.edges
+        ), f"Infer sink (new) mismatch: graph.sink: {new_g.sink}, infer_sink: {_infer_sink_module.infer_sink(new_g.edges)}"
+    # assert new_g.sink == _infer_sink_module.infer_sink_old(new_g.edges),  f"Infer sink (old) mismatch: graph.sink: {new_g.sink}, infer_sink: {_infer_sink_module.infer_sink_old(new_g.edges)}"
 
-    return base_types._assert_no_unwanted_ambiguity_when_debug_set(new_g)
+    return base_types.assert_no_unwanted_ambiguity_when_debug_set(new_g)

@@ -179,21 +179,19 @@ def is_debug_mode() -> bool:
 
 
 @gamla.side_effect
-def _assert_no_unwanted_ambiguity_when_debug_set(graph: GraphType):
+def assert_no_unwanted_ambiguity_when_debug_set(graph: GraphType):
     if is_debug_mode():
         assert_no_unwanted_ambiguity_on_edges(graph.edges)
 
+
 # TODO(nitzo): Is this used ? Check if we can re-enable the assertion when in debug / move to merge.
-def merge_edges(*edges) -> FrozenSet[ComputationEdge]:
-    s = frozenset({})
-    return s.union(*edges)
-
-    return _assert_no_unwanted_ambiguity_when_debug_set(new_g)
-
+def merge_edges(*edges: FrozenSet[ComputationEdge]) -> FrozenSet[ComputationEdge]:
+    result: FrozenSet[ComputationEdge] = frozenset()
+    return result.union(*edges)
 
 
 GraphOrCallable = Union[Callable, GraphType]
 CallableOrNode = Union[Callable, ComputationNode]
 CallableOrNodeOrGraph = Union[CallableOrNode, GraphType]
 NodeOrGraph = Union[ComputationNode, GraphType]
-EMPTY_GRAPH: GraphType = GraphType(edges=frozenset(), sink=None)
+EMPTY_GRAPH: GraphType = GraphType(edges=frozenset(), sink=None)  # type: ignore[arg-type]

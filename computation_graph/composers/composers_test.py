@@ -1,5 +1,5 @@
 import computation_graph.graph
-from computation_graph import base_types, composers, graph_runners, graph
+from computation_graph import composers, graph, graph_runners
 
 
 def test_unary_composition_with_graph_destination():
@@ -33,7 +33,7 @@ def test_infer_sink_edge_case_all_future_edges_with_single_destination():
     two_future_edges_single_dest = graph.merge_graphs(
         composers.compose_left_source(s, "c", c_b),
         composers.compose_left_source(s, "b", c_b),
-        sink_node_or_graph=graph.make_computation_node(c_b)
+        sink_node_or_graph=graph.make_computation_node(c_b),
     )
 
     composers.compose_left_unary(two_future_edges_single_dest, lambda x: x)

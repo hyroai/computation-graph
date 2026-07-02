@@ -1,13 +1,11 @@
 import asyncio
 import functools
 import inspect
-from typing import Dict, Callable
+from typing import Dict
 
 import gamla
-from toolz.curried import get_in
 
 from computation_graph import base_types, graph
-from computation_graph.base_types import GraphType
 from computation_graph.composers import debug
 
 

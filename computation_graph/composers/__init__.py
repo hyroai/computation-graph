@@ -205,19 +205,19 @@ def _determine_sink(
     source: base_types.NodeOrGraph, destination: base_types.NodeOrGraph, is_future: bool
 ) -> base_types.ComputationNode:
     if is_future:
-        if base_types.is_computation_graph(source):
+        if isinstance(source, base_types.GraphType):
             return source.sink
         return (
             destination.sink
-            if base_types.is_computation_graph(destination)
+            if isinstance(destination, base_types.GraphType)
             else destination
         )
 
-    if base_types.is_computation_graph(destination):
+    if isinstance(destination, base_types.GraphType):
         return destination.sink
 
     if destination.is_terminal:
-        return source.sink if base_types.is_computation_graph(source) else source
+        return source.sink if isinstance(source, base_types.GraphType) else source
     return destination
 
 
@@ -225,7 +225,7 @@ def _determine_composition_sink(
     graphs: Tuple[base_types.NodeOrGraph, ...]
 ) -> base_types.NodeOrGraph:
     for graph_or_node in reversed(graphs):
-        if base_types.is_computation_graph(graph_or_node):
+        if isinstance(graph_or_node, base_types.GraphType):
             return graph_or_node.sink
 
         if graph_or_node.is_terminal:
@@ -320,7 +320,9 @@ def _infer_composition_edges(
                     f"Cannot compose, destination signature does not contain key '{key}'"
                 ),
             ),
-            lambda edges: GraphType(edges, None),
+            # Sink is a placeholder here; `merge_graphs` below sets the real sink
+            # via `sink_node_or_graph`.
+            lambda edges: GraphType(edges, None),  # type: ignore[arg-type]
         ),
         _get_edges_from_node_or_graph(source),
         destination,
@@ -373,15 +375,15 @@ def make_compose_future(
     def when_memory_unavailable():
         return default
 
-    if not base_types.is_computation_graph(destination):
+    if not isinstance(destination, base_types.GraphType):
         destination = make_computation_node(destination)
 
-    if not base_types.is_computation_graph(source):
+    if not isinstance(source, base_types.GraphType):
         source = make_computation_node(source)
 
-    if base_types.is_computation_graph(source):
+    if isinstance(source, base_types.GraphType):
         sink_node_or_graph = source.sink
-    elif base_types.is_computation_graph(destination):
+    elif isinstance(destination, base_types.GraphType):
         sink_node_or_graph = destination.sink
     else:
         sink_node_or_graph = destination
