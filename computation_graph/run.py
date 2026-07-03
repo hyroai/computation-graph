@@ -185,9 +185,9 @@ class ChangeActiveColors:
 
     Declarations COMPOSE: independent subgraphs may each declare the colors they
     resolved (e.g. one declarer per routing context), and the runner activates the
-    UNION of every declaration observed in a pass. One turn can thus activate several
-    colors at once; a declarer that resolved nothing contributes nothing rather than
-    vetoing the others.
+    UNION of every declaration observed in a pass (replacing the caller's initial
+    seed). One turn can thus activate several colors at once; a declarer that
+    resolved nothing contributes nothing rather than vetoing the others.
     """
 
     colors: FrozenSet
@@ -216,8 +216,10 @@ class NodeActivation:
       * otherwise `_DepNotFoundError` is raised so the node prunes and the graph
         reducer's `{**prev, **computed}` merge latches its previous value for free.
 
-    ACTIVE COLORS: every run starts with NO active colors -- ONLY the no-color
-    (uncolored) nodes run, layer by layer, skipping colored nodes.
+    ACTIVE COLORS: the CALLER provides an initial color set when it starts the run
+    (the `active_colors` argument of the compiled reducer; optional). The run then
+    proceeds layer by layer skipping colored nodes whose color is not in the active
+    set -- when no initial color is given, ONLY the no-color (uncolored) nodes run.
     If `ChangeActiveColors` events then appear in node results whose UNION differs
     from the active set, the run STARTS OVER with that union as the new active set
     (nodes that were skipped may now need to run); only the colored nodes +
@@ -312,7 +314,7 @@ def _to_callable_with_side_effect_for_single_and_multiple(
 
     if is_async:
 
-        async def final_runner(sources_to_values):
+        async def final_runner(sources_to_values, active_colors=None):
             inputs = translate_source_to_placeholder(sources_to_values)
             all_results = await _run_graph_async(
                 inputs,
@@ -321,13 +323,14 @@ def _to_callable_with_side_effect_for_single_and_multiple(
                 node_to_colors,
                 boundary_defaults,
                 color_dependent,
+                active_colors,
             )
 
             return all_node_side_effects_on_edges(all_results)
 
     else:
 
-        def final_runner(sources_to_values):
+        def final_runner(sources_to_values, active_colors=None):
             return all_node_side_effects_on_edges(
                 _run_graph(
                     translate_source_to_placeholder(sources_to_values),
@@ -336,6 +339,7 @@ def _to_callable_with_side_effect_for_single_and_multiple(
                     node_to_colors,
                     boundary_defaults,
                     color_dependent,
+                    active_colors,
                 )
             )
 
@@ -634,6 +638,7 @@ async def _run_graph_async(
     node_to_colors,
     boundary_defaults,
     color_dependent,
+    initial_colors,
 ):
     node_to_task_or_result = inputs.copy()
     unhandled_exception = None
@@ -642,9 +647,9 @@ async def _run_graph_async(
         base_types.SkipComputationError,
         *handled_exceptions,
     )
-    # The run starts with NO active colors (the empty set is disjoint from every
-    # color, so only the no-color nodes run) until a declaration activates some.
-    active = frozenset()
+    # The caller provides the initial active colors; no initial color -> the empty
+    # set, disjoint from every color, so only the no-color (uncolored) nodes run.
+    active = initial_colors if initial_colors is not None else frozenset()
 
     def _schedule_or_skip(node_executor):
         node = node_executor[0]
@@ -735,13 +740,15 @@ def _run_graph(
     node_to_colors,
     boundary_defaults,
     color_dependent,
+    initial_colors,
 ) -> _NodeToResults:
     accumulated_results = inputs.copy()
-    # The run starts with NO active colors (only no-color nodes run); a
-    # ChangeActiveColors declaration starts the run over, recomputing only the
-    # color-dependent nodes and carrying the rest over. With no coloring
-    # (`to_callable`) the loop runs the whole graph once, exactly as before.
-    active = frozenset()
+    # The caller provides the initial active colors (no color -> empty set -> only
+    # no-color nodes run); a ChangeActiveColors event that declares a different set
+    # starts the run over, recomputing only the color-dependent nodes and carrying
+    # the rest over. With no coloring (`to_callable`) the loop runs the whole graph
+    # once, exactly as before.
+    active = initial_colors if initial_colors is not None else frozenset()
     # Same restart loop as the async runner: run the WHOLE pass, then union the
     # declarations (a later declarer in the toposort must be seen before deciding
     # the active set), and start over if a new color set was declared.
@@ -772,17 +779,21 @@ def _run_graph(
 
 
 def _graph_reducer(graph_callable):
-    def reducer(prev: _NodeToResults, sources: _NodeToResults) -> _NodeToResults:
-        return {**prev, **(graph_callable({**prev, **sources}))}
+    # `active_colors` (optional) is the initial color set the caller provides when
+    # it starts the run; ignored unless the graph has node-activation coloring.
+    def reducer(
+        prev: _NodeToResults, sources: _NodeToResults, active_colors=None
+    ) -> _NodeToResults:
+        return {**prev, **(graph_callable({**prev, **sources}, active_colors))}
 
     return reducer
 
 
 def _async_graph_reducer(graph_callable):
     async def reducer(
-        prev: _NodeToResults, sources: _NodeToResults
+        prev: _NodeToResults, sources: _NodeToResults, active_colors=None
     ) -> _NodeToResults:
-        return {**prev, **(await graph_callable({**prev, **sources}))}
+        return {**prev, **(await graph_callable({**prev, **sources}, active_colors))}
 
     return reducer
 
@@ -804,10 +815,12 @@ def to_callable_with_coloring(
     from the author tags carried on the graph's node funcs (colors and typed-empties;
     observer marks are diagnostic-only and do not affect the activation). The caller
     only tags the graph at composition time (`coloring.add_colors` /
-    `add_colors(..., empty=...)` / `coloring.pin_core`) and emits the
-    `run.ChangeActiveColors` event from its own nodes; this derives the
-    `NodeActivation` generically and compiles with it. Uncolored graphs / plain
-    `to_callable` behave identically to before.
+    `add_colors(..., empty=...)` / `coloring.pin_core`) and
+    emits the `run.ChangeActiveColors` event from its own node; this derives the
+    `NodeActivation` generically and compiles with it. The compiled reducer takes an
+    extra optional `active_colors` argument (the initial color set the caller
+    provides at run start). Uncolored graphs / plain `to_callable` behave identically
+    to before.
 
     Callers that already hold a `NodeActivation` (the engine's own tests, dev
     diagnostics) compile it directly via `to_callable_with_side_effect`."""

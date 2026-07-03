@@ -1,14 +1,15 @@
 """Tests for the opt-in per-node skipping ("coloring") in run.to_callable.
 
 The engine is domain-agnostic: it knows only COLORS (opaque tokens) and the
-`run.ChangeActiveColors` event. Every run starts with no active colors, so only
-the no-color nodes run; when a node RETURNS `run.ChangeActiveColors(...)` the run
-STARTS OVER with the union of the declared color sets (nodes skipped on the first
-pass may now need to run). Validates:
+`run.ChangeActiveColors` event. The CALLER passes the initial active colors when it
+starts the run (the reducer's `active_colors` argument; optional). Colored nodes
+whose color is not active skip; with no initial color, only the no-color nodes run.
+If a node then RETURNS `run.ChangeActiveColors(other)` the run STARTS OVER with the
+new color set (nodes skipped on the first pass may now need to run). Validates:
   * a SKIPPED BOUNDARY node returns its typed-empty default (downstream make_and
     stays well-formed); a SKIPPED INTERIOR node (no default) prunes (absent);
-  * a ChangeActiveColors declaration restarts the run to the newly-active colors;
-  * declarations from independent nodes UNION rather than cancel.
+  * the caller's initial color selects which skill runs (single pass);
+  * a ChangeActiveColors event restarts the run to the newly-active color.
 """
 import asyncio
 
@@ -28,7 +29,8 @@ def _to_callable(edges, activation):
 
 
 # --------------------------------------------------------------------------- #
-# Sync: skill_a/skill_b colored {A}/{B}; combine is make_and over both.
+# Sync: skill_a/skill_b colored {A}/{B}; combine is make_and over both. The
+# caller passes the active color directly.
 # --------------------------------------------------------------------------- #
 def _build(calls):
     def skill_a(x):
@@ -63,7 +65,29 @@ def _activation(nodes):
     )
 
 
-def test_colored_nodes_skip_without_declaration():
+def test_initial_color_runs_matching_skill():
+    calls = []
+    g, x_source, nodes = _build(calls)
+    f = _to_callable(g, _activation(nodes))
+
+    result = f({}, {x_source: 5}, frozenset({"A"}))  # caller provides color A
+
+    assert calls == ["A"]  # only A ran; B's boundary default flowed into make_and
+    assert result[nodes["combine"]] == (("A", 5), ("B", "EMPTY"))
+
+
+def test_other_initial_color():
+    calls = []
+    g, x_source, nodes = _build(calls)
+    f = _to_callable(g, _activation(nodes))
+
+    result = f({}, {x_source: 7}, frozenset({"B"}))
+
+    assert calls == ["B"]
+    assert result[nodes["combine"]] == (("A", "EMPTY"), ("B", 7))
+
+
+def test_no_initial_color_skips_all_colored():
     calls = []
     g, x_source, nodes = _build(calls)
     f = _to_callable(g, _activation(nodes))
@@ -87,24 +111,16 @@ def test_interior_node_prunes_when_skipped():
     g = composers.compose_left_future(x_source, worker, None, None)
     worker_node = graph.make_computation_node(worker)
 
-    sel = graph.make_source()
-
-    def declare(colors):
-        return run.ChangeActiveColors(frozenset(colors))
-
-    g = base_types.merge_graphs(
-        g, composers.compose_left_future(sel, declare, None, None)
-    )
     activation = run.NodeActivation(
         node_to_colors={worker_node: frozenset({"A"})}, boundary_defaults={}
     )
     f = _to_callable(g, activation)
 
-    skipped = f({}, {x_source: 9, sel: {"B"}})  # B declared -> worker(A) prunes
+    skipped = f({}, {x_source: 9}, frozenset({"B"}))  # B active -> worker(A) prunes
     assert calls == []
     assert worker_node not in skipped
 
-    ran = f({}, {x_source: 9, sel: {"A"}})  # A declared -> worker runs
+    ran = f({}, {x_source: 9}, frozenset({"A"}))  # A active -> worker runs
     assert calls == ["worker"]
     assert ran[worker_node] == ("worked", 9)
 
@@ -213,6 +229,27 @@ async def test_async_greeting_no_skill_skips_all():
     result = await f({}, {u: None, s: 5})  # event resolves empty -> skip all colored
     assert calls == []
     assert result[nodes["select"]] == ("NONE",)
+
+
+async def test_async_initial_color_single_pass():
+    g, u, s, nodes, calls = _build_async()
+    f = _to_callable(g, _async_activation(nodes))
+
+    # Caller seeds color 0 and the route event agrees -> single pass, no restart.
+    result = await f({}, {u: 0, s: 5}, frozenset({0}))
+    assert calls == ["A"]
+    assert result[nodes["select"]] == ("A", 5)
+
+
+async def test_async_reroute_restarts():
+    g, u, s, nodes, calls = _build_async()
+    f = _to_callable(g, _async_activation(nodes))
+
+    # Caller seeds color 0, but the route event resolves color 1 -> restart to B.
+    result = await f({}, {u: 1, s: 5}, frozenset({0}))
+    assert calls == ["A", "B"]  # A ran on the seeded pass, then restarted to B
+    assert result[nodes["select"]] == ("B", 5)
+
 
 
 # --------------------------------------------------------------------------- #
