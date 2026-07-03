@@ -13,9 +13,8 @@ subgraph, empty=...)` stamps `func.__cg_origin__` (+ an optional `__cg_empty__`)
 absorbing `_CORE` marker. `build_node_activation_from_edges` then recovers the whole
 `run.NodeActivation` from the final graph's tags: the SINGLE-COLOR RULE (>=2 colors =
 shared = always-on), a tolerance-aware must-run closure, and combiner-aware boundary
-defaults from the `empty` tags. `emit_active_colors` declares the node that sets the
-active colors; `latch` makes a value survive the turn its producer prunes (pinning its
-own machinery core).
+defaults from the `empty` tags. `latch` makes a value survive the turn its producer
+prunes (pinning its own machinery core).
 
 The engine stays domain-agnostic: colors are opaque tokens; nothing here knows
 skills / routes / effects.
@@ -318,22 +317,15 @@ def _must_run_closure(edges, seeds):
 
 
 def build_node_activation_from_edges(
-    edges: base_types.GraphType, *, strict: bool = False, prune_shared: bool = False
+    edges: base_types.GraphType, *, strict: bool = False
 ) -> run.NodeActivation:
     """Derive `run.NodeActivation` from an assembled, possibly-duplicated graph using
     only the author tags carried on the node funcs:
 
       * COLORS  (`_read_colors`)  -- the per-node color sets.
-      * SINGLE-COLOR RULE -- by default only nodes with EXACTLY ONE color are colored
-        (prunable); a node with >=2 colors is SHARED and always-runs (an authoring-time
-        proxy for "shared -> feeds core"), an untagged node is CORE. With
-        `prune_shared=True` a SHARED node is ALSO prunable -- it carries its full color
-        SET, so the runner skips it only when ALL its colors are inactive (it still runs
-        on any owning skill's turn). This is safe because the must-run closure below
-        independently forces always-on any shared node that actually feeds an intolerant
-        core frontier; a shared node that only flows into skill work then prunes when
-        none of its skills is active. (Test before trusting -- run the danger diagnostic
-        + an e2e diff.)
+      * SINGLE-COLOR RULE -- only nodes with EXACTLY ONE color are colored (prunable);
+        a node with >=2 colors is SHARED and always-runs (an authoring-time proxy for
+        "shared -> feeds core"), an untagged node is CORE.
       * MUST-RUN CLOSURE -- every colored producer at an INTOLERANT frontier with NO
         `empty` tag, PLUS its intolerant input cone, is forced always-on: an always-on
         intolerant consumer needs its REAL inputs (it has no default to substitute).
@@ -359,11 +351,9 @@ def build_node_activation_from_edges(
 
     `strict=True` instead RAISES `BoundaryDefaultRequired` listing the untagged
     intolerant frontiers (an audit of what falls back to always-on) rather than forcing
-    them core. Mirrors `build_node_activation` (the Tier-1 path) sourced from tags."""
+    them core."""
     colors = _read_colors(edges)
-    node_to_colors = (
-        dict(colors) if prune_shared else {n: c for n, c in colors.items() if len(c) == 1}
-    )
+    node_to_colors = {n: c for n, c in colors.items() if len(c) == 1}
     empties = _read_empties(edges)
 
     untagged = [

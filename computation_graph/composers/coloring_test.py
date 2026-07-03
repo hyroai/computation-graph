@@ -107,8 +107,16 @@ def test_empty_tag_drives_intolerant_frontier_default():
     assert activation.boundary_defaults == {n_a: ("A", "EMPTY"), n_b: ("B", "EMPTY")}
     assert activation.node_to_colors[n_a] == frozenset({"A"})
 
+    sel = graph.make_source()
+
+    def declare(colors):
+        return run.ChangeActiveColors(frozenset(colors))
+
+    g = base_types.merge_graphs(
+        g, composers.compose_left_future(sel, declare, None, None)
+    )
     f = run.to_callable_with_coloring(g, frozenset())
-    out = f({}, {x: 5}, frozenset({"A"}))
+    out = f({}, {x: 5, sel: {"A"}})  # declarer activates A -> restart runs it
     assert calls == ["A"]  # only A ran; B's tagged empty flowed into combine
     assert out[graph.make_computation_node(combine)] == (("A", 5), ("B", "EMPTY"))
 
@@ -143,29 +151,6 @@ def test_single_color_rule_shared_node_always_runs():
     activation = coloring.build_node_activation_from_edges(sub)
     # >=2 colors -> not prunable (shared infra runs every turn).
     assert graph.make_computation_node(shared) not in activation.node_to_colors
-
-
-def test_prune_shared_colors_multicolor_nodes():
-    def shared(v):
-        return v
-
-    x = graph.make_source()
-    sub = composers.compose_left_future(x, shared, None, None)
-    coloring.add_colors(frozenset({"A"}), sub)
-    coloring.add_colors(frozenset({"B"}), sub)  # shared -> {A, B}
-
-    # prune_shared: the shared node carries its full color SET and is prunable -- the
-    # runner skips it only when ALL its colors are inactive (runs on A's or B's turn).
-    activation = coloring.build_node_activation_from_edges(sub, prune_shared=True)
-    n_shared = graph.make_computation_node(shared)
-    assert activation.node_to_colors[n_shared] == frozenset({"A", "B"})
-    # it feeds nothing intolerant -> the must-run closure does not force it on.
-    # (explicit activation -> compile via the null-side-effect curry directly.)
-    f = run.to_callable_with_side_effect(
-        gamla.just(gamla.just(None)), sub, frozenset(), activation
-    )
-    assert f({}, {x: 7}, frozenset({"A"}))[n_shared] == 7  # A active -> shared runs
-    assert n_shared not in f({}, {x: 7}, frozenset({"C"}))  # all colors inactive -> pruned
 
 
 def test_observer_prunes_with_its_skill():
@@ -212,14 +197,20 @@ def test_latch_survives_pruned_producer():
     latched = coloring.latch(term, present=lambda v: v != UNKNOWN, default=UNKNOWN)
     use_graph = composers.compose_left_unary(latched, use_b)
     coloring.add_colors(frozenset({"B"}), use_graph)  # latch is pinned core -> only use_b colored
+    sel = graph.make_source()
+
+    def declare(colors):
+        return run.ChangeActiveColors(frozenset(colors))
+
     g = base_types.merge_graphs(
         expose_graph,
         composers.compose_left_unary(expose_a, term),  # exposer -> terminal (tolerant)
         use_graph,
+        composers.compose_left_future(sel, declare, None, None),
     )
     f = run.to_callable_with_coloring(g, frozenset())
-    r1 = f({}, {u: "hi"}, frozenset({"A"}))  # turn 1: A active -> exposes the var
-    r2 = f(r1, {u: "hi"}, frozenset({"B"}))  # turn 2: B active, A pruned -> latch holds it
+    r1 = f({}, {u: "hi", sel: {"A"}})  # turn 1: A active -> exposes the var
+    r2 = f(r1, {u: "hi", sel: {"B"}})  # turn 2: B active, A pruned -> latch holds it
 
     assert r2[graph.make_computation_node(use_b)] == WANT
     assert calls == ["A", "B"]  # A ran once (turn 1), B ran once (turn 2)
