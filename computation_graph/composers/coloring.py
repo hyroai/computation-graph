@@ -128,19 +128,22 @@ def _pin_core_func(func):
     return func
 
 
-def pin_core(subgraph: base_types.GraphType) -> base_types.GraphType:
-    """Pin every colorable node of `subgraph` CORE (absorbing): a later `add_colors`
-    sweep passing over these funcs -- or over any DUPLICATE of them -- leaves them
-    uncolored, so they always run. Use at the AUTHORING SITE of shared machinery
-    that skills later compose into their own channels (routing state, shared event
-    chains): without the pin, each per-skill duplicate ends up inside exactly one
-    skill's closure -> single color -> pruned on every other skill's turn, starving
-    core flows (e.g. a routing event chain that must fire on a turn whose active
-    color is a different skill). The tag rides func.__dict__ through duplication.
-    Returns the graph unchanged."""
-    for node in _colorable_nodes(subgraph):
+def pin_core(subgraph_or_callable):
+    """Pin every colorable node of a subgraph -- or a single bare callable -- CORE
+    (absorbing): a later `add_colors` sweep passing over these funcs -- or over any
+    DUPLICATE of them -- leaves them uncolored, so they always run. Use at the
+    AUTHORING SITE of shared machinery that skills later compose into their own
+    channels (routing state, shared event chains, variable-exposure derivations):
+    without the pin, each per-skill duplicate ends up inside exactly one skill's
+    closure -> single color -> pruned on every other skill's turn, starving core
+    flows. The tag rides func.__dict__ through duplication. Returns the argument
+    unchanged."""
+    if not isinstance(subgraph_or_callable, (tuple, list, set, frozenset)):
+        _pin_core_func(subgraph_or_callable)
+        return subgraph_or_callable
+    for node in _colorable_nodes(subgraph_or_callable):
         _pin_core_func(node.func)
-    return subgraph
+    return subgraph_or_callable
 
 
 def _read_colors(
