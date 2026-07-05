@@ -117,11 +117,11 @@ visualize_graph = gamla.compose_left(
 
 @gamla.curry
 def computation_trace(
-    filename: str, graph_instance: base_types.GraphType, node_to_results
+    filename: str, edges: frozenset[base_types.ComputationEdge], node_to_results
 ):
     gviz = union_graphviz(
         [
-            computation_graph_to_graphviz(graph_instance.edges),
+            computation_graph_to_graphviz(edges),
             computation_trace_to_graphviz(
                 gamla.pipe(node_to_results, dict.items, frozenset)
             ),
