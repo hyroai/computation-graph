@@ -250,11 +250,11 @@ class NodeActivation:
 def _to_callable_with_side_effect_for_single_and_multiple(
     single_node_side_effect: _SingleNodeSideEffect,
     all_nodes_side_effect: Callable,
-    graph: base_types.GraphType,
+    input_graph: base_types.GraphType,
     handled_exceptions: Tuple[Type[Exception], ...],
     node_activation: Optional[NodeActivation] = None,
 ) -> Callable[[_NodeToResults, _NodeToResults], _NodeToResults]:
-    edges = _merge_edges_pointing_to_terminals(graph).edges
+    edges = _merge_edges_pointing_to_terminals(input_graph).edges
     single_node_side_effect = (
         (lambda node, result: result)
         if os.getenv(base_types.COMPUTATION_GRAPH_DEBUG_ENV_KEY) is None

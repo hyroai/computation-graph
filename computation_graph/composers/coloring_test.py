@@ -27,7 +27,7 @@ def test_color_tag_survives_duplication():
     colors = coloring._read_colors(duplicated)
 
     colorable = [
-        n for n in graph.get_all_nodes(duplicated)
+        n for n in graph.get_all_nodes(duplicated.edges)
         if not n.is_terminal and not getattr(n.func, "__name__", "").startswith("source:")
     ]
     assert colorable, "expected colorable nodes after duplication"
@@ -94,7 +94,7 @@ def _tagged_make_and(calls, *, with_empties):
     coloring.add_colors(frozenset({"A"}), ga, **empty_a)
     coloring.add_colors(frozenset({"B"}), gb, **empty_b)
     core = composers.compose_dict(combine, {"a": skill_a, "b": skill_b})
-    g = base_types.merge_graphs(ga, gb, core)
+    g = graph.merge_graphs(ga, gb, core, sink_node_or_graph=core)
     return x, g, skill_a, skill_b, combine
 
 
@@ -156,7 +156,7 @@ def test_observer_prunes_with_its_skill():
 
     activation = coloring.build_node_activation_from_edges(obs)
     ever_node = next(
-        n for n in graph.get_all_nodes(obs)
+        n for n in graph.get_all_nodes(obs.edges)
         if getattr(n.func, "__name__", "") == "ever_inner"
     )
     # `memory.ever` marked it an observer, but the builder does NOT special-case
@@ -189,10 +189,11 @@ def test_latch_survives_pruned_producer():
     latched = coloring.latch(term, present=lambda v: v != UNKNOWN, default=UNKNOWN)
     use_graph = composers.compose_left_unary(latched, use_b)
     coloring.add_colors(frozenset({"B"}), use_graph)  # latch is pinned core -> only use_b colored
-    g = base_types.merge_graphs(
+    g = graph.merge_graphs(
         expose_graph,
         composers.compose_left_unary(expose_a, term),  # exposer -> terminal (tolerant)
         use_graph,
+        sink_node_or_graph=use_graph,
     )
     f = run.to_callable_with_coloring(g, frozenset())
     r1 = f({}, {u: "hi"}, frozenset({"A"}))  # turn 1: A active -> exposes the var

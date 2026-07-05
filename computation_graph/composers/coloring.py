@@ -36,19 +36,38 @@ _UNSET = object()
 # Node selection: sources are caller-seeded and terminals are sinks; neither is
 # ever skipped, so neither is colorable.
 # --------------------------------------------------------------------------- #
+def _edges(graph_or_edges) -> FrozenSet[base_types.ComputationEdge]:
+    # Every public entry point accepts either a `GraphType` or a bare edge
+    # collection; internals below always work on edges.
+    return (
+        graph_or_edges.edges
+        if isinstance(graph_or_edges, base_types.GraphType)
+        else graph_or_edges
+    )
+
+
 def _is_source(node: base_types.ComputationNode) -> bool:
     return getattr(node.func, "__name__", "").startswith("source:")
 
 
-def _colorable_nodes(edges: base_types.GraphType) -> FrozenSet[base_types.ComputationNode]:
+def _colorable_nodes(graph_or_edges) -> FrozenSet[base_types.ComputationNode]:
+    edges = _edges(graph_or_edges)
     return frozenset(
         n for n in graph.get_all_nodes(edges) if not n.is_terminal and not _is_source(n)
     )
 
 
-def _sinks(edges: base_types.GraphType) -> FrozenSet[base_types.ComputationNode]:
+def _leaves(edges) -> FrozenSet[base_types.ComputationNode]:
+    all_sources = frozenset(
+        source for edge in edges for source in base_types.edge_sources(edge)
+    )
+    return graph.get_all_nodes(edges) - all_sources
+
+
+def _sinks(graph_or_edges) -> FrozenSet[base_types.ComputationNode]:
+    edges = _edges(graph_or_edges)
     return frozenset(
-        n for n in graph.get_leaves(edges) if not n.is_terminal and not _is_source(n)
+        n for n in _leaves(edges) if not n.is_terminal and not _is_source(n)
     )
 
 
@@ -109,11 +128,11 @@ def tag_empty(empty: Any, subgraph: base_types.GraphType) -> base_types.GraphTyp
 
 
 def _read_empties(
-    edges: base_types.GraphType,
+    graph_or_edges,
 ) -> Dict[base_types.ComputationNode, Any]:
     """node -> its typed-empty, for every node whose func carries an `empty` tag."""
     out: Dict[base_types.ComputationNode, Any] = {}
-    for node in graph.get_all_nodes(edges):
+    for node in graph.get_all_nodes(_edges(graph_or_edges)):
         value = getattr(node.func, _EMPTY_ATTR, _UNSET)
         if value is not _UNSET:
             out[node] = value
@@ -138,7 +157,9 @@ def pin_core(subgraph_or_callable):
     closure -> single color -> pruned on every other skill's turn, starving core
     flows. The tag rides func.__dict__ through duplication. Returns the argument
     unchanged."""
-    if not isinstance(subgraph_or_callable, (tuple, list, set, frozenset)):
+    if not isinstance(
+        subgraph_or_callable, (base_types.GraphType, tuple, list, set, frozenset)
+    ):
         _pin_core_func(subgraph_or_callable)
         return subgraph_or_callable
     for node in _colorable_nodes(subgraph_or_callable):
@@ -147,11 +168,11 @@ def pin_core(subgraph_or_callable):
 
 
 def _read_colors(
-    edges: base_types.GraphType,
+    graph_or_edges,
 ) -> Mapping[base_types.ComputationNode, FrozenSet]:
     """node -> its color set, for every colored node (core / untagged omitted)."""
     out = {}
-    for node in graph.get_all_nodes(edges):
+    for node in graph.get_all_nodes(_edges(graph_or_edges)):
         tag = getattr(node.func, _ORIGIN_ATTR, None)
         if tag and tag != _CORE:
             out[node] = tag
@@ -186,7 +207,7 @@ def observer(result: base_types.GraphType, inner: Callable) -> base_types.GraphT
     diagnostics / an optional caller-built must-tick latch, and the pin is defensive.
     Use for any domain combinator that compares-or-accumulates across turns."""
     _mark_observer(inner)
-    for node in graph.get_all_nodes(result):
+    for node in graph.get_all_nodes(_edges(result)):
         if getattr(node.func, "__name__", "") == "when_memory_unavailable":
             _pin_core_func(node.func)
     return result
@@ -236,10 +257,12 @@ def latch(
     self_edge = composers.compose_left_future(
         carry_forward, carry_forward, "previous", default
     )
-    g = base_types.merge_graphs(
+    latched_graph = composers.compose_left_unary(carry_forward, latched)
+    g = graph.merge_graphs(
         composers.compose_dict(carry_forward, {"current": guarded_current}),
         self_edge,
-        composers.compose_left_unary(carry_forward, latched),
+        latched_graph,
+        sink_node_or_graph=latched_graph,
     )
     # Pin the latch's own machinery CORE (carry_forward + the when_memory_unavailable
     # default node + the guard's first_sink/fallback + the pass-through) -- shared
@@ -251,7 +274,7 @@ def latch(
     _pin_core_func(latched)
     current_nodes = (
         _colorable_nodes(current)
-        if isinstance(current, (tuple, frozenset, set))
+        if isinstance(current, (base_types.GraphType, tuple, frozenset, set))
         else frozenset()
     )
     for node in _colorable_nodes(guarded_current) - current_nodes:
@@ -349,7 +372,7 @@ def _must_run_closure(edges, seeds):
 
 
 def build_node_activation_from_edges(
-    edges: base_types.GraphType, *, strict: bool = False
+    graph_or_edges, *, strict: bool = False
 ) -> run.NodeActivation:
     """Derive `run.NodeActivation` from an assembled, possibly-duplicated graph using
     only the author tags carried on the node funcs:
@@ -384,6 +407,7 @@ def build_node_activation_from_edges(
     `strict=True` instead RAISES `BoundaryDefaultRequired` listing the untagged
     intolerant frontiers (an audit of what falls back to always-on) rather than forcing
     them core."""
+    edges = _edges(graph_or_edges)
     colors = _read_colors(edges)
     node_to_colors = {n: c for n, c in colors.items() if len(c) == 1}
     empties = _read_empties(edges)

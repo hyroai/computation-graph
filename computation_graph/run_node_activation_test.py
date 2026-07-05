@@ -45,10 +45,12 @@ def _build(calls):
         return (a, b)
 
     x_source = graph.make_source()
-    g = base_types.merge_graphs(
+    combine_graph = composers.compose_dict(combine, {"a": skill_a, "b": skill_b})
+    g = graph.merge_graphs(
         composers.compose_left_future(x_source, skill_a, None, None),
         composers.compose_left_future(x_source, skill_b, None, None),
-        composers.compose_dict(combine, {"a": skill_a, "b": skill_b}),
+        combine_graph,
+        sink_node_or_graph=combine_graph,
     )
     nodes = {
         "a": graph.make_computation_node(skill_a),
@@ -139,9 +141,11 @@ def test_sync_change_event_restarts():
 
     sel_source = graph.make_source()
     x_source = graph.make_source()
-    g = base_types.merge_graphs(
+    worker_graph = composers.compose_left_future(x_source, worker, None, None)
+    g = graph.merge_graphs(
         composers.compose_left_future(sel_source, router, None, None),
-        composers.compose_left_future(x_source, worker, None, None),
+        worker_graph,
+        sink_node_or_graph=worker_graph,
     )
     worker_node = graph.make_computation_node(worker)
     activation = run.NodeActivation(
@@ -189,14 +193,18 @@ def _build_async():
 
     u = graph.make_source()
     s = graph.make_source()
-    g = base_types.merge_graphs(
+    select_graph = composers.compose_dict(
+        select, {"chosen": chosen_skill_id, "agg": aggregate}
+    )
+    g = graph.merge_graphs(
         composers.compose_left_future(u, vic, None, None),
         composers.compose_left_unary(vic, chosen_skill_id),
         composers.compose_left_unary(vic, route_color),
         composers.compose_left_future(s, skill_a, None, None),
         composers.compose_left_future(s, skill_b, None, None),
         composers.compose_dict(aggregate, {"a": skill_a, "b": skill_b}),
-        composers.compose_dict(select, {"chosen": chosen_skill_id, "agg": aggregate}),
+        select_graph,
+        sink_node_or_graph=select_graph,
     )
     nodes = {
         "a": graph.make_computation_node(skill_a),
@@ -276,11 +284,13 @@ def _build_two_declarers(calls, colors_one, colors_two):
 
     u = graph.make_source()
     s = graph.make_source()
-    g = base_types.merge_graphs(
+    skill_b_graph = composers.compose_left_future(s, skill_b, None, None)
+    g = graph.merge_graphs(
         composers.compose_left_future(u, declarer_one, None, None),
         composers.compose_left_future(u, declarer_two, None, None),
         composers.compose_left_future(s, skill_a, None, None),
-        composers.compose_left_future(s, skill_b, None, None),
+        skill_b_graph,
+        sink_node_or_graph=skill_b_graph,
     )
     activation = run.NodeActivation(
         node_to_colors={
@@ -338,12 +348,14 @@ async def test_async_declarations_union():
 
     u = graph.make_source()
     s = graph.make_source()
-    g = base_types.merge_graphs(
+    skill_b_graph = composers.compose_left_future(s, skill_b, None, None)
+    g = graph.merge_graphs(
         composers.compose_left_future(u, vic, None, None),
         composers.compose_left_unary(vic, declarer_one),
         composers.compose_left_unary(vic, declarer_two),
         composers.compose_left_future(s, skill_a, None, None),
-        composers.compose_left_future(s, skill_b, None, None),
+        skill_b_graph,
+        sink_node_or_graph=skill_b_graph,
     )
     activation = run.NodeActivation(
         node_to_colors={
