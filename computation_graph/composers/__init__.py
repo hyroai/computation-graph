@@ -464,17 +464,21 @@ def compose_dict(
     (just----low---->between, just----high---->between)
     """
 
-    destination = f if base_types.is_computation_graph(f) else make_computation_node(f)
-    sink = destination.sink if base_types.is_computation_graph(destination) else destination
+    destination = f if base_types.is_computation_graph(f) else make_computation_node(f)  # type: ignore
+    sink = (
+        destination.sink  # type: ignore
+        if base_types.is_computation_graph(destination)
+        else destination
+    )
 
     return gamla.pipe(
         d,
         dict.items,
-        gamla.sync.map(gamla.star(lambda key, fn: make_compose(destination, fn, key=key))),
-        tuple,
-        lambda graphs: graph.merge_graphs(
-            *graphs, sink_node_or_graph=sink
+        gamla.sync.map(
+            gamla.star(lambda key, fn: make_compose(destination, fn, key=key))
         ),
+        tuple,
+        lambda graphs: graph.merge_graphs(*graphs, sink_node_or_graph=sink),  # type: ignore
     ) or compose_left_unary(f, lambda x: x)
 
 
