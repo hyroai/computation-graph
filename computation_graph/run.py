@@ -1,5 +1,4 @@
 import asyncio
-import collections
 import dataclasses
 import functools
 import inspect
@@ -29,83 +28,13 @@ import toposort
 import typeguard
 from gamla.optimized import sync as opt_gamla
 
-from computation_graph import base_types, composers, graph, signature
+from computation_graph import base_types, composers, graph, signature, sync_fusion
 
 CG_NO_RESULT = "CG_NO_RESULT"
 
 
 class _DepNotFoundError(Exception):
     pass
-
-
-def _sync_fusion_enabled() -> bool:
-    return os.getenv(base_types.COMPUTATION_GRAPH_SYNC_FUSION_ENV_KEY, "0") not in (
-        "0",
-        "false",
-        "False",
-        "",
-    )
-
-
-class _FusedSyncChain:
-    """A maximal linear run of synchronous nodes downstream of async nodes.
-
-    The whole chain executes inside a single asyncio Task instead of one Task
-    per node. `published` are the chain nodes whose result is consumed outside
-    the chain; each gets a Future in the results mapping so external consumers
-    can await it (resolved the moment the node computes or skips).
-    """
-
-    __slots__ = ("nodes", "published")
-
-    def __init__(
-        self,
-        nodes: Tuple[base_types.ComputationNode, ...],
-        published: Tuple[base_types.ComputationNode, ...],
-    ):
-        self.nodes = nodes
-        self.published = published
-
-    def __repr__(self):
-        return f"sync_chain[{'->'.join(map(str, self.nodes))}]"
-
-
-def _sync_chains(
-    edges: base_types.GraphType,
-    sync_and_downstream: Set[base_types.ComputationNode],
-) -> Tuple[Tuple[base_types.ComputationNode, ...], ...]:
-    """Maximal linear chains in the subgraph induced on `sync_and_downstream`.
-
-    A link u->v requires v to be u's only consumer within the induced subgraph
-    and u to be v's only producer within it. Chain nodes may still have inputs
-    from and outputs to nodes outside the chain (async nodes, sources, other
-    chains); those stay external. Only chains of length >= 2 are returned.
-    """
-    successors = collections.defaultdict(set)
-    predecessors = collections.defaultdict(set)
-    for edge in edges:
-        destination = edge.destination
-        if destination not in sync_and_downstream:
-            continue
-        for source in base_types.edge_sources(edge):
-            if source in sync_and_downstream:
-                successors[source].add(destination)
-                predecessors[destination].add(source)
-    next_in_chain = {
-        node: gamla.head(consumers)
-        for node, consumers in successors.items()
-        if len(consumers) == 1 and len(predecessors[gamla.head(consumers)]) == 1
-    }
-    linked = set(next_in_chain.values())
-    chains = []
-    for head in next_in_chain:
-        if head in linked:
-            continue
-        chain = [head]
-        while chain[-1] in next_in_chain:
-            chain.append(next_in_chain[chain[-1]])
-        chains.append(tuple(chain))
-    return tuple(chains)
 
 
 _NodeToResults = Dict[base_types.ComputationNode, base_types.Result]
@@ -250,9 +179,10 @@ def _to_callable_with_side_effect_for_single_and_multiple(
     handled_exceptions: Tuple[Type[Exception], ...],
 ) -> Callable[[_NodeToResults, _NodeToResults], _NodeToResults]:
     edges = _merge_edges_pointing_to_terminals(edges)
-    is_debug = os.getenv(base_types.COMPUTATION_GRAPH_DEBUG_ENV_KEY) is not None
     single_node_side_effect = (
-        single_node_side_effect if is_debug else (lambda node, result: result)
+        (lambda node, result: result)
+        if os.getenv(base_types.COMPUTATION_GRAPH_DEBUG_ENV_KEY) is None
+        else single_node_side_effect
     )
 
     future_sources = _graph_to_future_sources(edges)
@@ -276,20 +206,22 @@ def _to_callable_with_side_effect_for_single_and_multiple(
     placeholder_to_future_source = opt_gamla.pipe(
         future_source_to_placeholder, gamla.itemmap(lambda k_v: (k_v[1], k_v[0]))
     )
+    get_node_executor, fusion_context = _make_get_node_executor(
+        edges, handled_exceptions, single_node_side_effect
+    )
+
     topological_sorted_nodes = opt_gamla.pipe(
         edges,
         _toposort_nodes,
         gamla.remove(gamla.contains(placeholder_to_future_source)),
-        tuple,
+        opt_gamla.maptuple(opt_gamla.pair_right(get_node_executor)),
     )
-    fuse_sync_chains = is_async and _sync_fusion_enabled()
-    execution_units = _make_execution_units(
-        edges,
-        handled_exceptions,
-        single_node_side_effect,
-        topological_sorted_nodes,
-        fuse_sync_chains,
-    )
+    fusion_enabled = is_async and sync_fusion.enabled()
+    unfused_units = topological_sorted_nodes
+    if fusion_enabled:
+        topological_sorted_nodes = sync_fusion.fuse(
+            topological_sorted_nodes, fusion_context
+        )
 
     translate_source_to_placeholder = opt_gamla.compose_left(
         opt_gamla.keyfilter(gamla.contains(future_sources)),
@@ -302,34 +234,20 @@ def _to_callable_with_side_effect_for_single_and_multiple(
         async def final_runner(sources_to_values):
             inputs = translate_source_to_placeholder(sources_to_values)
             all_results = await _run_graph_async(
-                inputs, handled_exceptions, execution_units
+                inputs, handled_exceptions, topological_sorted_nodes
             )
 
             return all_node_side_effects_on_edges(all_results)
 
-        if fuse_sync_chains and is_debug:
-            # Debug equivalence check: also run the graph without fusion and
-            # compare. Note this runs every node twice per evaluation.
-            unfused_units = _make_execution_units(
-                edges,
-                handled_exceptions,
-                single_node_side_effect,
-                topological_sorted_nodes,
-                False,
+        if fusion_enabled and os.getenv(base_types.COMPUTATION_GRAPH_DEBUG_ENV_KEY):
+            final_runner = sync_fusion.with_debug_equivalence_check(
+                final_runner,
+                lambda sources_to_values: _run_graph_async(
+                    translate_source_to_placeholder(sources_to_values),
+                    handled_exceptions,
+                    unfused_units,
+                ),
             )
-            fused_runner = final_runner
-
-            async def final_runner(sources_to_values):  # noqa: F811
-                fused_results = await fused_runner(sources_to_values)
-                unfused_results = all_node_side_effects_on_edges(
-                    await _run_graph_async(
-                        translate_source_to_placeholder(sources_to_values),
-                        handled_exceptions,
-                        unfused_units,
-                    )
-                )
-                _assert_fusion_equivalence(fused_results, unfused_results)
-                return fused_results
 
     else:
 
@@ -338,31 +256,11 @@ def _to_callable_with_side_effect_for_single_and_multiple(
                 _run_graph(
                     translate_source_to_placeholder(sources_to_values),
                     handled_exceptions,
-                    execution_units,
+                    topological_sorted_nodes,
                 )
             )
 
     return (_async_graph_reducer if is_async else _graph_reducer)(final_runner)
-
-
-def _assert_fusion_equivalence(fused: _NodeToResults, unfused: _NodeToResults):
-    if set(fused) != set(unfused):
-        raise AssertionError(
-            "sync chain fusion changed the set of computed nodes."
-            f" only fused: {set(fused) - set(unfused)},"
-            f" only unfused: {set(unfused) - set(fused)}"
-        )
-    for node in fused:
-        try:
-            equal = bool(fused[node] == unfused[node])
-        except Exception:
-            continue
-        if not equal:
-            # Not an assertion: nondeterministic nodes and identity-based
-            # equality produce false positives here.
-            logging.warning(
-                f"sync chain fusion: differing results for {node} (may be nondeterminism or identity equality)"
-            )
 
 
 _get_args_nodes: Callable[
@@ -394,13 +292,9 @@ def _node_incoming_edges_to_input_spec(
     )
 
 
-def _make_execution_units(
-    edges,
-    handled_exceptions,
-    single_node_side_effect: _SingleNodeSideEffect,
-    topological_sorted_nodes: Tuple[base_types.ComputationNode, ...],
-    fuse_sync_chains: bool,
-) -> Tuple[Tuple[Any, Callable], ...]:
+def _make_get_node_executor(
+    edges, handled_exceptions, single_node_side_effect: _SingleNodeSideEffect
+):
     node_to_incoming_edges = functools.cache(graph.get_incoming_edges_for_node(edges))
     node_to_computation_input_spec_options: Callable[
         [base_types.ComputationNode], Tuple[_ComputationInputSpec]
@@ -584,177 +478,24 @@ def _make_execution_units(
             return get_deps_and_apply  # type: ignore
         raise Exception("no executor found")
 
-    if not fuse_sync_chains:
-        return opt_gamla.maptuple(opt_gamla.pair_right(get_executor))(
-            topological_sorted_nodes
-        )
-
-    handled = (base_types.SkipComputationError, *handled_exceptions)
-    # Nodes whose value in the results mapping is never a Future: inputs
-    # (placeholders and sources are removed from the executed topological
-    # order) and nodes computed by direct call in the walk. Chain members are
-    # added per chain: by execution order they are plain values (or absent)
-    # by the time a later chain node reads them.
-    statically_concrete = sync_not_downstream | (
-        all_nodes - set(topological_sorted_nodes)
+    return get_executor, sync_fusion.FusionContext(
+        edges=edges,
+        handled_exceptions=handled_exceptions,
+        single_node_side_effect=single_node_side_effect,
+        node_to_input_async=node_to_input_async,
+        node_to_input_spec_options=node_to_computation_input_spec_options,
+        sync_and_downstream=sync_and_downstream,
+        sync_not_downstream=sync_not_downstream,
+        dep_not_found_error=_DepNotFoundError,
+        profile=_profile,
     )
 
-    def make_chain_executor(chain: _FusedSyncChain):
-        chain_set = frozenset(chain.nodes)
-        concrete_for_chain = statically_concrete | chain_set
 
-        def split_input_options(node):
-            """Prefix of priority-ordered options resolvable with plain dict
-            lookups; from the first option that may reference a Future on, the
-            rest is handled by node_to_input_async (which resolves concrete
-            values too, so order is preserved)."""
-            options = node_to_computation_input_spec_options(node)
-            concrete_options: list = []
-            for index, option in enumerate(options):
-                args_spec, kwargs_spec = option
-                if all(
-                    source in concrete_for_chain
-                    for source in (*args_spec, *kwargs_spec.values())
-                ):
-                    concrete_options.append(option)
-                else:
-                    return tuple(concrete_options), options[index:]
-            return tuple(concrete_options), ()
-
-        nodes_and_input_options = tuple(
-            (node, *split_input_options(node)) for node in chain.nodes
-        )
-        published = frozenset(chain.published)
-
-        async def run_chain(accumulated_results, out_futures) -> _NodeToResults:
-            chain_results: _NodeToResults = {}
-            # Chain-internal results shadow the global mapping, so fan-out
-            # within the chain is a plain dict lookup instead of a Future.
-            lookup = collections.ChainMap(chain_results, accumulated_results)
-
-            def concrete_value(source):
-                value = chain_results.get(source, CG_NO_RESULT)
-                if value is not CG_NO_RESULT:
-                    return value
-                if source in chain_set:
-                    # Already ran and skipped; its published Future (if any)
-                    # must not be read as a value.
-                    raise KeyError(source)
-                value = accumulated_results.get(source, CG_NO_RESULT)
-                if value is CG_NO_RESULT:
-                    raise KeyError(source)
-                return value
-
-            try:
-                for node, concrete_options, remaining_options in (
-                    nodes_and_input_options
-                ):
-                    args_kwargs = None
-                    for args_spec, kwargs_spec in concrete_options:
-                        try:
-                            args_kwargs = (
-                                tuple(concrete_value(arg) for arg in args_spec),
-                                {
-                                    key: concrete_value(value)
-                                    for key, value in kwargs_spec.items()
-                                },
-                            )
-                            break
-                        except KeyError:
-                            continue
-                    if args_kwargs is None and remaining_options:
-                        args_kwargs = await node_to_input_async(
-                            lookup, remaining_options
-                        )
-                    if args_kwargs is None:
-                        # Same as a per-node Task raising _DepNotFoundError: no
-                        # result, consumers fall back to lower-priority options
-                        # or skip. Resolving immediately (not at chain end) is
-                        # what lets a consumer that reconverges into this chain
-                        # through an async node proceed while the chain is
-                        # still running.
-                        if node in out_futures:
-                            out_futures[node].set_exception(_DepNotFoundError())
-                        continue
-                    args, kwargs = args_kwargs
-                    before = time.perf_counter()
-                    try:
-                        result = node.func(*args, **kwargs)
-                    except handled as exception:
-                        if node in out_futures:
-                            out_futures[node].set_exception(exception)
-                        continue
-                    except Exception as exception:
-                        if node in out_futures:
-                            out_futures[node].set_exception(exception)
-                        raise
-                    single_node_side_effect(node, result)
-                    if inspect.isawaitable(result):
-                        raise Exception(
-                            f"{node} returned an awaitable result but is not an async function"
-                        )
-                    _profile(node, before)
-                    chain_results[node] = result
-                    if node in out_futures:
-                        out_futures[node].set_result(result)
-                return chain_results
-            finally:
-                # After an unhandled exception the remaining nodes never ran;
-                # resolve their futures so consumers and the final gather don't
-                # wait forever.
-                for future in out_futures.values():
-                    if not future.done():
-                        future.set_exception(_DepNotFoundError())
-                # We delete the reference to the global mapping to avoid circular reference (task->exception->traceback->mapping) and improve memory performance
-                del accumulated_results, lookup
-
-        def schedule_chain(accumulated_results: dict, _chain) -> Awaitable:
-            out_futures = {
-                node: asyncio.get_running_loop().create_future() for node in published
-            }
-            accumulated_results.update(out_futures)
-            return asyncio.create_task(run_chain(accumulated_results, out_futures))
-
-        return schedule_chain
-
-    node_to_consumers = collections.defaultdict(set)
-    for edge in edges:
-        for source in base_types.edge_sources(edge):
-            node_to_consumers[source].add(edge.destination)
-    node_to_chain = {}
-    chains = _sync_chains(edges, sync_and_downstream)
-    for chain_nodes in chains:
-        chain_set = frozenset(chain_nodes)
-        chain = _FusedSyncChain(
-            chain_nodes,
-            tuple(
-                node
-                for node in chain_nodes
-                if node_to_consumers[node] - chain_set
-            ),
-        )
-        for node in chain_nodes:
-            node_to_chain[node] = chain
-    logging.debug(
-        f"sync chain fusion: fused {len(node_to_chain)} of {len(topological_sorted_nodes)} nodes into {len(chains)} chains"
-    )
-    units = []
-    for node in topological_sorted_nodes:
-        chain = node_to_chain.get(node)
-        if chain is None:
-            units.append((node, get_executor(node)))
-        elif node == chain.nodes[0]:
-            # The whole chain is scheduled as one unit at its head's position;
-            # the other chain members are dropped from the walk.
-            units.append((chain, make_chain_executor(chain)))
-    return tuple(units)
-
-
-async def _run_graph_async(inputs, handled_exceptions, execution_units):
+async def _run_graph_async(inputs, handled_exceptions, topological_sorted_nodes):
     node_to_task_or_result = inputs.copy()
     unhandled_exception = None
     try:
-        for node_executor in execution_units:
+        for node_executor in topological_sorted_nodes:
             try:
                 node_to_task_or_result[node_executor[0]] = node_executor[1](
                     node_to_task_or_result, node_executor[0]
@@ -780,9 +521,8 @@ async def _run_graph_async(inputs, handled_exceptions, execution_units):
             ):
                 task_e = node_to_task_or_result[node].exception()
                 if not task_e:
-                    if type(node) is _FusedSyncChain:
-                        # A fused chain's task returns the results of all its
-                        # nodes (including unpublished ones), keyed by node.
+                    if type(node) is sync_fusion.FusedSyncChain:
+                        # A fused chain's task returns all its nodes' results.
                         all_results.update(node_result)
                     else:
                         all_results[node] = node_result

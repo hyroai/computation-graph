@@ -9,10 +9,6 @@ from typing import Callable, FrozenSet, Hashable, Optional, Tuple, Union
 import gamla
 
 COMPUTATION_GRAPH_DEBUG_ENV_KEY = "COMPUTATION_GRAPH_DEBUG"
-# When set (to anything but "0"/"false"), runs of synchronous nodes downstream
-# of async nodes are fused into a single asyncio Task per run instead of one
-# Task per node. Read at graph compilation time.
-COMPUTATION_GRAPH_SYNC_FUSION_ENV_KEY = "COMPUTATION_GRAPH_SYNC_FUSION"
 
 Result = Hashable
 

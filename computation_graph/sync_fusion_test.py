@@ -8,9 +8,9 @@ import asyncio
 import gamla
 import pytest
 
-from computation_graph import base_types, composers, graph, run
+from computation_graph import base_types, composers, graph, run, sync_fusion
 
-_FUSION_KEY = base_types.COMPUTATION_GRAPH_SYNC_FUSION_ENV_KEY
+_FUSION_KEY = sync_fusion.COMPUTATION_GRAPH_SYNC_FUSION_ENV_KEY
 
 
 def _fusion_on(monkeypatch):
@@ -60,7 +60,7 @@ def test_chain_detection():
         composers.compose_left(s3, fan_in, key="x"),
         composers.compose_left(other, fan_in, key="y"),
     )
-    chains = run._sync_chains(tuple(edges), _sync_and_downstream(edges))
+    chains = sync_fusion._sync_chains(tuple(edges), _sync_and_downstream(edges))
     node = graph.make_computation_node
     # fan_in has two sync producers so it cannot join a chain; `other` has a
     # single consumer but is alone (its consumer has in-degree 2), so no
