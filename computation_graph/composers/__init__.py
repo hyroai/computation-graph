@@ -463,8 +463,9 @@ def compose_dict(
     >>> compose_dict(gamla.between, {"low": gamla.just(0), "high": gamla.just(10)})
     (just----low---->between, just----high---->between)
     """
-    if not base_types.is_computation_graph(f):
-        destination = make_computation_node(f)
+
+    destination = f if base_types.is_computation_graph(f) else make_computation_node(f)
+
     return gamla.pipe(
         d,
         dict.items,
