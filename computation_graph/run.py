@@ -288,14 +288,6 @@ def _node_incoming_edges_to_input_spec(
     )
 
 
-def _to_awaitable(v) -> Awaitable:
-    if inspect.isawaitable(v):
-        return v
-    f = asyncio.get_event_loop().create_future()
-    f.set_result(v)
-    return f
-
-
 def _make_get_node_executor(
     edges, handled_exceptions, single_node_side_effect: _SingleNodeSideEffect
 ):
@@ -312,25 +304,6 @@ def _make_get_node_executor(
             opt_gamla.maptuple(_node_incoming_edges_to_input_spec),
         )
     )
-
-    async def gather(
-        args: Tuple[Awaitable, ...], kwargs: Mapping[str, Awaitable]
-    ) -> tuple[tuple[Any, ...], dict[str, Any]]:
-        if args or kwargs:
-            try:
-                gathered = await asyncio.gather(*args, *kwargs.values())
-                return gathered[: len(args)], dict(
-                    zip(kwargs.keys(), gathered[len(args) :])
-                )
-            except (
-                _DepNotFoundError,
-                base_types.SkipComputationError,
-                *handled_exceptions,
-            ):
-                # We delete the references to the upstream tasks to avoid circular reference (task->exception->traceback->task) and improve memory performance
-                del args, kwargs
-                raise _DepNotFoundError() from None
-        return (), {}
 
     def node_to_input_sync(
         accumulated_results: Mapping[base_types.ComputationNode, base_types.Result],
@@ -361,12 +334,20 @@ def _make_get_node_executor(
                 accumulated_results.get(kwarg, CG_NO_RESULT) is not CG_NO_RESULT
                 for kwarg in kwargs_spec.values()
             ):
+                # Resolve inputs in place: await only the still-pending ones
+                # (already-scheduled tasks, so concurrency is preserved) and pass
+                # concrete values straight through. This avoids allocating a
+                # resolved Future per concrete input and the asyncio.gather
+                # machinery; the comprehension does zero awaits when nothing is
+                # pending, so it completes without suspending.
+                args = [accumulated_results[a] for a in args_spec]
+                kwargs = {k: accumulated_results[v] for k, v in kwargs_spec.items()}
                 try:
-                    return await gather(
-                        tuple(_to_awaitable(accumulated_results[a]) for a in args_spec),
+                    return (
+                        tuple([await x if inspect.isawaitable(x) else x for x in args]),
                         {
-                            k: _to_awaitable(accumulated_results[v])
-                            for k, v in kwargs_spec.items()
+                            k: (await x if inspect.isawaitable(x) else x)
+                            for k, x in kwargs.items()
                         },
                     )
                 except (
@@ -374,7 +355,9 @@ def _make_get_node_executor(
                     base_types.SkipComputationError,
                     *handled_exceptions,
                 ):
-                    ...
+                    # Drop refs to the upstream tasks to avoid a
+                    # task -> exception -> traceback -> task reference cycle.
+                    del args, kwargs
         return None
 
     @opt_gamla.after(asyncio.create_task)
