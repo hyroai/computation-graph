@@ -18,7 +18,6 @@ _to_computation_node_if_callable = gamla.unless(
 )
 
 
-# TODO(nitzo): Rename
 def _get_edges_from_node_or_graph(
     node_or_graph: base_types.NodeOrGraph,
 ) -> base_types.GraphType:
@@ -275,13 +274,14 @@ def _infer_composition_edges(
     )
 
     if isinstance(destination, base_types.ComputationNode):
+        sink = _determine_sink(source, destination, is_future)
         return graph.merge_graphs(
             base_types.GraphType(
                 edges=frozenset([try_connect(destination, destination.signature)]),
-                sink=_determine_sink(source, destination, is_future),
+                sink=sink,
             ),
             _get_edges_from_node_or_graph(source),
-            sink_node_or_graph=_determine_sink(source, destination, is_future),
+            sink_node_or_graph=sink,
         )
     unbound_signature = graph.unbound_signature(
         graph.get_incoming_edges_for_node(destination.edges)
@@ -463,14 +463,16 @@ def compose_dict(
     >>> compose_dict(gamla.between, {"low": gamla.just(0), "high": gamla.just(10)})
     (just----low---->between, just----high---->between)
     """
+    if not base_types.is_computation_graph(f):
+        destination = make_computation_node(f)
     return gamla.pipe(
         d,
         dict.items,
-        gamla.sync.map(gamla.star(lambda key, fn: make_compose(f, fn, key=key))),
+        gamla.sync.map(gamla.star(lambda key, fn: make_compose(destination, fn, key=key))),
         tuple,
         lambda graphs: graph.merge_graphs(
-            *graphs, sink_node_or_graph=graphs[-1]
-        ),  # TODO(nitzo): Use the new _determine_sink_function.
+            *graphs, sink_node_or_graph=destination
+        ),
     ) or compose_left_unary(f, lambda x: x)
 
 
