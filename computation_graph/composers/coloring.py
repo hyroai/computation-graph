@@ -222,20 +222,42 @@ def latch(
         return value  # `sink_excluding_terminals` resolve cleanly (carry_forward's
         # own future self-edge would otherwise leave the graph with no plain leaf).
 
+    def latch_default():
+        return default
+
+    # `current` enters through a TOLERANT frontier (make_first + a default
+    # fallback): a pruned producer yields `default` (-> not `present` -> previous)
+    # instead of STARVING the pinned carry_forward. Without this guard, a colored
+    # `current` at the pinned-intolerant frontier is caught by the must-run closure,
+    # which forces its whole input cone always-on -- pruning collapses (measured:
+    # bon_secours prunable 50k -> 26k, greeting 257ms -> 11s). A terminal `current`
+    # (the var-bus consume) is already tolerant; the guard is harmless there.
+    guarded_current = composers.make_first(current, latch_default)
     self_edge = composers.compose_left_future(
         carry_forward, carry_forward, "previous", default
     )
     g = base_types.merge_graphs(
-        composers.compose_dict(carry_forward, {"current": current}),
+        composers.compose_dict(carry_forward, {"current": guarded_current}),
         self_edge,
         composers.compose_left_unary(carry_forward, latched),
     )
     # Pin the latch's own machinery CORE (carry_forward + the when_memory_unavailable
-    # default node + the pass-through) -- shared carry-forward infra that must run every
-    # turn; `current`'s subgraph stays colored/prunable.
+    # default node + the guard's first_sink/fallback + the pass-through) -- shared
+    # carry-forward infra that must run every turn; `current`'s subgraph stays
+    # colored/prunable.
     for node in _colorable_nodes(self_edge):
         _pin_core_func(node.func)
+    _pin_core_func(latch_default)
     _pin_core_func(latched)
+    current_nodes = (
+        _colorable_nodes(current)
+        if isinstance(current, (tuple, frozenset, set))
+        else frozenset()
+    )
+    for node in _colorable_nodes(guarded_current) - current_nodes:
+        if callable(current) and node.func is current:
+            continue
+        _pin_core_func(node.func)
     return g
 
 
@@ -258,7 +280,14 @@ def _is_tolerant_consumer(node: base_types.ComputationNode) -> bool:
     #     (`run._merge_edges_pointing_to_terminals`), so a pruned producer is filtered
     #     and the terminal's aggregate just shrinks (this is what lets a var-bus
     #     exposer prune with no default, latched downstream).
-    return node.is_terminal or getattr(node.func, "__name__", "") == "first_sink"
+    # `duplicate_function` prefixes __name__ with "duplicate of ", so strip it --
+    # a DUPLICATED first_sink is exactly as tolerant as the original (missing this
+    # misclassified duplicated sinks as intolerant and closure-forced their whole
+    # producer cones always-on).
+    name = getattr(node.func, "__name__", "")
+    while name.startswith("duplicate of "):
+        name = name[len("duplicate of ") :]
+    return node.is_terminal or name == "first_sink"
 
 
 def _needs_default(producer_colors: FrozenSet, consumer_colors) -> bool:
