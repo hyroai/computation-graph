@@ -465,6 +465,7 @@ def compose_dict(
     """
 
     destination = f if base_types.is_computation_graph(f) else make_computation_node(f)
+    sink = destination.sink if base_types.is_computation_graph(destination) else destination
 
     return gamla.pipe(
         d,
@@ -472,7 +473,7 @@ def compose_dict(
         gamla.sync.map(gamla.star(lambda key, fn: make_compose(destination, fn, key=key))),
         tuple,
         lambda graphs: graph.merge_graphs(
-            *graphs, sink_node_or_graph=destination
+            *graphs, sink_node_or_graph=sink
         ),
     ) or compose_left_unary(f, lambda x: x)
 

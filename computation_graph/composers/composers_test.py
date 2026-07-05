@@ -39,6 +39,27 @@ def test_infer_sink_edge_case_all_future_edges_with_single_destination():
     composers.compose_left_unary(two_future_edges_single_dest, lambda x: x)
 
 
+def test_compose_dict():
+    def add(a, b):
+        return a + b
+
+    result = graph_runners.nullary_infer_sink(
+        composers.compose_dict(add, {"a": lambda: 3, "b": lambda: 4})
+    )
+    assert result == 7
+
+
+def test_compose_dict_with_graph_destination():
+    def add(a, b):
+        return a + b
+
+    destination_graph = composers.compose_left(lambda: 3, add, key="a")
+    result = graph_runners.nullary_infer_sink(
+        composers.compose_dict(destination_graph, {"b": lambda: 4})
+    )
+    assert result == 7
+
+
 def test_ambiguity_does_not_blow_up():
     counter = 0
 
