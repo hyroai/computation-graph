@@ -29,6 +29,7 @@ import typeguard
 from gamla.optimized import sync as opt_gamla
 
 from computation_graph import base_types, composers, graph, signature
+from computation_graph.base_types import GraphType
 
 CG_NO_RESULT = "CG_NO_RESULT"
 
@@ -46,8 +47,7 @@ _ComputationInputSpec = Tuple[
 _NodeExecutor = Callable[
     [
         Mapping[
-            base_types.ComputationNode,
-            base_types.Result | Awaitable[base_types.Result],
+            base_types.ComputationNode, base_types.Result | Awaitable[base_types.Result]
         ],
         base_types.ComputationNode,
     ],
@@ -145,28 +145,40 @@ _graph_to_future_sources = opt_gamla.compose_left(
 
 
 def _merge_edges_pointing_to_terminals(g: base_types.GraphType) -> base_types.GraphType:
-    return gamla.compose_left(
+    return gamla.pipe(
+        g,
+        gamla.attrgetter("edges"),
         gamla.groupby(gamla.attrgetter("destination")),
         gamla.itemmap(
-            gamla.star(
-                lambda dest, edges_for_dest: (
-                    dest,
-                    base_types.merge_graphs(
-                        composers.make_or(
-                            opt_gamla.maptuple(base_types.edge_source)(edges_for_dest),
-                            merge_fn=(aggregate := lambda args: args),
+            gamla.compose_left(
+                gamla.star(
+                    lambda dest, edges_for_dest: (
+                        dest,
+                        (
+                            graph.merge_graphs(
+                                composers.make_or(
+                                    opt_gamla.maptuple(base_types.edge_source)(
+                                        edges_for_dest
+                                    ),
+                                    merge_fn=(aggregate := lambda args: args),
+                                ),
+                                composers.compose_left_unary(aggregate, dest),
+                                sink_node_or_graph=graph.make_computation_node(
+                                    aggregate
+                                ),
+                            ).edges
+                            if dest.is_terminal
+                            else edges_for_dest
                         ),
-                        composers.compose_left_unary(aggregate, dest),
                     )
-                    if dest.is_terminal
-                    else edges_for_dest,
                 )
             )
         ),
         dict.values,
         gamla.concat,
-        tuple,
-    )(g)
+        frozenset,
+        lambda edges: GraphType(edges, g.sink),
+    )
 
 
 
@@ -238,11 +250,11 @@ class NodeActivation:
 def _to_callable_with_side_effect_for_single_and_multiple(
     single_node_side_effect: _SingleNodeSideEffect,
     all_nodes_side_effect: Callable,
-    edges: base_types.GraphType,
+    graph: base_types.GraphType,
     handled_exceptions: Tuple[Type[Exception], ...],
     node_activation: Optional[NodeActivation] = None,
 ) -> Callable[[_NodeToResults, _NodeToResults], _NodeToResults]:
-    edges = _merge_edges_pointing_to_terminals(edges)
+    edges = _merge_edges_pointing_to_terminals(graph).edges
     single_node_side_effect = (
         (lambda node, result: result)
         if os.getenv(base_types.COMPUTATION_GRAPH_DEBUG_ENV_KEY) is None
@@ -264,7 +276,7 @@ def _to_callable_with_side_effect_for_single_and_multiple(
         ),
         tuple,
         gamla.side_effect(_assert_composition_is_valid),
-        gamla.side_effect(base_types.assert_no_unwanted_ambiguity),
+        gamla.side_effect(base_types.assert_no_unwanted_ambiguity_on_edges),
     )
     is_async = _is_graph_async(edges)
     placeholder_to_future_source = opt_gamla.pipe(
@@ -375,14 +387,6 @@ def _node_incoming_edges_to_input_spec(
     )
 
 
-def _to_awaitable(v) -> Awaitable:
-    if inspect.isawaitable(v):
-        return v
-    f = asyncio.get_event_loop().create_future()
-    f.set_result(v)
-    return f
-
-
 def _make_get_node_executor(
     edges, handled_exceptions, single_node_side_effect: _SingleNodeSideEffect
 ):
@@ -399,25 +403,6 @@ def _make_get_node_executor(
             opt_gamla.maptuple(_node_incoming_edges_to_input_spec),
         )
     )
-
-    async def gather(
-        args: Tuple[Awaitable, ...], kwargs: Mapping[str, Awaitable]
-    ) -> tuple[tuple[Any, ...], dict[str, Any]]:
-        if args or kwargs:
-            try:
-                gathered = await asyncio.gather(*args, *kwargs.values())
-                return gathered[: len(args)], dict(
-                    zip(kwargs.keys(), gathered[len(args) :])
-                )
-            except (
-                _DepNotFoundError,
-                base_types.SkipComputationError,
-                *handled_exceptions,
-            ):
-                # We delete the references to the upstream tasks to avoid circular reference (task->exception->traceback->task) and improve memory performance
-                del args, kwargs
-                raise _DepNotFoundError() from None
-        return (), {}
 
     def node_to_input_sync(
         accumulated_results: Mapping[base_types.ComputationNode, base_types.Result],
@@ -448,12 +433,20 @@ def _make_get_node_executor(
                 accumulated_results.get(kwarg, CG_NO_RESULT) is not CG_NO_RESULT
                 for kwarg in kwargs_spec.values()
             ):
+                # Resolve inputs in place: await only the still-pending ones
+                # (already-scheduled tasks, so concurrency is preserved) and pass
+                # concrete values straight through. This avoids allocating a
+                # resolved Future per concrete input and the asyncio.gather
+                # machinery; the comprehension does zero awaits when nothing is
+                # pending, so it completes without suspending.
+                args = [accumulated_results[a] for a in args_spec]
+                kwargs = {k: accumulated_results[v] for k, v in kwargs_spec.items()}
                 try:
-                    return await gather(
-                        tuple(_to_awaitable(accumulated_results[a]) for a in args_spec),
+                    return (
+                        tuple([await x if inspect.isawaitable(x) else x for x in args]),
                         {
-                            k: _to_awaitable(accumulated_results[v])
-                            for k, v in kwargs_spec.items()
+                            k: (await x if inspect.isawaitable(x) else x)
+                            for k, x in kwargs.items()
                         },
                     )
                 except (
@@ -461,7 +454,9 @@ def _make_get_node_executor(
                     base_types.SkipComputationError,
                     *handled_exceptions,
                 ):
-                    ...
+                    # Drop refs to the upstream tasks to avoid a
+                    # task -> exception -> traceback -> task reference cycle.
+                    del args, kwargs
         return None
 
     @opt_gamla.after(asyncio.create_task)

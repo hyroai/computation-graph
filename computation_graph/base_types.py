@@ -63,9 +63,17 @@ class ComputationEdge:
         assert bool(self.args) != bool(
             self.source
         ), f"Edge must have a source or args, not both: {self}"
+        assert bool(self.args) or isinstance(
+            self.source, ComputationNode
+        ), f"source must be a ComputationNode {self.source}"
+        assert isinstance(
+            self.destination, ComputationNode
+        ), f"destination must be a ComputationNode {self.destination}"
+        assert all(
+            isinstance(x, ComputationNode) for x in self.args
+        ), f"all args must be ComputationNodes {self.args}"
         if (
             not self.args
-            # TODO(uri): doesn't support `functools.partial`, suggested to drop support for it entirely.
             and not isinstance(self.source.func, functools.partial)
             and not isinstance(self.destination.func, functools.partial)
         ):
@@ -76,7 +84,9 @@ class ComputationEdge:
 
     def __repr__(self):
         source_str = (
-            "".join(map(str, self.args)) if self.source is None else str(self.source)
+            f"[{''.join(map(str, self.args))}]"
+            if self.source is None
+            else str(self.source)
         )
         line = "...." if self.is_future else "----"
         return source_str + line + self.key + line + ">" + str(self.destination)
@@ -105,7 +115,16 @@ class ComputationNode:
         return self.computed_hash
 
     def __repr__(self):
-        return self.name
+        return f"<CompuationNode {self.name.replace('<', '').replace('>', '')}({','.join(self.signature.kwargs)}) >"
+
+
+@dataclasses.dataclass(frozen=True)
+class GraphType:
+    edges: FrozenSet[ComputationEdge]
+    sink: ComputationNode
+
+    def __post_init__(self):
+        assert isinstance(self.edges, frozenset), "edges must be a frozenset"
 
 
 node_implementation = gamla.attrgetter("func")
@@ -125,13 +144,15 @@ def edge_sources(edge: ComputationEdge) -> Tuple[ComputationNode, ...]:
 
 is_computation_graph = gamla.alljuxt(
     # Note that this cannot be set to `GraphType` (due to `is_instance` limitation).
-    gamla.is_instance((tuple, set, frozenset)),
-    gamla.len_greater(0),
-    gamla.allmap(gamla.is_instance(ComputationEdge)),
+    gamla.is_instance(GraphType),
+    gamla.compose_left(gamla.attrgetter("edges"), gamla.len_greater(0)),
+    gamla.compose_left(
+        gamla.attrgetter("edges"), gamla.allmap(gamla.is_instance(ComputationEdge))
+    ),
 )
 
 
-ambiguity_groups = gamla.compose(
+_ambiguity_groups_on_edges = gamla.compose(
     frozenset,
     gamla.filter(gamla.len_greater(1)),
     dict.values,
@@ -139,9 +160,9 @@ ambiguity_groups = gamla.compose(
     gamla.groupby(gamla.juxt(edge_destination, edge_key, edge_priority)),
 )
 
-assert_no_unwanted_ambiguity = gamla.side_effect(
+assert_no_unwanted_ambiguity_on_edges = gamla.side_effect(
     gamla.compose_left(
-        ambiguity_groups,
+        _ambiguity_groups_on_edges,
         gamla.assert_that_with_message(
             gamla.wrap_str(
                 "There are multiple edges with the same destination, key and priority in the computation graph!: {}"
@@ -153,23 +174,24 @@ assert_no_unwanted_ambiguity = gamla.side_effect(
 )
 
 
+def is_debug_mode() -> bool:
+    return os.getenv(COMPUTATION_GRAPH_DEBUG_ENV_KEY) is not None
+
+
 @gamla.side_effect
-def _assert_no_unwanted_ambiguity_when_debug_set(graph):
-    if os.getenv(COMPUTATION_GRAPH_DEBUG_ENV_KEY) is not None:
-        assert_no_unwanted_ambiguity(graph)
+def assert_no_unwanted_ambiguity_when_debug_set(graph: GraphType):
+    if is_debug_mode():
+        assert_no_unwanted_ambiguity_on_edges(graph.edges)
 
 
-def merge_graphs(*graphs):
-    s = frozenset({})
-    s = s.union(*graphs)
+# TODO(nitzo): Is this used ? Check if we can re-enable the assertion when in debug / move to merge.
+def merge_edges(*edges: FrozenSet[ComputationEdge]) -> FrozenSet[ComputationEdge]:
+    result: FrozenSet[ComputationEdge] = frozenset()
+    return result.union(*edges)
 
-    return _assert_no_unwanted_ambiguity_when_debug_set(s)
 
-
-# We use a tuple to generate a unique id for each node based on the order of edges.
-GraphType = FrozenSet[ComputationEdge]
 GraphOrCallable = Union[Callable, GraphType]
 CallableOrNode = Union[Callable, ComputationNode]
 CallableOrNodeOrGraph = Union[CallableOrNode, GraphType]
 NodeOrGraph = Union[ComputationNode, GraphType]
-EMPTY_GRAPH: GraphType = frozenset()
+EMPTY_GRAPH: GraphType = GraphType(edges=frozenset(), sink=None)  # type: ignore[arg-type]
