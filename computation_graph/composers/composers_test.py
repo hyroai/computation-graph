@@ -1,5 +1,5 @@
 import computation_graph.graph
-from computation_graph import base_types, composers, graph_runners
+from computation_graph import composers, graph, graph_runners
 
 
 def test_unary_composition_with_graph_destination():
@@ -30,12 +30,34 @@ def test_infer_sink_edge_case_all_future_edges_with_single_destination():
     def c_b(c, b):
         return b
 
-    two_future_edges_single_dest = base_types.merge_graphs(
+    two_future_edges_single_dest = graph.merge_graphs(
         composers.compose_left_source(s, "c", c_b),
         composers.compose_left_source(s, "b", c_b),
+        sink_node_or_graph=graph.make_computation_node(c_b),
     )
 
     composers.compose_left_unary(two_future_edges_single_dest, lambda x: x)
+
+
+def test_compose_dict():
+    def add(a, b):
+        return a + b
+
+    result = graph_runners.nullary_infer_sink(
+        composers.compose_dict(add, {"a": lambda: 3, "b": lambda: 4})
+    )
+    assert result == 7
+
+
+def test_compose_dict_with_graph_destination():
+    def add(a, b):
+        return a + b
+
+    destination_graph = composers.compose_left(lambda: 3, add, key="a")
+    result = graph_runners.nullary_infer_sink(
+        composers.compose_dict(destination_graph, {"b": lambda: 4})
+    )
+    assert result == 7
 
 
 def test_ambiguity_does_not_blow_up():
