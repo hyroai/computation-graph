@@ -121,7 +121,7 @@ def computation_trace(
 ):
     gviz = union_graphviz(
         [
-            computation_graph_to_graphviz(graph_instance),
+            computation_graph_to_graphviz(graph_instance.edges),
             computation_trace_to_graphviz(
                 gamla.pipe(node_to_results, dict.items, frozenset)
             ),
