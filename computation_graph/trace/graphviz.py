@@ -44,9 +44,9 @@ def _handle_edge(pgv_graph, edge):
             )
 
 
-def computation_graph_to_graphviz(edges: base_types.GraphType) -> pgv.AGraph:
+def computation_graph_to_graphviz(graph: base_types.GraphType) -> pgv.AGraph:
     pgv_graph = pgv.AGraph(directed=True)
-    for edge in edges:
+    for edge in graph.edges:
         _handle_edge(pgv_graph, edge)
     return pgv_graph
 
