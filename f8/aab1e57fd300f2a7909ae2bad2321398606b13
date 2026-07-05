@@ -1,0 +1,29 @@
+computation_graph/run.py
+  s_44f9d428cbb3e9::t_ac6c630609dd73 524-525
+  s_44f9d428cbb3e9::t_5e8f059f69d63a 31
+  s_44f9d428cbb3e9::t_04607d87c17ca8 183-185,210-212,217,237,259,295-297,494,498
+  s_44f9d428cbb3e9::t_244e444c4875ca 209,219-224
+  s_44f9d428cbb3e9::t_f72971310ca1a7 481-490
+  s_44f9d428cbb3e9::t_8b52d2275f26b9 242-249
+computation_graph/sync_fusion_test.py
+  s_44f9d428cbb3e9::t_b8c5c56925568a 11,13
+  s_44f9d428cbb3e9::t_d0b14e7ac53878 63
+computation_graph/sync_fusion.py
+  s_44f9d428cbb3e9::t_43b6c73295eafe 1-330
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "f8aab1e57fd300f2a7909ae2bad2321398606b13",
+  "prompts": {},
+  "sessions": {
+    "s_44f9d428cbb3e9": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "db2d8f70-bb00-4e9e-bdf0-9d2c3e56af20",
+        "model": "claude-fable-5"
+      },
+      "human_author": "Yinon Eliraz <yinon.e@hyro.ai>"
+    }
+  }
+}
