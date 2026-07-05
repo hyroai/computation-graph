@@ -1,0 +1,40 @@
+computation_graph/sync_fusion_test.py
+  s_44f9d428cbb3e9::t_d5ec6dffdaa69b 1-302,325-365
+  s_44f9d428cbb3e9::t_7f014d647fd200 303-324
+computation_graph/run.py
+  s_44f9d428cbb3e9::t_83d8fe25a659d0 593-600,603-623,625,634-646,649-668
+  s_44f9d428cbb3e9::t_c371ad44627b62 725-726,738-740
+  s_44f9d428cbb3e9::t_39a53392b32c72 753,757,783-788
+  s_44f9d428cbb3e9::t_a0ed6cb60cd25a 41-110
+  s_44f9d428cbb3e9::t_6470ea037c9014 2
+  s_44f9d428cbb3e9::t_68bf960382688d 253,255
+  s_44f9d428cbb3e9::t_be7ecf3a311f36 397-403
+  s_44f9d428cbb3e9::t_1ea0ea93136c2c 587-592,602,624,626-633,648,669-724,727-737,741-750
+  s_44f9d428cbb3e9::t_4d301f01f34e3e 283-291
+  s_44f9d428cbb3e9::t_b12f506bec51ad 305,310-333,341,348-365
+  s_44f9d428cbb3e9::t_73385efc663629 366-367
+  s_44f9d428cbb3e9::t_cf3cca18931064 751-752
+computation_graph/base_types.py
+  s_44f9d428cbb3e9::t_8a779bba80f480 12-15
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "c81a40020b13ab732ae026b3bcbda70d9ca00cc4",
+  "prompts": {},
+  "humans": {
+    "h_738e1775e47e41": {
+      "author": "Yinon Eliraz <yinon.e@hyro.ai>"
+    }
+  },
+  "sessions": {
+    "s_44f9d428cbb3e9": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "db2d8f70-bb00-4e9e-bdf0-9d2c3e56af20",
+        "model": "claude-fable-5"
+      },
+      "human_author": "Yinon Eliraz <yinon.e@hyro.ai>"
+    }
+  }
+}
