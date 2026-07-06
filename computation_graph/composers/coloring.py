@@ -22,7 +22,7 @@ skills / routes / effects.
 from __future__ import annotations
 
 import collections
-from typing import Any, Callable, Dict, FrozenSet, Mapping
+from typing import Any, Callable, Dict, FrozenSet, Mapping, Optional
 
 from computation_graph import base_types, composers, graph, run
 
@@ -221,15 +221,33 @@ def observer(result: base_types.GraphType, inner: Callable) -> base_types.GraphT
 # then returns the value's own PREVIOUS (a future self-edge) instead of the absent
 # default, so it persists across the pruned turn.
 # --------------------------------------------------------------------------- #
+class _Pruned:
+    """Sentinel the latch guard yields when `current`'s producer was PRUNED this
+    turn (produced nothing). Distinct from any domain value -- in particular from a
+    domain-level "unknown" a producer that RAN can legitimately return. Private:
+    `carry_forward` translates it before any consumer sees it."""
+
+    def __repr__(self):
+        return "_Pruned()"
+
+
+_PRUNED = _Pruned()
+
+
 def latch(
     current: base_types.CallableOrNodeOrGraph,
     *,
-    present: Callable[[Any], bool],
+    present: Optional[Callable[[Any], bool]] = None,
     default: Any,
 ) -> base_types.GraphType:
-    """Carry `current` forward across turns it is absent. `present(value)` decides
-    whether this turn's value is real (else fall back to `previous`); `default` is
-    the value before any turn has produced one. The latch node + the
+    """Carry `current` forward across turns it is absent. A PRUNED producer (its
+    color inactive this turn) always falls back to `previous`. `present(value)`, if
+    given, additionally treats this turn's PRODUCED value as absent when false --
+    callers whose produced values encode absence (e.g. a consume terminal's
+    all-exposers-pruned sentinel) use it; omit it to latch on pruning ONLY, letting
+    a produced domain-unknown pass through exactly as the always-run baseline would
+    deliver it (latching over it would resurrect a stale value). `default` is the
+    value before any turn has produced one. The latch node + the
     `when_memory_unavailable` default node its future self-edge creates are pinned
     CORE (they are shared carry-forward machinery that must run every turn) so the
     per-color sweep can't mis-color them; `current`'s own subgraph stays
@@ -237,22 +255,26 @@ def latch(
     onto it."""
 
     def carry_forward(current, previous):
-        return current if present(current) else previous
+        if current is _PRUNED:
+            return previous
+        return previous if present is not None and not present(current) else current
 
     def latched(value):  # pass-through: a future-edge-FREE sink, so consumers and
         return value  # `sink_excluding_terminals` resolve cleanly (carry_forward's
         # own future self-edge would otherwise leave the graph with no plain leaf).
 
     def latch_default():
-        return default
+        return _PRUNED
 
-    # `current` enters through a TOLERANT frontier (make_first + a default
-    # fallback): a pruned producer yields `default` (-> not `present` -> previous)
-    # instead of STARVING the pinned carry_forward. Without this guard, a colored
-    # `current` at the pinned-intolerant frontier is caught by the must-run closure,
-    # which forces its whole input cone always-on -- pruning collapses (measured:
-    # bon_secours prunable 50k -> 26k, greeting 257ms -> 11s). A terminal `current`
-    # (the var-bus consume) is already tolerant; the guard is harmless there.
+    # `current` enters through a TOLERANT frontier (make_first + a sentinel
+    # fallback): a pruned producer yields `_PRUNED` (-> previous) instead of
+    # STARVING the pinned carry_forward. Without this guard, a colored `current` at
+    # the pinned-intolerant frontier is caught by the must-run closure, which
+    # forces its whole input cone always-on -- pruning collapses (measured:
+    # bon_secours prunable 50k -> 26k, greeting 257ms -> 11s). The sentinel (not
+    # `default`) is what lets pruned be distinguished from ran-and-returned-unknown.
+    # A terminal `current` (the var-bus consume) is already tolerant; the guard is
+    # harmless there.
     guarded_current = composers.make_first(current, latch_default)
     self_edge = composers.compose_left_future(
         carry_forward, carry_forward, "previous", default

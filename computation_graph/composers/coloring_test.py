@@ -201,3 +201,34 @@ def test_latch_survives_pruned_producer():
 
     assert r2[graph.make_computation_node(use_b)] == WANT
     assert calls == ["A", "B"]  # A ran once (turn 1), B ran once (turn 2)
+
+
+def test_latch_distinguishes_pruned_from_ran_unknown():
+    # present OMITTED -> latch on pruning only: a producer that RUNS and returns a
+    # domain-unknown passes it through (the baseline would deliver it); latching
+    # over it would resurrect a stale earlier value.
+    UNKNOWN = "UNKNOWN"
+
+    def expose_a(utterance):  # colored {A}: echoes the utterance as the value
+        return utterance
+
+    def use_b(v):  # core consumer of the latched value
+        return ("B", v)
+
+    u = graph.make_source()
+    expose_graph = composers.compose_left_future(u, expose_a, None, None)
+    coloring.add_colors(frozenset({"A"}), expose_graph)
+    latched = coloring.latch(expose_graph, default=UNKNOWN)
+    use_graph = composers.compose_left_unary(latched, use_b)
+    g = graph.merge_graphs(expose_graph, use_graph, sink_node_or_graph=use_graph)
+    f = run.to_callable_with_coloring(g, frozenset())
+    use_node = graph.make_computation_node(use_b)
+
+    r1 = f({}, {u: "phone:555"}, frozenset({"A"}))  # A runs, real value
+    assert r1[use_node] == ("B", "phone:555")
+    r2 = f(r1, {u: "ignored"}, frozenset())  # A PRUNED -> previous survives
+    assert r2[use_node] == ("B", "phone:555")
+    r3 = f(r2, {u: UNKNOWN}, frozenset({"A"}))  # A RUNS, returns unknown ->
+    assert r3[use_node] == ("B", UNKNOWN)  # passes through, NOT the stale value
+    r4 = f(r3, {u: "ignored"}, frozenset())  # pruned again -> carries the unknown
+    assert r4[use_node] == ("B", UNKNOWN)  # (what the last live run delivered)
