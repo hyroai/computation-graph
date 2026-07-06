@@ -1,6 +1,6 @@
 import asyncio
+import dataclasses
 import functools
-import inspect
 from typing import Dict
 
 import gamla
@@ -35,23 +35,27 @@ def _duplicate_computation_edge(get_duplicated_node):
     )
 
 
-_duplicate_node = gamla.compose_left(
-    base_types.node_implementation,
-    gamla.when(
-        gamla.compose_left(inspect.signature, gamla.attrgetter("parameters"), len),
-        duplicate_function,
-    ),
-    graph.make_computation_node,
-)
+def _signature_is_empty(signature: base_types.NodeSignature) -> bool:
+    return not (
+        signature.kwargs
+        or signature.optional_kwargs
+        or signature.is_args
+        or signature.is_kwargs
+    )
+
+
+def _duplicate_node(node: base_types.ComputationNode) -> base_types.ComputationNode:
+    if _signature_is_empty(node.signature):
+        return node
+    inner = duplicate_function(node.func)
+    return dataclasses.replace(node, name=inner.__name__, func=inner)
+
 
 duplicate_node = _duplicate_node
 
-_node_to_duplicated_node = gamla.compose_left(
-    gamla.remove(base_types.node_is_terminal),
-    gamla.map(gamla.pair_right(_duplicate_node)),
-    dict,
-    gamla.dict_to_getter_with_default(None),
-)
+
+def _node_to_duplicated_node(nodes):
+    return {node: _duplicate_node(node) for node in nodes if not node.is_terminal}.get
 
 
 def duplicate_graph(original: base_types.GraphType) -> base_types.GraphType:
@@ -90,35 +94,64 @@ def safe_replace_sources(
     if not len(source_to_replacement_dict):
         return cg
 
-    source_to_replacement_dict = gamla.keymap(graph.make_computation_node)(
-        source_to_replacement_dict
+    source_to_replacement_dict = gamla.pipe(
+        source_to_replacement_dict,
+        gamla.keymap(graph.make_computation_node),
+        gamla.valmap(
+            gamla.unless(
+                gamla.is_instance(base_types.GraphType), graph.make_computation_node
+            )
+        ),
     )
-    reachable_to_duplicate_map = gamla.pipe(
+    get_duplicate = gamla.pipe(
         gamla.graph_traverse_many(
             source_to_replacement_dict.keys(), graph.traverse_forward(cg.edges)
         ),
         gamla.remove(gamla.contains(source_to_replacement_dict.keys())),
         _node_to_duplicated_node,
     )
-    get_node_replacement = gamla.compose_left(
-        gamla.lazyjuxt(
-            gamla.dict_to_getter_with_default(None)(source_to_replacement_dict),
-            reachable_to_duplicate_map,
-            gamla.identity,
-        ),
-        gamla.find(gamla.identity),
-    )
 
-    def update_edge(e: base_types.ComputationEdge) -> base_types.GraphType:
-        dest = base_types.edge_destination(e)
-        g = graph.replace_node(dest, get_node_replacement(dest))(
-            base_types.GraphType(edges=frozenset((e,)), sink=dest)
-        )
-        for source in base_types.edge_sources(e):
-            g = graph.replace_source(source, get_node_replacement(source), g)
-        return g
+    def node_replacement(node):
+        replacement = source_to_replacement_dict.get(node)
+        if replacement is not None:
+            return replacement
+        duplicate = get_duplicate(node)
+        return duplicate if duplicate is not None else node
+
+    replacement_graphs_edges = {}
+
+    def source_replacement(node):
+        replacement = node_replacement(node)
+        if isinstance(replacement, base_types.GraphType):
+            replacement_graphs_edges[id(replacement)] = replacement.edges
+            return replacement.sink
+        return replacement
+
+    new_edges = []
+    for edge in cg.edges:
+        destination = node_replacement(edge.destination)
+        if edge.args:
+            args = tuple(source_replacement(arg) for arg in edge.args)
+            if destination is edge.destination and all(
+                new is old for new, old in zip(args, edge.args)
+            ):
+                new_edges.append(edge)
+            else:
+                new_edges.append(
+                    dataclasses.replace(edge, args=args, destination=destination)
+                )
+        else:
+            source = source_replacement(edge.source)
+            if source is edge.source and destination is edge.destination:
+                new_edges.append(edge)
+            else:
+                new_edges.append(
+                    dataclasses.replace(edge, source=source, destination=destination)
+                )
 
     return base_types.GraphType(
-        edges=frozenset(edge for e in cg.edges for edge in update_edge(e).edges),
-        sink=get_node_replacement(cg.sink),
+        edges=base_types.merge_edges(
+            frozenset(new_edges), *replacement_graphs_edges.values()
+        ),
+        sink=node_replacement(cg.sink),
     )
