@@ -286,44 +286,36 @@ def _infer_composition_edges(
     unbound_signature = graph.unbound_signature(
         graph.get_incoming_edges_for_node(destination.edges)
     )
+    source_nodes = (
+        graph.get_all_nodes(source.edges)
+        if isinstance(source, GraphType)
+        else frozenset()
+    )
+    skip_cycle_check = isinstance(source, base_types.ComputationNode)
+    new_edges = set()
+    # The connectable-node set is order-independent (result is a frozenset), so we
+    # can iterate the cached node set instead of rescanning the edges.
+    for node in graph.get_all_nodes(destination.edges):
+        node_signature = unbound_signature(node)
+        if not (
+            key in node_signature.kwargs
+            or (key is None and signature.is_unary(node_signature))
+        ):
+            continue
+        # Do not add edges to nodes from source that are already present in destination (cycle).
+        if not skip_cycle_check and node in source_nodes:
+            continue
+        new_edges.add(
+            try_connect(destination=node, unbound_destination_signature=node_signature)
+        )
+    if not new_edges:
+        raise AssertionError(
+            f"Cannot compose, destination signature does not contain key '{key}'"
+        )
     return graph.merge_graphs(
-        gamla.sync.pipe(
-            destination,
-            gamla.attrgetter("edges"),
-            gamla.sync.mapcat(graph.get_edge_nodes),
-            gamla.unique,
-            gamla.sync.filter(
-                gamla.sync.compose_left(
-                    unbound_signature,
-                    lambda sig: key in sig.kwargs
-                    or (key is None and signature.is_unary(sig)),
-                )
-            ),
-            # Do not add edges to nodes from source that are already present in destination (cycle).
-            gamla.sync.filter(
-                lambda node: isinstance(source, base_types.ComputationNode)
-                or node
-                not in graph.get_all_nodes(
-                    source.edges if isinstance(source, GraphType) else source
-                )
-            ),
-            gamla.sync.map(
-                lambda destination_node: try_connect(
-                    destination=destination_node,
-                    unbound_destination_signature=unbound_signature(destination_node),
-                )
-            ),
-            frozenset,
-            gamla.sync.check(
-                gamla.identity,
-                AssertionError(
-                    f"Cannot compose, destination signature does not contain key '{key}'"
-                ),
-            ),
-            # Sink is a placeholder here; `merge_graphs` below sets the real sink
-            # via `sink_node_or_graph`.
-            lambda edges: GraphType(edges, None),  # type: ignore[arg-type]
-        ),
+        # Sink is a placeholder here; `merge_graphs` below sets the real sink
+        # via `sink_node_or_graph`.
+        GraphType(frozenset(new_edges), None),  # type: ignore[arg-type]
         _get_edges_from_node_or_graph(source),
         destination,
         sink_node_or_graph=_determine_sink(source, destination, is_future),
