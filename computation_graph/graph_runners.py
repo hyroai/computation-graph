@@ -1,4 +1,4 @@
-import inspect
+import asyncio
 from typing import Callable, Union
 
 import gamla
@@ -77,7 +77,7 @@ def unary_with_state_and_expectations(
 def variadic_with_state_and_expectations(g, sink):
     f = run.to_callable_strict(g)
 
-    if inspect.iscoroutinefunction(f):
+    if asyncio.iscoroutinefunction(f):
 
         async def inner(turns):
             prev = {}

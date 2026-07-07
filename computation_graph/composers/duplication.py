@@ -1,6 +1,6 @@
+import asyncio
 import dataclasses
 import functools
-import inspect
 from typing import Dict
 
 import gamla
@@ -10,7 +10,7 @@ from computation_graph.composers import debug
 
 
 def duplicate_function(func):
-    if inspect.iscoroutinefunction(func):
+    if asyncio.iscoroutinefunction(func):
 
         @functools.wraps(func)
         async def inner(*args, **kwargs):

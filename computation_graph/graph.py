@@ -1,6 +1,6 @@
 import dataclasses
 import functools
-from typing import Callable, Dict, FrozenSet, Iterable, Optional, Tuple
+from typing import Callable, Dict, FrozenSet, Optional, Tuple
 
 import gamla
 from gamla.optimized import sync as opt_gamla
@@ -64,17 +64,11 @@ def make_computation_node(
     )
 
 
-_EMPTY_EDGE_SET: FrozenSet[base_types.ComputationEdge] = frozenset()
-
-
-def get_incoming_edges_for_node(
-    edges: Iterable[base_types.ComputationEdge],
-) -> Callable[[base_types.ComputationNode], FrozenSet[base_types.ComputationEdge]]:
-    grouped: Dict[base_types.ComputationNode, list] = {}
-    for edge in edges:
-        grouped.setdefault(edge.destination, []).append(edge)
-    node_to_edges = {node: frozenset(group) for node, group in grouped.items()}
-    return lambda node: node_to_edges.get(node, _EMPTY_EDGE_SET)
+get_incoming_edges_for_node = opt_gamla.compose_left(
+    opt_gamla.groupby(base_types.edge_destination),
+    opt_gamla.valmap(frozenset),
+    gamla.dict_to_getter_with_default(frozenset()),
+)
 
 
 get_terminals = opt_gamla.compose_left(
@@ -101,24 +95,30 @@ def make_terminal(name: str, func: Callable) -> base_types.ComputationNode:
     )
 
 
+_keep_not_in_bound_kwargs = opt_gamla.compose_left(
+    opt_gamla.map(base_types.edge_key),
+    gamla.filter(gamla.identity),
+    frozenset,
+    gamla.contains,
+    gamla.remove,
+)
+
+
 @gamla.curry
 def unbound_signature(
     node_to_incoming_edges, node: base_types.ComputationNode
 ) -> base_types.NodeSignature:
     """Computes the new signature of unbound variables after considering internal edges."""
     incoming_edges = node_to_incoming_edges(node)
-    bound_keys = {edge.key for edge in incoming_edges if edge.key}
-    node_signature = node.signature
+    keep_not_in_bound_kwargs = _keep_not_in_bound_kwargs(incoming_edges)
     return base_types.NodeSignature(
-        is_kwargs=node_signature.is_kwargs
-        and all(edge.key != "**kwargs" for edge in incoming_edges)
-        and signature.is_unary(node_signature),
-        is_args=node_signature.is_args
+        is_kwargs=node.signature.is_kwargs
+        and "**kwargs" not in tuple(opt_gamla.map(base_types.edge_key)(incoming_edges))
+        and signature.is_unary(node.signature),
+        is_args=node.signature.is_args
         and not any(edge.args for edge in incoming_edges),
-        kwargs=tuple(k for k in node_signature.kwargs if k not in bound_keys),
-        optional_kwargs=tuple(
-            k for k in node_signature.optional_kwargs if k not in bound_keys
-        ),
+        kwargs=tuple(keep_not_in_bound_kwargs(node.signature.kwargs)),
+        optional_kwargs=tuple(keep_not_in_bound_kwargs(node.signature.optional_kwargs)),
     )
 
 
@@ -361,20 +361,28 @@ def merge_graphs(
         isinstance(x, base_types.GraphType) for x in graphs
     ), f"{graphs} not a graph"
     assert (
-        not isinstance(sink_node_or_graph, base_types.GraphType)
-        or not sink_node_or_graph.edges
+        not base_types.is_computation_graph(sink_node_or_graph)
         or sink_node_or_graph in graphs
     ), "sink graph must be one of the graphs being merged"
 
-    new_g = base_types.GraphType(
-        base_types.merge_edges(
-            *(g.edges for g in graphs if g != base_types.EMPTY_GRAPH)
+    new_g = gamla.pipe(
+        graphs,
+        gamla.remove(gamla.equals(base_types.EMPTY_GRAPH)),
+        tuple,
+        gamla.pair_right(
+            gamla.just(
+                sink_node_or_graph.sink
+                if isinstance(sink_node_or_graph, base_types.GraphType)
+                else sink_node_or_graph
+            )
         ),
-        (
-            sink_node_or_graph.sink
-            if isinstance(sink_node_or_graph, base_types.GraphType)
-            else sink_node_or_graph
+        gamla.packstack(
+            gamla.compose_left(
+                gamla.map(gamla.attrgetter("edges")), gamla.star(base_types.merge_edges)
+            ),
+            gamla.identity,
         ),
+        gamla.star(base_types.GraphType),
     )
 
     if base_types.is_debug_mode():
