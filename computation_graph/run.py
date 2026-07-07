@@ -109,7 +109,7 @@ _is_graph_async = opt_gamla.compose_left(
     opt_gamla.mapcat(lambda edge: (edge.source, *edge.args)),
     opt_gamla.remove(gamla.equals(None)),
     opt_gamla.map(base_types.node_implementation),
-    gamla.anymap(asyncio.iscoroutinefunction),
+    gamla.anymap(inspect.iscoroutinefunction),
 )
 
 
@@ -452,7 +452,7 @@ def _make_get_node_executor(
         return result
 
     all_nodes = graph.get_all_nodes(edges)
-    async_nodes = {n for n in all_nodes if asyncio.iscoroutinefunction(n.func)}
+    async_nodes = {n for n in all_nodes if inspect.iscoroutinefunction(n.func)}
     sync = all_nodes - async_nodes
     tf = graph.traverse_forward(edges)
     downstream_from_async = set(gamla.graph_traverse_many(async_nodes, tf))
@@ -572,7 +572,9 @@ to_callable = to_callable_with_side_effect(gamla.just(gamla.just(None)))
 
 
 def _node_is_properly_composed(
-    node_to_incoming_edges: base_types.GraphType,
+    node_to_incoming_edges: Callable[
+        [base_types.ComputationNode], FrozenSet[base_types.ComputationEdge]
+    ]
 ) -> Callable[[base_types.ComputationNode], bool]:
     return gamla.compose_left(
         graph.unbound_signature(node_to_incoming_edges),
@@ -581,7 +583,7 @@ def _node_is_properly_composed(
     )
 
 
-def _assert_composition_is_valid(g: base_types.GraphType):
+def _assert_composition_is_valid(g: typing.Iterable[base_types.ComputationEdge]):
     return opt_gamla.pipe(
         g,
         graph.get_all_nodes,
