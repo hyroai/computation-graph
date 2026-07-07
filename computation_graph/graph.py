@@ -1,6 +1,6 @@
 import dataclasses
 import functools
-from typing import Callable, Dict, FrozenSet, Optional, Tuple
+from typing import Callable, Dict, FrozenSet, Iterable, Optional, Tuple
 
 import gamla
 from gamla.optimized import sync as opt_gamla
@@ -68,7 +68,7 @@ _EMPTY_EDGE_SET: FrozenSet[base_types.ComputationEdge] = frozenset()
 
 
 def get_incoming_edges_for_node(
-    edges: FrozenSet[base_types.ComputationEdge],
+    edges: Iterable[base_types.ComputationEdge],
 ) -> Callable[[base_types.ComputationNode], FrozenSet[base_types.ComputationEdge]]:
     grouped: Dict[base_types.ComputationNode, list] = {}
     for edge in edges:
