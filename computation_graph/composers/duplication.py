@@ -51,9 +51,6 @@ def _duplicate_node(node: base_types.ComputationNode) -> base_types.ComputationN
     return dataclasses.replace(node, name=inner.__name__, func=inner)
 
 
-duplicate_node = _duplicate_node
-
-
 def _node_to_duplicated_node(nodes):
     return {node: _duplicate_node(node) for node in nodes if not node.is_terminal}.get
 
