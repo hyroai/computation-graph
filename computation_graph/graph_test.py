@@ -1000,6 +1000,33 @@ def test_replace_node():
     )
 
 
+@pytest.mark.parametrize(
+    "node_map",
+    [
+        pytest.param({}, id="empty map is a no-op"),
+        pytest.param({_node1: _node1_async}, id="single node"),
+        pytest.param({_node1: _node1_async, _node2: _next_int}, id="multiple nodes"),
+        pytest.param({(lambda x: x): _node1_async}, id="node not in graph is a no-op"),
+    ],
+)
+def test_replace_nodes(node_map: Dict):
+    a = graph.make_source()
+    g = graph.merge_graphs(
+        composers.compose_source_unary(_node1, a),
+        composers.compose_left_unary(_node1, _node2),
+        sink_node_or_graph=graph.make_computation_node(_node2),
+    )
+    node_map = gamla.pipe(
+        node_map,
+        gamla.keymap(graph.make_computation_node),
+        gamla.valmap(graph.make_computation_node),
+    )
+    expected = g
+    for original, replacement in node_map.items():
+        expected = graph.replace_node(original, replacement)(expected)
+    assert graph.replace_nodes(node_map)(g) == expected
+
+
 def test_ambig_edges_assertion_in_merge_graphs_active_only_when_env_var_is_active(
     monkeypatch,
 ):
