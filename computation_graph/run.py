@@ -205,6 +205,16 @@ class ChangeActiveColors:
     colors: FrozenSet
 
 
+# The reserved results key under which the colored runner records the turn's SETTLED
+# effective active-color set (the union the restart loop converged on). Callers that
+# persist state across turns should carry this value forward as the NEXT run's seed
+# `active_colors`: it survives the restart intact, unlike any single declarer node,
+# which is color-dependent and prunes when the settled colors differ from its own
+# declaration (e.g. a mid-flow route change -> the new skill's declarer prunes under
+# the newly-active color, so its declaration is lost). Domain-agnostic: just colors.
+EFFECTIVE_ACTIVE_COLORS_KEY = "__cg_effective_active_colors__"
+
+
 class ColorDeclarationsDidNotConverge(Exception):
     """The unioned `ChangeActiveColors` declarations cycled back to an active set
     this run already had -- the declarations depend on the active colors themselves,
@@ -725,6 +735,10 @@ async def _run_graph_async(
                 del node_to_task_or_result
                 del unhandled_exception
                 raise e from e
+    if color_dependent:
+        # Record the SETTLED active set so the caller can seed it next turn (see
+        # EFFECTIVE_ACTIVE_COLORS_KEY): survives restarts that the declarer nodes do not.
+        node_to_task_or_result[EFFECTIVE_ACTIVE_COLORS_KEY] = ChangeActiveColors(active)
     return node_to_task_or_result
 
 
@@ -770,6 +784,10 @@ def _run_graph(
         # A new color set was declared -> start over with it.
         active = observed
         _drop_color_dependent(accumulated_results, color_dependent)
+    if color_dependent:
+        # Record the SETTLED active set so the caller can seed it next turn (see
+        # EFFECTIVE_ACTIVE_COLORS_KEY): survives restarts that the declarer nodes do not.
+        accumulated_results[EFFECTIVE_ACTIVE_COLORS_KEY] = ChangeActiveColors(active)
     return accumulated_results
 
 
