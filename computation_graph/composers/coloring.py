@@ -31,6 +31,16 @@ _EMPTY_ATTR = "__cg_empty__"
 _OBSERVER_ATTR = "__cg_observer__"
 _UNSET = object()
 
+# Every func stamped by `_tag_func` is registered here so `reset_colors` can strip
+# the tags again. Colors live on the process-global `func.__dict__` (so they ride
+# `duplicate_function`), and MANY funcs are shared BY REFERENCE across bot builds
+# (generic gamla combinators, module-level slot/configurable definitions built once
+# at import). Without a reset, a bot built earlier stamps these shared objects and a
+# bot built LATER inherits the foreign colors -> mis-pruning. The registry lets each
+# build start from a clean slate; see `reset_colors`.
+_TAGGED_FUNCS: set = set()
+_TAG_ATTRS = (_ORIGIN_ATTR, _EMPTY_ATTR, _OBSERVER_ATTR)
+
 
 # --------------------------------------------------------------------------- #
 # Node selection: sources are caller-seeded and terminals are sinks; neither is
@@ -87,10 +97,31 @@ def _tag_func(func, attr: str, value) -> None:
     # The one guarded stamp: write `attr = value` onto the func's __dict__ so it rides
     # `duplicate_function` (functools.wraps copies __dict__). No-op on an un-taggable
     # builtin / C callable -> it stays tag-less, which the readers treat as core.
+    # Register the func so `reset_colors` can strip every tag it received at the next
+    # build's start (tags leak across builds on shared-by-reference funcs otherwise).
     try:
         setattr(func, attr, value)
     except (AttributeError, TypeError):
-        pass
+        return
+    _TAGGED_FUNCS.add(func)
+
+
+def reset_colors() -> None:
+    """Strip every color/empty/observer tag stamped since the last reset, and forget
+    the funcs that carried them. Call ONCE at the START of each bot build -- before
+    any `add_colors` / `pin_core` / `observer` sweep and before graph construction --
+    so tags stamped by an EARLIER build cannot leak onto shared-by-reference funcs a
+    LATER build reuses (the process-global-`__dict__` contamination). Idempotent; a
+    build that never colored is unaffected. Deliberately NOT called mid-build: a
+    multi-skill bot compiles many subgraphs and clearing between them would leave the
+    later compiles uncolored."""
+    for func in _TAGGED_FUNCS:
+        for attr in _TAG_ATTRS:
+            try:
+                delattr(func, attr)
+            except AttributeError:
+                pass
+    _TAGGED_FUNCS.clear()
 
 
 def add_colors(

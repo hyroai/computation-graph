@@ -71,6 +71,45 @@ def test_pin_core_func_is_absorbing():
     assert colors[graph.make_computation_node(private)] == frozenset({"skill-X"})
 
 
+def test_reset_colors_prevents_cross_build_contamination():
+    # `shared` is a build-once, shared-by-reference func (a generic combinator or a
+    # module-level slot def): an EARLIER build colors it, a LATER build reuses the
+    # SAME object. Without reset, the later build inherits the earlier build's color.
+    def shared(x):
+        return x
+
+    # --- build 1 (the "poison" bot) colors the shared func ---
+    build1 = composers.compose_left_unary(graph.make_source(), shared)
+    coloring.add_colors(frozenset({"poison"}), build1)
+    assert getattr(shared, coloring._ORIGIN_ATTR, None) == frozenset({"poison"})
+
+    # --- build 2 starts: reset wipes tags off every shared-by-reference func ---
+    coloring.reset_colors()
+    assert not hasattr(shared, coloring._ORIGIN_ATTR)
+    assert not coloring._TAGGED_FUNCS
+
+    # build 2 (a goal bot that colors nothing itself) reuses `shared` -> stays core.
+    build2 = composers.compose_left_unary(graph.make_source(), shared)
+    assert graph.make_computation_node(shared) not in coloring._read_colors(build2)
+
+
+def test_reset_colors_clears_empty_and_observer_tags():
+    def f(x):
+        return x
+
+    coloring._pin_core_func(f)
+    coloring.tag_empty("EMPTY", composers.compose_left_unary(graph.make_source(), f))
+    coloring._mark_observer(f)
+    assert hasattr(f, coloring._ORIGIN_ATTR)
+    assert hasattr(f, coloring._EMPTY_ATTR)
+    assert hasattr(f, coloring._OBSERVER_ATTR)
+
+    coloring.reset_colors()
+    assert not hasattr(f, coloring._ORIGIN_ATTR)
+    assert not hasattr(f, coloring._EMPTY_ATTR)
+    assert not hasattr(f, coloring._OBSERVER_ATTR)
+
+
 # --------------------------------------------------------------------------- #
 # Tier 2: build_node_activation_from_edges (tags -> activation)
 # --------------------------------------------------------------------------- #
