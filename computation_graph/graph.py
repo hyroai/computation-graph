@@ -1,6 +1,6 @@
 import dataclasses
 import functools
-from typing import Callable, FrozenSet, Optional, Tuple
+from typing import Callable, Dict, FrozenSet, Optional, Tuple
 
 import gamla
 from gamla.optimized import sync as opt_gamla
@@ -229,6 +229,45 @@ def replace_node(
         replace_source(original, replacement),
         replace_destination(original, replacement),
     )
+
+
+def replace_nodes(
+    node_map: Dict[base_types.ComputationNode, base_types.ComputationNode]
+) -> Callable[[base_types.GraphType], base_types.GraphType]:
+    """Replace many nodes at once (sources, destinations and sink) in a single pass."""
+
+    def replace_nodes(g: base_types.GraphType) -> base_types.GraphType:
+        if not node_map:
+            return g
+        new_edges = []
+        for edge in g.edges:
+            destination = node_map.get(edge.destination, edge.destination)
+            if edge.args:
+                args = tuple(node_map.get(arg, arg) for arg in edge.args)
+                if destination is edge.destination and all(
+                    new is old for new, old in zip(args, edge.args)
+                ):
+                    new_edges.append(edge)
+                else:
+                    new_edges.append(
+                        dataclasses.replace(edge, args=args, destination=destination)
+                    )
+            else:
+                assert edge.source is not None
+                source = node_map.get(edge.source, edge.source)
+                if source is edge.source and destination is edge.destination:
+                    new_edges.append(edge)
+                else:
+                    new_edges.append(
+                        dataclasses.replace(
+                            edge, source=source, destination=destination
+                        )
+                    )
+        return base_types.GraphType(
+            edges=frozenset(new_edges), sink=node_map.get(g.sink, g.sink)
+        )
+
+    return replace_nodes
 
 
 def transform_edges(
