@@ -26,20 +26,27 @@ from typing import Any, Callable, Dict, FrozenSet, Mapping, Optional
 
 from computation_graph import base_types, composers, graph, run
 
+# The three "tags" are kept in PROCESS-LOCAL MAPS keyed by the func object, NOT on
+# `func.__dict__`. `_ORIGIN_ATTR` etc. survive only as the map selectors below.
 _ORIGIN_ATTR = "__cg_origin__"
 _EMPTY_ATTR = "__cg_empty__"
 _OBSERVER_ATTR = "__cg_observer__"
 _UNSET = object()
 
-# Every func stamped by `_tag_func` is registered here so `reset_colors` can strip
-# the tags again. Colors live on the process-global `func.__dict__` (so they ride
-# `duplicate_function`), and MANY funcs are shared BY REFERENCE across bot builds
-# (generic gamla combinators, module-level slot/configurable definitions built once
-# at import). Without a reset, a bot built earlier stamps these shared objects and a
-# bot built LATER inherits the foreign colors -> mis-pruning. The registry lets each
-# build start from a clean slate; see `reset_colors`.
-_TAGGED_FUNCS: set = set()
-_TAG_ATTRS = (_ORIGIN_ATTR, _EMPTY_ATTR, _OBSERVER_ATTR)
+# Colors used to be stamped on the process-global `func.__dict__`. That leaked across
+# bot builds (shared-by-reference funcs -- generic combinators, module-level slot defs
+# -- carried an earlier build's colors into a later one), and clearing the tags per
+# build was ruinously slow under the test runner, which instruments every `__dict__`
+# mutation for dependency tracking (tens of thousands of mutations per build).
+#
+# Instead we keep the tags in module-level MAPS keyed by func. `reset_colors` drops
+# them in O(1) with ZERO per-func mutation, so each build starts clean and nothing
+# touches the shared func objects. Provenance still survives `duplicate_function`:
+# functools.wraps sets `inner.__wrapped__ = original`, so `_resolve` walks the
+# __wrapped__ chain to recover a duplicate's tag from the original it was copied from.
+_COLOR_MAP: Dict = {}  # func -> frozenset(colors)  |  _CORE
+_EMPTY_MAP: Dict = {}  # func -> typed-empty value
+_OBSERVER_MAP: Dict = {}  # func -> True
 
 
 # --------------------------------------------------------------------------- #
@@ -93,35 +100,52 @@ def _sinks(graph_or_edges) -> FrozenSet[base_types.ComputationNode]:
 _CORE = "\x00cg-core"  # absorbing marker; not a usable color token
 
 
+_ATTR_TO_MAP = {
+    _ORIGIN_ATTR: _COLOR_MAP,
+    _EMPTY_ATTR: _EMPTY_MAP,
+    _OBSERVER_ATTR: _OBSERVER_MAP,
+}
+
+
 def _tag_func(func, attr: str, value) -> None:
-    # The one guarded stamp: write `attr = value` onto the func's __dict__ so it rides
-    # `duplicate_function` (functools.wraps copies __dict__). No-op on an un-taggable
-    # builtin / C callable -> it stays tag-less, which the readers treat as core.
-    # Register the func so `reset_colors` can strip every tag it received at the next
-    # build's start (tags leak across builds on shared-by-reference funcs otherwise).
+    # Record `value` for `func` in the map selected by `attr`. Keyed by the func object
+    # (no `func.__dict__` mutation). No-op on an unhashable callable -> it stays
+    # untracked, which the readers treat as core (same as the old un-taggable path).
     try:
-        setattr(func, attr, value)
-    except (AttributeError, TypeError):
-        return
-    _TAGGED_FUNCS.add(func)
+        _ATTR_TO_MAP[attr][func] = value
+    except TypeError:
+        pass
+
+
+def _resolve(func, mapping, default=None):
+    # A duplicate isn't in the map, but functools.wraps set its `__wrapped__` to the
+    # func it was copied from -- walk that chain to recover the tag the original carried
+    # (this is how tags "survive duplication" now that they live off `func.__dict__`).
+    for _ in range(64):  # depth guard against a pathological __wrapped__ cycle
+        try:
+            if func in mapping:
+                return mapping[func]
+        except TypeError:  # unhashable -> untracked
+            return default
+        func = getattr(func, "__wrapped__", None)
+        if func is None:
+            break
+    return default
 
 
 def reset_colors() -> None:
-    """Strip every color/empty/observer tag stamped since the last reset, and forget
-    the funcs that carried them. Call ONCE at the START of each bot build -- before
-    any `add_colors` / `pin_core` / `observer` sweep and before graph construction --
-    so tags stamped by an EARLIER build cannot leak onto shared-by-reference funcs a
-    LATER build reuses (the process-global-`__dict__` contamination). Idempotent; a
-    build that never colored is unaffected. Deliberately NOT called mid-build: a
-    multi-skill bot compiles many subgraphs and clearing between them would leave the
-    later compiles uncolored."""
-    for func in _TAGGED_FUNCS:
-        for attr in _TAG_ATTRS:
-            try:
-                delattr(func, attr)
-            except AttributeError:
-                pass
-    _TAGGED_FUNCS.clear()
+    """Drop every color/empty/observer tag stamped since the last reset. Call ONCE at
+    the START of each bot build -- before any `add_colors` / `pin_core` / `observer`
+    sweep and before graph construction -- so tags stamped by an EARLIER build cannot
+    leak into a LATER build that reuses the same shared-by-reference funcs (generic
+    combinators, module-level slot defs). O(1) and mutation-free (the tags live in
+    module maps, not on the funcs), so it is cheap even under a test runner that
+    instruments `__dict__` writes. Idempotent; a build that never colored is
+    unaffected. Deliberately NOT called mid-build: a multi-skill bot compiles many
+    subgraphs and clearing between them would leave the later compiles uncolored."""
+    _COLOR_MAP.clear()
+    _EMPTY_MAP.clear()
+    _OBSERVER_MAP.clear()
 
 
 def add_colors(
@@ -139,7 +163,7 @@ def add_colors(
     make_first sinks, and terminals -- which the runner merges via make_or) never
     consult it, so only the genuinely intolerant frontier needs an `empty`."""
     for node in _colorable_nodes(subgraph):
-        current = getattr(node.func, _ORIGIN_ATTR, None)
+        current = _resolve(node.func, _COLOR_MAP)
         if current == _CORE:
             continue
         _tag_func(node.func, _ORIGIN_ATTR, (current or frozenset()) | colors)
@@ -164,7 +188,7 @@ def _read_empties(
     """node -> its typed-empty, for every node whose func carries an `empty` tag."""
     out: Dict[base_types.ComputationNode, Any] = {}
     for node in graph.get_all_nodes(_edges(graph_or_edges)):
-        value = getattr(node.func, _EMPTY_ATTR, _UNSET)
+        value = _resolve(node.func, _EMPTY_MAP, _UNSET)
         if value is not _UNSET:
             out[node] = value
     return out
@@ -204,7 +228,7 @@ def _read_colors(
     """node -> its color set, for every colored node (core / untagged omitted)."""
     out = {}
     for node in graph.get_all_nodes(_edges(graph_or_edges)):
-        tag = getattr(node.func, _ORIGIN_ATTR, None)
+        tag = _resolve(node.func, _COLOR_MAP)
         if tag and tag != _CORE:
             out[node] = tag
     return out

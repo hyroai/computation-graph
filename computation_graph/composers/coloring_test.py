@@ -81,12 +81,13 @@ def test_reset_colors_prevents_cross_build_contamination():
     # --- build 1 (the "poison" bot) colors the shared func ---
     build1 = composers.compose_left_unary(graph.make_source(), shared)
     coloring.add_colors(frozenset({"poison"}), build1)
-    assert getattr(shared, coloring._ORIGIN_ATTR, None) == frozenset({"poison"})
+    assert coloring._read_colors(build1)[graph.make_computation_node(shared)] == frozenset(
+        {"poison"}
+    )
 
-    # --- build 2 starts: reset wipes tags off every shared-by-reference func ---
+    # --- build 2 starts: reset drops the color maps (no per-func mutation) ---
     coloring.reset_colors()
-    assert not hasattr(shared, coloring._ORIGIN_ATTR)
-    assert not coloring._TAGGED_FUNCS
+    assert not coloring._COLOR_MAP
 
     # build 2 (a goal bot that colors nothing itself) reuses `shared` -> stays core.
     build2 = composers.compose_left_unary(graph.make_source(), shared)
@@ -100,14 +101,15 @@ def test_reset_colors_clears_empty_and_observer_tags():
     coloring._pin_core_func(f)
     coloring.tag_empty("EMPTY", composers.compose_left_unary(graph.make_source(), f))
     coloring._mark_observer(f)
-    assert hasattr(f, coloring._ORIGIN_ATTR)
-    assert hasattr(f, coloring._EMPTY_ATTR)
-    assert hasattr(f, coloring._OBSERVER_ATTR)
+    assert coloring._resolve(f, coloring._COLOR_MAP) == coloring._CORE
+    assert coloring._resolve(f, coloring._EMPTY_MAP, coloring._UNSET) == "EMPTY"
+    assert coloring._resolve(f, coloring._OBSERVER_MAP) is True
 
     coloring.reset_colors()
-    assert not hasattr(f, coloring._ORIGIN_ATTR)
-    assert not hasattr(f, coloring._EMPTY_ATTR)
-    assert not hasattr(f, coloring._OBSERVER_ATTR)
+    assert not coloring._COLOR_MAP
+    assert not coloring._EMPTY_MAP
+    assert not coloring._OBSERVER_MAP
+    assert coloring._resolve(f, coloring._COLOR_MAP) is None
 
 
 # --------------------------------------------------------------------------- #
@@ -201,7 +203,7 @@ def test_observer_prunes_with_its_skill():
     # `memory.ever` marked it an observer, but the builder does NOT special-case
     # observers: a skill-private observer prunes WITH its skill (forcing observer cones
     # always-on was measured to drag in ~the whole graph).
-    assert getattr(ever_node.func, coloring._OBSERVER_ATTR, False)
+    assert coloring._resolve(ever_node.func, coloring._OBSERVER_MAP, False)
     assert activation.node_to_colors[ever_node] == frozenset({"A"})
 
 
