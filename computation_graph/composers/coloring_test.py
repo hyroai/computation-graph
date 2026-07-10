@@ -85,31 +85,40 @@ def test_reset_colors_prevents_cross_build_contamination():
         {"poison"}
     )
 
-    # --- build 2 starts: reset drops the color maps (no per-func mutation) ---
+    # --- build 2 starts: reset bumps the generation, invalidating the tag (no mutation) ---
     coloring.reset_colors()
-    assert not coloring._COLOR_MAP
+    assert coloring._tag_get(shared, coloring._ORIGIN_ATTR) is None
 
     # build 2 (a goal bot that colors nothing itself) reuses `shared` -> stays core.
     build2 = composers.compose_left_unary(graph.make_source(), shared)
     assert graph.make_computation_node(shared) not in coloring._read_colors(build2)
 
 
-def test_reset_colors_clears_empty_and_observer_tags():
-    def f(x):
+def test_reset_invalidates_gen_scoped_tags_but_keeps_core():
+    def colored(x):
         return x
 
-    coloring._pin_core_func(f)
-    coloring.tag_empty("EMPTY", composers.compose_left_unary(graph.make_source(), f))
-    coloring._mark_observer(f)
-    assert coloring._resolve(f, coloring._COLOR_MAP) == coloring._CORE
-    assert coloring._resolve(f, coloring._EMPTY_MAP, coloring._UNSET) == "EMPTY"
-    assert coloring._resolve(f, coloring._OBSERVER_MAP) is True
+    def core(y):
+        return y
+
+    coloring.add_colors(
+        frozenset({"A"}), composers.compose_left_unary(graph.make_source(), colored)
+    )
+    coloring.tag_empty("EMPTY", composers.compose_left_unary(graph.make_source(), colored))
+    coloring._mark_observer(colored)
+    coloring._pin_core_func(core)  # permanent
+    assert coloring._tag_get(colored, coloring._ORIGIN_ATTR) == frozenset({"A"})
+    assert coloring._tag_get(colored, coloring._EMPTY_ATTR, coloring._UNSET) == "EMPTY"
+    assert coloring._tag_get(colored, coloring._OBSERVER_ATTR, False) is True
+    assert coloring._tag_get(core, coloring._ORIGIN_ATTR) == coloring._CORE
 
     coloring.reset_colors()
-    assert not coloring._COLOR_MAP
-    assert not coloring._EMPTY_MAP
-    assert not coloring._OBSERVER_MAP
-    assert coloring._resolve(f, coloring._COLOR_MAP) is None
+    # gen-scoped tags become invisible after the generation bump...
+    assert coloring._tag_get(colored, coloring._ORIGIN_ATTR) is None
+    assert coloring._tag_get(colored, coloring._EMPTY_ATTR, coloring._UNSET) is coloring._UNSET
+    assert coloring._tag_get(colored, coloring._OBSERVER_ATTR, False) is False
+    # ...but a CORE pin is permanent (core is core in every build).
+    assert coloring._tag_get(core, coloring._ORIGIN_ATTR) == coloring._CORE
 
 
 # --------------------------------------------------------------------------- #
@@ -203,7 +212,7 @@ def test_observer_prunes_with_its_skill():
     # `memory.ever` marked it an observer, but the builder does NOT special-case
     # observers: a skill-private observer prunes WITH its skill (forcing observer cones
     # always-on was measured to drag in ~the whole graph).
-    assert coloring._resolve(ever_node.func, coloring._OBSERVER_MAP, False)
+    assert coloring._tag_get(ever_node.func, coloring._OBSERVER_ATTR, False)
     assert activation.node_to_colors[ever_node] == frozenset({"A"})
 
 

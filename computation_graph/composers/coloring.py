@@ -26,27 +26,23 @@ from typing import Any, Callable, Dict, FrozenSet, Mapping, Optional
 
 from computation_graph import base_types, composers, graph, run
 
-# The three "tags" are kept in PROCESS-LOCAL MAPS keyed by the func object, NOT on
-# `func.__dict__`. `_ORIGIN_ATTR` etc. survive only as the map selectors below.
 _ORIGIN_ATTR = "__cg_origin__"
 _EMPTY_ATTR = "__cg_empty__"
 _OBSERVER_ATTR = "__cg_observer__"
 _UNSET = object()
 
-# Colors used to be stamped on the process-global `func.__dict__`. That leaked across
-# bot builds (shared-by-reference funcs -- generic combinators, module-level slot defs
-# -- carried an earlier build's colors into a later one), and clearing the tags per
-# build was ruinously slow under the test runner, which instruments every `__dict__`
-# mutation for dependency tracking (tens of thousands of mutations per build).
-#
-# Instead we keep the tags in module-level MAPS keyed by func. `reset_colors` drops
-# them in O(1) with ZERO per-func mutation, so each build starts clean and nothing
-# touches the shared func objects. Provenance still survives `duplicate_function`:
-# functools.wraps sets `inner.__wrapped__ = original`, so `_resolve` walks the
-# __wrapped__ chain to recover a duplicate's tag from the original it was copied from.
-_COLOR_MAP: Dict = {}  # func -> frozenset(colors)  |  _CORE
-_EMPTY_MAP: Dict = {}  # func -> typed-empty value
-_OBSERVER_MAP: Dict = {}  # func -> True
+# Each tag is stamped on `func.__dict__` as a `(generation, value)` PAIR. It rides
+# `duplicate_function` for free (functools.wraps copies __dict__), so provenance is
+# recoverable from the assembled graph -- by tag, not by shape. `reset_colors` bumps a
+# module-global build generation and readers IGNORE any tag from an older generation, so
+# an earlier build's colors on a shared-by-reference func (generic combinators,
+# module-level slot defs) are invisible to a later build -- per-build isolation with NO
+# per-func mutation on reset (just one int bump). This matters because the test runner
+# instruments func.__dict__ mutations for dependency tracking: TAGGING is one setattr
+# per tag (unavoidable, cheap), but WIPING the tags per build (the previous approach) was
+# tens of thousands of mutations per build and blew the suite past its timeout. Bumping
+# one int is free.
+_BUILD_GEN = [0]  # current build generation; `reset_colors` increments it
 
 
 # --------------------------------------------------------------------------- #
@@ -89,63 +85,59 @@ def _sinks(graph_or_edges) -> FrozenSet[base_types.ComputationNode]:
 
 
 # --------------------------------------------------------------------------- #
-# The color tag rides the func's `__dict__`, so it survives `duplicate_function`
-# (functools.wraps copies `__dict__`) and is recoverable from the assembled graph.
-# The tag is a FROZENSET of opaque color tokens (colors UNION when more than one
-# author tags the same func -- a building block shared by reference among skills A
-# and B ends up {A, B}), OR the absorbing sentinel `_CORE` meaning "never color this"
-# (a core/shared func, pinned at its authoring site, stays uncolored even when a
-# skill's sweep later passes over a duplicated copy of it).
+# A tag is stamped on `func.__dict__` as `(generation, value)`, so it rides
+# `duplicate_function` (functools.wraps copies `__dict__`) and is recoverable from the
+# assembled graph. `value` is a FROZENSET of opaque color tokens (colors UNION when
+# more than one author tags the same func -- a building block shared by reference among
+# skills A and B ends up {A, B}), OR the absorbing sentinel `_CORE` meaning "never color
+# this" (a core/shared func stays uncolored even when a skill's sweep passes over a
+# duplicated copy of it). A CORE pin is stamped with `_PERMANENT` so it is valid in
+# EVERY build (core is core everywhere -- always-run, safe); every other tag is valid
+# only in the build generation it was stamped in, so `reset_colors` (a generation bump)
+# invalidates it without touching the func.
 # --------------------------------------------------------------------------- #
 _CORE = "\x00cg-core"  # absorbing marker; not a usable color token
+_PERMANENT = -1  # generation sentinel: valid in every build (used for CORE pins)
 
 
-_ATTR_TO_MAP = {
-    _ORIGIN_ATTR: _COLOR_MAP,
-    _EMPTY_ATTR: _EMPTY_MAP,
-    _OBSERVER_ATTR: _OBSERVER_MAP,
-}
-
-
-def _tag_func(func, attr: str, value) -> None:
-    # Record `value` for `func` in the map selected by `attr`. Keyed by the func object
-    # (no `func.__dict__` mutation). No-op on an unhashable callable -> it stays
-    # untracked, which the readers treat as core (same as the old un-taggable path).
+def _tag_func(func, attr: str, value, *, permanent: bool = False) -> None:
+    # Stamp `(generation, value)` onto the func's __dict__ so it rides
+    # `duplicate_function` (functools.wraps copies __dict__). `permanent=True` (CORE
+    # pins) uses a generation that matches every build, so the pin survives resets. No-op
+    # on an un-taggable builtin / C callable -> it stays tag-less, which readers treat as
+    # core.
+    gen = _PERMANENT if permanent else _BUILD_GEN[0]
     try:
-        _ATTR_TO_MAP[attr][func] = value
-    except TypeError:
+        setattr(func, attr, (gen, value))
+    except (AttributeError, TypeError):
         pass
 
 
-def _resolve(func, mapping, default=None):
-    # A duplicate isn't in the map, but functools.wraps set its `__wrapped__` to the
-    # func it was copied from -- walk that chain to recover the tag the original carried
-    # (this is how tags "survive duplication" now that they live off `func.__dict__`).
-    for _ in range(64):  # depth guard against a pathological __wrapped__ cycle
-        try:
-            if func in mapping:
-                return mapping[func]
-        except TypeError:  # unhashable -> untracked
-            return default
-        func = getattr(func, "__wrapped__", None)
-        if func is None:
-            break
+def _tag_get(func, attr: str, default=None):
+    # Read a tag back, honoring the build generation: a tag stamped in an EARLIER build
+    # (gen != current and not _PERMANENT) is invisible -> treated as absent. Cheap C-level
+    # getattr + tuple unpack; called per node during `build_node_activation`.
+    pair = getattr(func, attr, None)
+    if pair is None:
+        return default
+    gen, value = pair
+    if gen == _PERMANENT or gen == _BUILD_GEN[0]:
+        return value
     return default
 
 
 def reset_colors() -> None:
-    """Drop every color/empty/observer tag stamped since the last reset. Call ONCE at
-    the START of each bot build -- before any `add_colors` / `pin_core` / `observer`
+    """Invalidate every color/empty/observer tag stamped since the last reset. Call ONCE
+    at the START of each bot build -- before any `add_colors` / `pin_core` / `observer`
     sweep and before graph construction -- so tags stamped by an EARLIER build cannot
     leak into a LATER build that reuses the same shared-by-reference funcs (generic
-    combinators, module-level slot defs). O(1) and mutation-free (the tags live in
-    module maps, not on the funcs), so it is cheap even under a test runner that
-    instruments `__dict__` writes. Idempotent; a build that never colored is
-    unaffected. Deliberately NOT called mid-build: a multi-skill bot compiles many
-    subgraphs and clearing between them would leave the later compiles uncolored."""
-    _COLOR_MAP.clear()
-    _EMPTY_MAP.clear()
-    _OBSERVER_MAP.clear()
+    combinators, module-level slot defs). Bumps the build generation: O(1) and
+    MUTATION-FREE (it touches no func), so it is cheap even under a test runner that
+    instruments `__dict__` writes. CORE pins are `_PERMANENT` and survive (core is core
+    in every build). Idempotent; a build that never colored is unaffected. Deliberately
+    NOT called mid-build: a multi-skill bot compiles many subgraphs and bumping between
+    them would make the later compiles read as uncolored."""
+    _BUILD_GEN[0] += 1
 
 
 def add_colors(
@@ -163,7 +155,7 @@ def add_colors(
     make_first sinks, and terminals -- which the runner merges via make_or) never
     consult it, so only the genuinely intolerant frontier needs an `empty`."""
     for node in _colorable_nodes(subgraph):
-        current = _resolve(node.func, _COLOR_MAP)
+        current = _tag_get(node.func, _ORIGIN_ATTR)
         if current == _CORE:
             continue
         _tag_func(node.func, _ORIGIN_ATTR, (current or frozenset()) | colors)
@@ -188,7 +180,7 @@ def _read_empties(
     """node -> its typed-empty, for every node whose func carries an `empty` tag."""
     out: Dict[base_types.ComputationNode, Any] = {}
     for node in graph.get_all_nodes(_edges(graph_or_edges)):
-        value = _resolve(node.func, _EMPTY_MAP, _UNSET)
+        value = _tag_get(node.func, _EMPTY_ATTR, _UNSET)
         if value is not _UNSET:
             out[node] = value
     return out
@@ -197,8 +189,9 @@ def _read_empties(
 def _pin_core_func(func):
     # Pin a single callable CORE (absorbing -- a later color sweep leaves it alone).
     # The CORE tag rides func.__dict__ through duplicate_function, so copies stay core
-    # too. Returns the func. No-op on un-taggable (builtin/C) callables.
-    _tag_func(func, _ORIGIN_ATTR, _CORE)
+    # too. Stamped `_PERMANENT` (survives `reset_colors`): a core func is core in every
+    # build. Returns the func. No-op on un-taggable (builtin/C) callables.
+    _tag_func(func, _ORIGIN_ATTR, _CORE, permanent=True)
     return func
 
 
@@ -228,7 +221,7 @@ def _read_colors(
     """node -> its color set, for every colored node (core / untagged omitted)."""
     out = {}
     for node in graph.get_all_nodes(_edges(graph_or_edges)):
-        tag = _resolve(node.func, _COLOR_MAP)
+        tag = _tag_get(node.func, _ORIGIN_ATTR)
         if tag and tag != _CORE:
             out[node] = tag
     return out
