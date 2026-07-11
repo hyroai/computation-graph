@@ -124,7 +124,14 @@ def tag_empty(empty: Any, subgraph: base_types.GraphType) -> base_types.GraphTyp
     intolerant frontier consuming that sink can be satisfied without it when the
     producer is pruned. Standalone analogue of `add_colors(..., empty=...)` for
     when the empty is attached independently of coloring."""
-    for sink in _sinks(subgraph):
+    sinks = _sinks(subgraph)
+    if isinstance(subgraph, base_types.GraphType):
+        # A declared sink with a future self-edge (e.g. a memory/remember node) is a
+        # SOURCE of its own future edge, so leaf detection misses it -- stamp it too.
+        sink = subgraph.sink
+        if sink is not None and not sink.is_terminal and not _is_source(sink):
+            sinks = sinks | {sink}
+    for sink in sinks:
         _tag_func(sink.func, _EMPTY_ATTR, empty)
     return subgraph
 
@@ -147,6 +154,25 @@ def _pin_core_func(func):
     # too. Returns the func. No-op on un-taggable (builtin/C) callables.
     _tag_func(func, _ORIGIN_ATTR, _CORE)
     return func
+
+
+def pin_core_excluding(subgraph, excluded) -> base_types.GraphType:
+    """`pin_core`, scoped: pin every colorable node of `subgraph` CORE except the
+    nodes of the `excluded` subgraphs -- per-color channels composed into shared
+    machinery (e.g. a skill's effect channel feeding a shared ack aggregation) that
+    must stay colored/prunable. Pinning them instead makes them ALWAYS-RUN, where
+    they evaluate their pruned inputs' boundary defaults as domain truth (the
+    false-latch class). Pair each excluded channel with a typed-empty
+    (`tag_empty`) so the shared machinery is satisfied when it prunes. Returns
+    `subgraph`."""
+    excluded_nodes = (
+        frozenset().union(*(_colorable_nodes(g) for g in excluded))
+        if excluded
+        else frozenset()
+    )
+    for node in _colorable_nodes(subgraph) - excluded_nodes:
+        _pin_core_func(node.func)
+    return subgraph
 
 
 def pin_core(subgraph_or_callable):
@@ -372,11 +398,17 @@ def _intolerant_frontiers(edges, node_to_colors, empties):
             yield producer, consumer, producer in empties
 
 
-def _must_run_closure(edges, seeds):
+def _must_run_closure(edges, seeds, empties):
     """`seeds` plus their intolerant input cone: backward from each seed, a node's
     producers are pulled in only while the node is an INTOLERANT consumer (needs all
     its args). Stop at tolerant consumers (first_sink / terminals) -- their inputs may
-    prune, so the cone ends there. Tolerance-aware, tag-driven analogue of a data-flow
+    prune, so the cone ends there -- and at EMPTY-TAGGED producers: a producer with a
+    typed-empty satisfies even a forced consumer via its boundary default, so it (and
+    its whole input cone) stays prunable. Without that stop, a single untagged
+    frontier anywhere downstream forces entire skill channels always-on THROUGH their
+    empty-tagged interior nodes -- and an always-run memory/decision node then ticks
+    on its pruned inputs' boundary defaults, committing garbage to cross-turn state
+    (the false-latch class). Tolerance-aware, tag-driven analogue of a data-flow
     core-reach: everything reached must run every turn."""
     incoming: Dict = collections.defaultdict(list)
     for edge in edges:
@@ -391,7 +423,7 @@ def _must_run_closure(edges, seeds):
         seen.add(node)
         if _is_tolerant_consumer(node):
             continue  # tolerant: its inputs may prune, don't pull them in
-        stack.extend(incoming.get(node, ()))
+        stack.extend(p for p in incoming.get(node, ()) if p not in empties)
     return seen
 
 
@@ -450,8 +482,9 @@ def build_node_activation_from_edges(
             ),
             missing=untagged,
         )
-    # Force always-on: untagged intolerant-frontier producers + their intolerant cone.
-    for node in _must_run_closure(edges, {p for p, _ in untagged}):
+    # Force always-on: untagged intolerant-frontier producers + their intolerant cone
+    # (stopping at empty-tagged producers, which stay prunable behind their default).
+    for node in _must_run_closure(edges, {p for p, _ in untagged}, empties):
         node_to_colors.pop(node, None)
 
     boundary_defaults: Dict[base_types.ComputationNode, Any] = {}
