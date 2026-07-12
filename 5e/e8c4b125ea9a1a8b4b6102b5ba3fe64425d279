@@ -1,0 +1,47 @@
+computation_graph/composers/__init__.py
+  s_947a33ce19b46f::t_edf9064f6a3a4f 148-151,155-162,164-168
+  s_947a33ce19b46f::t_046b1c4f1ea5da 59-77,79-85
+  s_947a33ce19b46f::t_6ed07e95c86e12 241-254
+  s_947a33ce19b46f::t_c925925308e5fc 99,106-121,123-129
+  s_947a33ce19b46f::t_15f815fd0b58af 16-21
+  s_947a33ce19b46f::t_06218c361da909 302-308
+  s_947a33ce19b46f::t_29ddd057fd2a80 266,268,270-282,284-286
+computation_graph/composers/duplication.py
+  s_947a33ce19b46f::t_8cf717079d4560 29-39
+  s_947a33ce19b46f::t_8d55f5cfe53962 65-69,71-72
+  s_947a33ce19b46f::t_6082fabb484da9 64
+  s_947a33ce19b46f::t_197be588d709a8 101,104-105
+computation_graph/graph.py
+  s_947a33ce19b46f::t_340fdc473eaf50 214-215
+  s_947a33ce19b46f::t_b34e31f0341ea7 142,147,150,164-171
+  s_947a33ce19b46f::t_ded54e450b8c34 37-39
+  s_947a33ce19b46f::t_6f60d614dc158e 47-52,59-70
+  s_947a33ce19b46f::t_928045343940f0 134-137,140,143,146,148-149,151-161,173-174
+  s_947a33ce19b46f::t_a49facecfc533a 138-139
+  s_947a33ce19b46f::t_48305a39312847 202,206-211
+  s_947a33ce19b46f::t_b3449008ed31da 141,144-145,162-163,172
+  s_947a33ce19b46f::t_cc5d76b2b3b481 225-237
+  s_947a33ce19b46f::t_002de38e8ef260 281,284-288
+  s_947a33ce19b46f::t_a3479ff2b61e1e 359-365,368-376
+  s_947a33ce19b46f::t_aefdb85a23ffa5 216
+computation_graph/base_types.py
+  s_947a33ce19b46f::t_eb67a81039679b 149-188
+  s_947a33ce19b46f::t_00d7f43c366ccc 61-63,66-79
+  s_947a33ce19b46f::t_dbb7387b6f9181 102-104
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.12",
+  "base_commit_sha": "5ee8c4b125ea9a1a8b4b6102b5ba3fe64425d279",
+  "prompts": {},
+  "sessions": {
+    "s_947a33ce19b46f": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "9c74603d-2db1-4890-b10f-5c884337fbb8",
+        "model": "claude-fable-5"
+      },
+      "human_author": "Yinon Eliraz <yinon.e@hyro.ai>"
+    }
+  }
+}
