@@ -1,0 +1,22 @@
+computation_graph/graph.py
+  s_947a33ce19b46f::t_785ea379247a8e 130-133,137-140,142-150
+  s_947a33ce19b46f::t_070bc4d93d4c6b 202-205,208-210,212-214
+  s_947a33ce19b46f::t_f7e66557101036 128-129,134-136,141
+  s_947a33ce19b46f::t_42f0b9a63a83a7 200-201,206-207,211
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.12",
+  "base_commit_sha": "90f5aa4979c85762f947dff6b564c5c2b1634604",
+  "prompts": {},
+  "sessions": {
+    "s_947a33ce19b46f": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "9c74603d-2db1-4890-b10f-5c884337fbb8",
+        "model": "claude-fable-5"
+      },
+      "human_author": null
+    }
+  }
+}
