@@ -26,13 +26,17 @@ def duplicate_function(func):
 
 
 def _duplicate_computation_edge(get_duplicated_node):
-    return gamla.compose_left(
-        gamla.dataclass_transform("source", get_duplicated_node),
-        gamla.dataclass_transform("destination", get_duplicated_node),
-        gamla.dataclass_transform(
-            "args", gamla.compose_left(gamla.map(get_duplicated_node), tuple)
-        ),
-    )
+    def duplicate_computation_edge(
+        edge: base_types.ComputationEdge,
+    ) -> base_types.ComputationEdge:
+        return dataclasses.replace(
+            edge,
+            source=get_duplicated_node(edge.source),
+            destination=get_duplicated_node(edge.destination),
+            args=tuple(get_duplicated_node(arg) for arg in edge.args),
+        )
+
+    return duplicate_computation_edge
 
 
 def _signature_is_empty(signature: base_types.NodeSignature) -> bool:
@@ -57,21 +61,15 @@ def _node_to_duplicated_node(nodes):
 
 def duplicate_graph(original: base_types.GraphType) -> base_types.GraphType:
 
-    _node_to_duplicated_node_index = gamla.pipe(
-        original.edges, graph.get_all_nodes, _node_to_duplicated_node
-    )
-    get_duplicated_node = gamla.when(
-        _node_to_duplicated_node_index, _node_to_duplicated_node_index
-    )
+    _node_to_duplicated_node_index = _node_to_duplicated_node(original.nodes)
+
+    def get_duplicated_node(node):
+        duplicated = _node_to_duplicated_node_index(node)
+        return node if duplicated is None else duplicated
+
     return base_types.GraphType(
-        edges=gamla.pipe(
-            original.edges,
-            gamla.map(
-                _duplicate_computation_edge(
-                    gamla.when(get_duplicated_node, get_duplicated_node)
-                )
-            ),
-            frozenset,
+        edges=frozenset(
+            map(_duplicate_computation_edge(get_duplicated_node), original.edges)
         ),
         sink=get_duplicated_node(original.sink),
     )
@@ -100,9 +98,11 @@ def safe_replace_sources(
             )
         ),
     )
+    forward_neighbors = cg.node_to_forward_neighbors
     get_duplicate = gamla.pipe(
         gamla.graph_traverse_many(
-            source_to_replacement_dict.keys(), graph.traverse_forward(cg.edges)
+            source_to_replacement_dict.keys(),
+            lambda node: forward_neighbors.get(node, ()),
         ),
         gamla.remove(gamla.contains(source_to_replacement_dict.keys())),
         _node_to_duplicated_node,

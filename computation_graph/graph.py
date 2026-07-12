@@ -34,14 +34,20 @@ get_all_nodes = get_all_nodes_with_filter(None)
 def get_all_nodes_from_graph_with_filter(
     filter_nodes: Optional[Callable[[base_types.ComputationNode], bool]]
 ) -> Callable[[base_types.GraphType], FrozenSet[base_types.ComputationNode]]:
-    return opt_gamla.compose_left(
-        gamla.attrgetter("edges"), get_all_nodes_with_filter(filter_nodes)
-    )
+    if filter_nodes is None:
+        return gamla.attrgetter("nodes")
+    return lambda g: frozenset(filter(filter_nodes, g.nodes))
 
 
 edges_to_node_id_map = opt_gamla.compose_left(
     gamla.mapcat(get_edge_nodes), gamla.unique, enumerate, gamla.map(reversed), dict
 )
+
+
+# Nodes are pure values derived from the callable, and callables hash by
+# identity, so memoizing skips re-running `inspect.signature` for a callable
+# that already has a node (the callables are kept alive by the graphs anyway).
+_func_to_node: Dict[Callable, base_types.ComputationNode] = {}
 
 
 def make_computation_node(
@@ -50,18 +56,18 @@ def make_computation_node(
     if isinstance(func, base_types.ComputationNode):
         return func
 
-    return base_types.ComputationNode(
-        name=signature.name(func),
-        func=func,
-        signature=gamla.pipe(
-            func,
-            signature.from_callable,
-            gamla.assert_that_with_message(
-                gamla.just(str(func)), signature.is_supported
-            ),
-        ),
-        is_terminal=False,
-    )
+    node = _func_to_node.get(func)
+    if node is None:
+        node_signature = signature.from_callable(func)
+        assert signature.is_supported(node_signature), str(func)
+        node = base_types.ComputationNode(
+            name=signature.name(func),
+            func=func,
+            signature=node_signature,
+            is_terminal=False,
+        )
+        _func_to_node[func] = node
+    return node
 
 
 get_incoming_edges_for_node = opt_gamla.compose_left(
@@ -122,39 +128,50 @@ def unbound_signature(
     )
 
 
-def _node_in_edge_args(
-    x: base_types.CallableOrNode,
-) -> Callable[[base_types.ComputationEdge], bool]:
-    node = make_computation_node(x)
-
-    def node_in_edge_args(edge: base_types.ComputationEdge) -> bool:
-        return node in edge.args
-
-    return node_in_edge_args
-
-
 def _replace_source_in_edges(
     original: base_types.CallableOrNode, replacement: base_types.CallableOrNode
 ) -> Callable[[base_types.GraphType], base_types.GraphType]:
-    return gamla.compose(
-        gamla.star(base_types.GraphType),
-        gamla.stack(
-            [
-                gamla.compose(
-                    transform_edges(
-                        edge_source_equals(original), replace_edge_source(replacement)
-                    ),
-                    transform_edges(
-                        _node_in_edge_args(original),
-                        _replace_edge_source_args(original, replacement),
-                    ),
-                ),
-                gamla.identity,
-            ]
-        ),
-        tuple,
-        gamla.juxt(gamla.attrgetter("edges"), gamla.attrgetter("sink")),
-    )
+    original_node = make_computation_node(original)
+    replacement_node = make_computation_node(replacement)
+
+    def replace_source_in_edges(g: base_types.GraphType) -> base_types.GraphType:
+        if original_node == replacement_node:
+            return g
+        new_edges = []
+        original_remains_as_destination = False
+        rewrote_any = False
+        for edge in g.edges:
+            if edge.destination == original_node:
+                original_remains_as_destination = True
+            if edge.source == original_node:
+                rewrote_any = True
+                new_edges.append(dataclasses.replace(edge, source=replacement_node))
+            elif original_node in edge.args:
+                rewrote_any = True
+                new_edges.append(
+                    dataclasses.replace(
+                        edge,
+                        args=tuple(
+                            replacement_node if arg == original_node else arg
+                            for arg in edge.args
+                        ),
+                    )
+                )
+            else:
+                new_edges.append(edge)
+        result = base_types.GraphType(frozenset(new_edges), g.sink)
+        if "nodes" in g.__dict__:
+            new_nodes = g.nodes
+            if rewrote_any:
+                new_nodes = new_nodes | {replacement_node}
+                if not original_remains_as_destination:
+                    # All occurrences of `original_node` were in source positions
+                    # and were rewritten, so it is gone from the graph.
+                    new_nodes = new_nodes - {original_node}
+            result.seed_nodes(new_nodes)
+        return result
+
+    return replace_source_in_edges
 
 
 traverse_forward: Callable[
@@ -182,21 +199,20 @@ def replace_source(
     replacement: base_types.CallableOrNodeOrGraph,
     current_graph: base_types.GraphType,
 ) -> base_types.GraphType:
-    if make_computation_node(original) not in get_all_nodes(current_graph.edges):
+    if make_computation_node(original) not in current_graph.nodes:
         return current_graph
 
-    if gamla.is_instance(base_types.CallableOrNode)(replacement):
-        return _replace_source_in_edges(original, replacement)(current_graph)  # type: ignore
-
     if isinstance(replacement, base_types.GraphType):
-        return gamla.pipe(
-            current_graph,
-            _replace_source_in_edges(original, replacement.sink),
-            lambda transformed_graph: base_types.GraphType(
-                base_types.merge_edges(transformed_graph.edges, replacement.edges),
-                transformed_graph.sink,
-            ),
+        transformed_graph = _replace_source_in_edges(original, replacement.sink)(
+            current_graph
         )
+        return base_types.GraphType(
+            base_types.merge_edges(transformed_graph.edges, replacement.edges),
+            transformed_graph.sink,
+        )
+
+    if isinstance(replacement, base_types.ComputationNode) or callable(replacement):
+        return _replace_source_in_edges(original, replacement)(current_graph)
 
     raise RuntimeError(f"Unsupported relacement graph {replacement}")
 
@@ -204,22 +220,21 @@ def replace_source(
 def replace_destination(
     original: base_types.CallableOrNode, replacement: base_types.CallableOrNode
 ) -> Callable[[base_types.GraphType], base_types.GraphType]:
-    original = make_computation_node(original)
-    replacement = make_computation_node(replacement)
-    return gamla.compose(
-        gamla.star(base_types.GraphType),
-        gamla.stack(
-            [
-                transform_edges(
-                    edge_destination_equals(original),
-                    _replace_edge_destination(replacement),
-                ),
-                gamla.when(gamla.equals(original), gamla.just(replacement)),
-            ]
-        ),
-        tuple,
-        gamla.juxt(gamla.attrgetter("edges"), gamla.attrgetter("sink")),
-    )
+    original_node = make_computation_node(original)
+    replacement_node = make_computation_node(replacement)
+
+    def replace_destination_inner(g: base_types.GraphType) -> base_types.GraphType:
+        return base_types.GraphType(
+            frozenset(
+                dataclasses.replace(edge, destination=replacement_node)
+                if edge.destination == original_node
+                else edge
+                for edge in g.edges
+            ),
+            replacement_node if g.sink == original_node else g.sink,
+        )
+
+    return replace_destination_inner
 
 
 def replace_node(
@@ -263,9 +278,14 @@ def replace_nodes(
                             edge, source=source, destination=destination
                         )
                     )
-        return base_types.GraphType(
+        result = base_types.GraphType(
             edges=frozenset(new_edges), sink=node_map.get(g.sink, g.sink)
         )
+        # Every occurrence of a mapped node is rewritten, so the new node set
+        # is the old one mapped through `node_map`.
+        if "nodes" in g.__dict__:
+            result.seed_nodes(frozenset(node_map.get(n, n) for n in g.nodes))
+        return result
 
     return replace_nodes
 
@@ -308,35 +328,6 @@ def replace_edge_source(
     return gamla.dataclass_replace("source", make_computation_node(replacement))
 
 
-def _replace_edge_source_args(
-    original: base_types.CallableOrNode, replacement: base_types.CallableOrNode
-):
-    def replace_edge_source_args(
-        edge: base_types.ComputationEdge,
-    ) -> base_types.ComputationEdge:
-        return dataclasses.replace(
-            edge,
-            args=gamla.pipe(
-                edge.args,
-                gamla.map(
-                    gamla.when(
-                        gamla.equals(make_computation_node(original)),
-                        gamla.just(make_computation_node(replacement)),
-                    )
-                ),
-                tuple,
-            ),
-        )
-
-    return replace_edge_source_args
-
-
-def _replace_edge_destination(
-    replacement: base_types.CallableOrNode,
-) -> Callable[[base_types.ComputationEdge], base_types.ComputationEdge]:
-    return gamla.dataclass_replace("destination", make_computation_node(replacement))
-
-
 def _operate_on_edges(selector, transformation):
     return gamla.compose(
         gamla.star(
@@ -365,25 +356,24 @@ def merge_graphs(
         or sink_node_or_graph in graphs
     ), "sink graph must be one of the graphs being merged"
 
-    new_g = gamla.pipe(
-        graphs,
-        gamla.remove(gamla.equals(base_types.EMPTY_GRAPH)),
-        tuple,
-        gamla.pair_right(
-            gamla.just(
-                sink_node_or_graph.sink
-                if isinstance(sink_node_or_graph, base_types.GraphType)
-                else sink_node_or_graph
-            )
+    non_empty = tuple(g for g in graphs if g.edges)
+    new_g = base_types.GraphType(
+        base_types.merge_edges(*(g.edges for g in non_empty)),
+        (
+            sink_node_or_graph.sink
+            if isinstance(sink_node_or_graph, base_types.GraphType)
+            else sink_node_or_graph
         ),
-        gamla.packstack(
-            gamla.compose_left(
-                gamla.map(gamla.attrgetter("edges")), gamla.star(base_types.merge_edges)
-            ),
-            gamla.identity,
-        ),
-        gamla.star(base_types.GraphType),
     )
+    # Merged edges are exactly the union of the children's edges, so if every
+    # child already knows its nodes we can seed the union instead of having the
+    # next reader rescan all edges.
+    if all("nodes" in g.__dict__ for g in non_empty):
+        new_g.seed_nodes(
+            frozenset().union(*(g.nodes for g in non_empty))
+            if non_empty
+            else frozenset()
+        )
 
     if base_types.is_debug_mode():
         assert new_g.sink == _infer_sink_module.infer_sink(
