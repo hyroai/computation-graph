@@ -122,39 +122,32 @@ def unbound_signature(
     )
 
 
-def _node_in_edge_args(
-    x: base_types.CallableOrNode,
-) -> Callable[[base_types.ComputationEdge], bool]:
-    node = make_computation_node(x)
-
-    def node_in_edge_args(edge: base_types.ComputationEdge) -> bool:
-        return node in edge.args
-
-    return node_in_edge_args
-
-
 def _replace_source_in_edges(
     original: base_types.CallableOrNode, replacement: base_types.CallableOrNode
 ) -> Callable[[base_types.GraphType], base_types.GraphType]:
-    return gamla.compose(
-        gamla.star(base_types.GraphType),
-        gamla.stack(
-            [
-                gamla.compose(
-                    transform_edges(
-                        edge_source_equals(original), replace_edge_source(replacement)
-                    ),
-                    transform_edges(
-                        _node_in_edge_args(original),
-                        _replace_edge_source_args(original, replacement),
-                    ),
-                ),
-                gamla.identity,
-            ]
-        ),
-        tuple,
-        gamla.juxt(gamla.attrgetter("edges"), gamla.attrgetter("sink")),
-    )
+    original_node = make_computation_node(original)
+    replacement_node = make_computation_node(replacement)
+
+    def replace_source_in_edges(g: base_types.GraphType) -> base_types.GraphType:
+        new_edges = []
+        for edge in g.edges:
+            if edge.source == original_node:
+                new_edges.append(dataclasses.replace(edge, source=replacement_node))
+            elif original_node in edge.args:
+                new_edges.append(
+                    dataclasses.replace(
+                        edge,
+                        args=tuple(
+                            replacement_node if arg == original_node else arg
+                            for arg in edge.args
+                        ),
+                    )
+                )
+            else:
+                new_edges.append(edge)
+        return base_types.GraphType(frozenset(new_edges), g.sink)
+
+    return replace_source_in_edges
 
 
 traverse_forward: Callable[
@@ -204,22 +197,21 @@ def replace_source(
 def replace_destination(
     original: base_types.CallableOrNode, replacement: base_types.CallableOrNode
 ) -> Callable[[base_types.GraphType], base_types.GraphType]:
-    original = make_computation_node(original)
-    replacement = make_computation_node(replacement)
-    return gamla.compose(
-        gamla.star(base_types.GraphType),
-        gamla.stack(
-            [
-                transform_edges(
-                    edge_destination_equals(original),
-                    _replace_edge_destination(replacement),
-                ),
-                gamla.when(gamla.equals(original), gamla.just(replacement)),
-            ]
-        ),
-        tuple,
-        gamla.juxt(gamla.attrgetter("edges"), gamla.attrgetter("sink")),
-    )
+    original_node = make_computation_node(original)
+    replacement_node = make_computation_node(replacement)
+
+    def replace_destination_inner(g: base_types.GraphType) -> base_types.GraphType:
+        return base_types.GraphType(
+            frozenset(
+                dataclasses.replace(edge, destination=replacement_node)
+                if edge.destination == original_node
+                else edge
+                for edge in g.edges
+            ),
+            replacement_node if g.sink == original_node else g.sink,
+        )
+
+    return replace_destination_inner
 
 
 def replace_node(
@@ -306,35 +298,6 @@ def replace_edge_source(
     replacement: base_types.CallableOrNode,
 ) -> Callable[[base_types.ComputationEdge], base_types.ComputationEdge]:
     return gamla.dataclass_replace("source", make_computation_node(replacement))
-
-
-def _replace_edge_source_args(
-    original: base_types.CallableOrNode, replacement: base_types.CallableOrNode
-):
-    def replace_edge_source_args(
-        edge: base_types.ComputationEdge,
-    ) -> base_types.ComputationEdge:
-        return dataclasses.replace(
-            edge,
-            args=gamla.pipe(
-                edge.args,
-                gamla.map(
-                    gamla.when(
-                        gamla.equals(make_computation_node(original)),
-                        gamla.just(make_computation_node(replacement)),
-                    )
-                ),
-                tuple,
-            ),
-        )
-
-    return replace_edge_source_args
-
-
-def _replace_edge_destination(
-    replacement: base_types.CallableOrNode,
-) -> Callable[[base_types.ComputationEdge], base_types.ComputationEdge]:
-    return gamla.dataclass_replace("destination", make_computation_node(replacement))
 
 
 def _operate_on_edges(selector, transformation):
