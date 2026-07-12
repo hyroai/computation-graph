@@ -58,8 +58,25 @@ class ComputationEdge:
     source: Optional[ComputationNode]
     args: Tuple[ComputationNode, ...]
     is_future: bool
+    # Edges are hashed on every frozenset construction/lookup; the fields are
+    # immutable so the hash is computed once. Excluded from __eq__/__repr__.
+    computed_hash: int = dataclasses.field(init=False, repr=False, compare=False)
 
     def __post_init__(self):
+        object.__setattr__(
+            self,
+            "computed_hash",
+            hash(
+                (
+                    self.destination,
+                    self.priority,
+                    self.key,
+                    self.source,
+                    self.args,
+                    self.is_future,
+                )
+            ),
+        )
         assert bool(self.args) != bool(
             self.source
         ), f"Edge must have a source or args, not both: {self}"
@@ -81,6 +98,9 @@ class ComputationEdge:
                 raise ComputationGraphTypeError(
                     _mismatch_message(self.key, self.source.func, self.destination.func)
                 )
+
+    def __hash__(self):
+        return self.computed_hash
 
     def __repr__(self):
         source_str = (
@@ -125,6 +145,46 @@ class GraphType:
 
     def __post_init__(self):
         assert isinstance(self.edges, frozenset), "edges must be a frozenset"
+
+    # The properties below are derived from `edges` (immutable), computed on
+    # first access and cached on the instance. Graph transformations that know
+    # how a derived value changes may pre-seed it via `seed_nodes` instead of
+    # letting the next reader recompute it from scratch.
+
+    @functools.cached_property
+    def nodes(self) -> FrozenSet[ComputationNode]:
+        result = set()
+        for edge in self.edges:
+            if edge.source is not None:
+                result.add(edge.source)
+            else:
+                result.update(edge.args)
+            result.add(edge.destination)
+        return frozenset(result)
+
+    @functools.cached_property
+    def node_to_incoming_edges(
+        self,
+    ) -> typing.Mapping[ComputationNode, FrozenSet[ComputationEdge]]:
+        grouped: dict = {}
+        for edge in self.edges:
+            grouped.setdefault(edge.destination, []).append(edge)
+        return {node: frozenset(group) for node, group in grouped.items()}
+
+    @functools.cached_property
+    def node_to_forward_neighbors(
+        self,
+    ) -> typing.Mapping[ComputationNode, FrozenSet[ComputationNode]]:
+        grouped: dict = {}
+        for edge in self.edges:
+            for source in edge.args or (edge.source,):
+                grouped.setdefault(source, set()).add(edge.destination)
+        return {node: frozenset(group) for node, group in grouped.items()}
+
+    def seed_nodes(self, nodes: FrozenSet[ComputationNode]) -> "GraphType":
+        """Pre-populate the `nodes` cache when the caller already knows it."""
+        self.__dict__["nodes"] = nodes
+        return self
 
 
 node_implementation = gamla.attrgetter("func")
