@@ -1,0 +1,48 @@
+computation_graph/sync_fusion_test.py
+  s_44f9d428cbb3e9::t_d697bf9af9230e 367-371
+  s_44f9d428cbb3e9::t_0cb323dc8f49c9 24-25,27,54,61,63,90,97,119,122,153,159,187,192,219,225,247,252,277,282,304,338,342,361,365
+computation_graph/sync_fusion.py
+  s_44f9d428cbb3e9::t_963fddf2eacf9a 86,98
+computation_graph/base_types.py
+  s_44f9d428cbb3e9::t_683c108aca4a43 66-74,87-89,118-127,147-151,155,163,165,177-178,181-185,187-190,197
+computation_graph/composers/__init__.py
+  s_44f9d428cbb3e9::t_9d4a348147899e 3,8-9,16-17,52-54,58,61,63-69,71-82,84,86,89-92,97,111-113,116,119-120,122,124-135,137,139-144,157,162-169,172-178,184,192-193,195,203-235,268-274,277-282,284,287,289,292,305-308,311-313,316,323-325,328-329,345,348-351,378-390,395,466-473,477-481
+computation_graph/composers/composers_test.py
+  s_44f9d428cbb3e9::t_79f1db75eb6f84 2,33,36,42-62
+computation_graph/composers/duplication.py
+  s_44f9d428cbb3e9::t_89b9ad5995b58a 2,38-44,47-55,57-68,74-78,81,91-101,103,105,111-147,149-154
+computation_graph/graph.py
+  s_44f9d428cbb3e9::t_0a33339c90761e 2-3,8-10,18-39,140-153,155-156,161,185,191,194-198,207-221,234-272,277,340,343,355-394
+computation_graph/graph_runners.py
+  s_44f9d428cbb3e9::t_3b710bb4503c58 20-23,39-42,56,65-68,116,121,139,149
+computation_graph/graph_test.py
+  s_44f9d428cbb3e9::t_6c0863d00116f1 9,75,80,122,126,146,149,159,165,205,212,334,336,339,342,353,360-361,376-378,382-383,389-408,414,416-417,433,438,455,457-459,462,542,548-549,553-554,556,559,561,564-565,567,572,579,582,594-599,601-602,604,695,699,711,716,734,737,749,751,761,772,782,800-822,841-848,878,881,883,886,892-906,908,910,930,934,937,940,943-944,954,957,959,962,966,968-980,982-984,991,994,996,999-1017,1019-1027,1037,1040,1047,1050,1080,1084-1086,1096-1101,1108-1113,1120-1125,1132-1137,1148
+computation_graph/infer_sink.py
+  s_44f9d428cbb3e9::t_4cdefc95959c92 1-48
+computation_graph/infer_sink_test.py
+  s_44f9d428cbb3e9::t_f15360130a6817 1-403
+computation_graph/legacy.py
+  s_44f9d428cbb3e9::t_9f4c5f0338c3fd 27-30,33-34
+computation_graph/trace/graphviz.py
+  s_44f9d428cbb3e9::t_858f18b47404e5 47-49,122,126
+setup.py
+  s_44f9d428cbb3e9::t_aa178ce5ecb5b3 10
+computation_graph/run.py
+  s_44f9d428cbb3e9::t_1932548ce726d3 32,50,151-153,156-174,182-184,190,193,215
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.13",
+  "base_commit_sha": "db98fef73cad825e60fd836f35a68d04b6c10ba7",
+  "prompts": {},
+  "sessions": {
+    "s_44f9d428cbb3e9": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "db2d8f70-bb00-4e9e-bdf0-9d2c3e56af20",
+        "model": "claude-fable-5"
+      },
+      "human_author": "Yinon Eliraz <yinon.e@hyro.ai>"
+    }
+  }
+}
