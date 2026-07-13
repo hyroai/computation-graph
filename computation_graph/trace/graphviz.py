@@ -44,7 +44,9 @@ def _handle_edge(pgv_graph, edge):
             )
 
 
-def computation_graph_to_graphviz(edges: base_types.GraphType) -> pgv.AGraph:
+def computation_graph_to_graphviz(
+    edges: frozenset[base_types.ComputationEdge],
+) -> pgv.AGraph:
     pgv_graph = pgv.AGraph(directed=True)
     for edge in edges:
         _handle_edge(pgv_graph, edge)
@@ -117,11 +119,11 @@ visualize_graph = gamla.compose_left(
 
 @gamla.curry
 def computation_trace(
-    filename: str, graph_instance: base_types.GraphType, node_to_results
+    filename: str, edges: frozenset[base_types.ComputationEdge], node_to_results
 ):
     gviz = union_graphviz(
         [
-            computation_graph_to_graphviz(graph_instance),
+            computation_graph_to_graphviz(edges),
             computation_trace_to_graphviz(
                 gamla.pipe(node_to_results, dict.items, frozenset)
             ),

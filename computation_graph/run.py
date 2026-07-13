@@ -29,6 +29,7 @@ import typeguard
 from gamla.optimized import sync as opt_gamla
 
 from computation_graph import base_types, composers, graph, signature, sync_fusion
+from computation_graph.base_types import GraphType
 
 CG_NO_RESULT = "CG_NO_RESULT"
 
@@ -46,8 +47,7 @@ _ComputationInputSpec = Tuple[
 _NodeExecutor = Callable[
     [
         Mapping[
-            base_types.ComputationNode,
-            base_types.Result | Awaitable[base_types.Result],
+            base_types.ComputationNode, base_types.Result | Awaitable[base_types.Result]
         ],
         base_types.ComputationNode,
     ],
@@ -148,37 +148,49 @@ _graph_to_future_sources = opt_gamla.compose_left(
 
 
 def _merge_edges_pointing_to_terminals(g: base_types.GraphType) -> base_types.GraphType:
-    return gamla.compose_left(
+    return gamla.pipe(
+        g,
+        gamla.attrgetter("edges"),
         gamla.groupby(gamla.attrgetter("destination")),
         gamla.itemmap(
-            gamla.star(
-                lambda dest, edges_for_dest: (
-                    dest,
-                    base_types.merge_graphs(
-                        composers.make_or(
-                            opt_gamla.maptuple(base_types.edge_source)(edges_for_dest),
-                            merge_fn=(aggregate := lambda args: args),
+            gamla.compose_left(
+                gamla.star(
+                    lambda dest, edges_for_dest: (
+                        dest,
+                        (
+                            graph.merge_graphs(
+                                composers.make_or(
+                                    opt_gamla.maptuple(base_types.edge_source)(
+                                        edges_for_dest
+                                    ),
+                                    merge_fn=(aggregate := lambda args: args),
+                                ),
+                                composers.compose_left_unary(aggregate, dest),
+                                sink_node_or_graph=graph.make_computation_node(
+                                    aggregate
+                                ),
+                            ).edges
+                            if dest.is_terminal
+                            else edges_for_dest
                         ),
-                        composers.compose_left_unary(aggregate, dest),
                     )
-                    if dest.is_terminal
-                    else edges_for_dest,
                 )
             )
         ),
         dict.values,
         gamla.concat,
-        tuple,
-    )(g)
+        frozenset,
+        lambda edges: GraphType(edges, g.sink),
+    )
 
 
 def _to_callable_with_side_effect_for_single_and_multiple(
     single_node_side_effect: _SingleNodeSideEffect,
     all_nodes_side_effect: Callable,
-    edges: base_types.GraphType,
+    graph: base_types.GraphType,
     handled_exceptions: Tuple[Type[Exception], ...],
 ) -> Callable[[_NodeToResults, _NodeToResults], _NodeToResults]:
-    edges = _merge_edges_pointing_to_terminals(edges)
+    edges = _merge_edges_pointing_to_terminals(graph).edges
     single_node_side_effect = (
         (lambda node, result: result)
         if os.getenv(base_types.COMPUTATION_GRAPH_DEBUG_ENV_KEY) is None
@@ -200,7 +212,7 @@ def _to_callable_with_side_effect_for_single_and_multiple(
         ),
         tuple,
         gamla.side_effect(_assert_composition_is_valid),
-        gamla.side_effect(base_types.assert_no_unwanted_ambiguity),
+        gamla.side_effect(base_types.assert_no_unwanted_ambiguity_on_edges),
     )
     is_async = _is_graph_async(edges)
     placeholder_to_future_source = opt_gamla.pipe(

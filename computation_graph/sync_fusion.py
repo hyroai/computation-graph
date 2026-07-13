@@ -83,7 +83,7 @@ class FusionContext:
     fused nodes resolve inputs and report side effects exactly like unfused
     ones."""
 
-    edges: base_types.GraphType
+    edges: Tuple[base_types.ComputationEdge, ...]
     handled_exceptions: Tuple[Type[Exception], ...]
     single_node_side_effect: Callable
     node_to_input_async: Callable
@@ -95,7 +95,7 @@ class FusionContext:
 
 
 def _sync_chains(
-    edges: base_types.GraphType,
+    edges: Tuple[base_types.ComputationEdge, ...],
     sync_and_downstream: Set[base_types.ComputationNode],
 ) -> Tuple[Tuple[base_types.ComputationNode, ...], ...]:
     """Maximal linear chains in the subgraph induced on `sync_and_downstream`.
