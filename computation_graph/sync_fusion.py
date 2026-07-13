@@ -94,7 +94,7 @@ class FusionContext:
     profile: Callable
 
 
-def _sync_chains(
+def sync_chains(
     edges: Tuple[base_types.ComputationEdge, ...],
     sync_and_downstream: Set[base_types.ComputationNode],
 ) -> Tuple[Tuple[base_types.ComputationNode, ...], ...]:
@@ -241,8 +241,9 @@ def _make_chain_executor(
             for future in out_futures.values():
                 if not future.done():
                     future.set_exception(dep_not_found_error())
-            # We delete the reference to the global mapping to avoid circular reference (task->exception->traceback->mapping) and improve memory performance
-            del accumulated_results, lookup
+            # We drop the reference to the global mapping to avoid circular reference (task->exception->traceback->mapping) and improve memory performance.
+            # Rebinding rather than `del` keeps the names defined for the closure.
+            accumulated_results = lookup = None
 
     def schedule_chain(accumulated_results: dict, _chain):
         out_futures = {
@@ -258,7 +259,7 @@ def fuse(node_executor_pairs: Tuple, context: FusionContext) -> Tuple:
     """Replace every fusable chain in the (node, executor) execution order
     with a single (FusedSyncChain, executor) unit at its head's position; all
     other units are passed through untouched."""
-    chains = _sync_chains(context.edges, context.sync_and_downstream)
+    chains = sync_chains(context.edges, context.sync_and_downstream)
     if not chains:
         return node_executor_pairs
     topological_sorted_nodes = tuple(pair[0] for pair in node_executor_pairs)
@@ -286,14 +287,17 @@ def fuse(node_executor_pairs: Tuple, context: FusionContext) -> Tuple:
     logging.debug(
         f"sync chain fusion: fused {len(node_to_chain)} of {len(topological_sorted_nodes)} nodes into {len(chains)} chains"
     )
-    units = []
+    units: list = []
     for node, executor in node_executor_pairs:
-        chain = node_to_chain.get(node)
-        if chain is None:
+        node_chain = node_to_chain.get(node)
+        if node_chain is None:
             units.append((node, executor))
-        elif node == chain.nodes[0]:
+        elif node == node_chain.nodes[0]:
             units.append(
-                (chain, _make_chain_executor(chain, statically_concrete, context))
+                (
+                    node_chain,
+                    _make_chain_executor(node_chain, statically_concrete, context),
+                )
             )
     return tuple(units)
 

@@ -22,11 +22,10 @@ def _fusion_off(monkeypatch):
 
 
 def _sync_and_downstream(g: base_types.GraphType):
-    edges = tuple(g.edges)
-    all_nodes = graph.get_all_nodes(edges)
+    all_nodes = graph.get_all_nodes(g.edges)
     async_nodes = {n for n in all_nodes if asyncio.iscoroutinefunction(n.func)}
     downstream = set(
-        gamla.graph_traverse_many(async_nodes, graph.traverse_forward(edges))
+        gamla.graph_traverse_many(async_nodes, graph.traverse_forward(g.edges))
     )
     return (all_nodes - async_nodes) & downstream
 
@@ -60,7 +59,7 @@ def test_chain_detection():
         composers.compose_left(other, fan_in, key="y"),
         sink_node_or_graph=graph.make_computation_node(fan_in),
     )
-    chains = sync_fusion._sync_chains(tuple(g.edges), _sync_and_downstream(g))
+    chains = sync_fusion.sync_chains(tuple(g.edges), _sync_and_downstream(g))
     node = graph.make_computation_node
     # fan_in has two sync producers so it cannot join a chain; `other` has a
     # single consumer but is alone (its consumer has in-degree 2), so no
