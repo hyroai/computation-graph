@@ -241,8 +241,16 @@ class NodeActivation:
     ACTIVE COLORS: the CALLER provides an initial color set when it starts the run
     (the `active_colors` argument of the compiled reducer; optional). The run then
     proceeds layer by layer skipping colored nodes whose color is not in the active
-    set -- when no initial color is given, ONLY the no-color (uncolored) nodes run.
-    If `ChangeActiveColors` events then appear in node results whose UNION differs
+    set. When no initial color is given (None -- no color information yet, e.g. a
+    conversation's first turns before anything was declared) the run is UNPRUNED:
+    every node runs exactly as under `to_callable`, declarations never narrow the
+    pass, and their union is only recorded (EFFECTIVE_ACTIVE_COLORS_KEY) for the
+    caller to seed next turn. Cross-turn state therefore always captures the
+    conversation's opening context: one-shot `remember` latches hold verdicts only
+    computable at conversation start, so pruning a skill's first-ever turn poisons
+    them permanently. An EXPLICIT empty set is the opposite: prune every colored
+    node. With an explicit initial set,
+    if `ChangeActiveColors` events then appear in node results whose UNION differs
     from the active set, the run STARTS OVER with that union as the new active set
     (nodes that were skipped may now need to run); only the colored nodes +
     everything downstream of them are recomputed, the rest (e.g. an upstream routing
@@ -595,6 +603,20 @@ def _schedule_node(node_executor, node_to_task_or_result, handled_exceptions):
         pass
 
 
+def _declared_union(topological_sorted_nodes, results) -> Optional[FrozenSet]:
+    """The union of every `ChangeActiveColors` in the pass's results, or None when
+    nothing was declared."""
+    declarations = frozenset(
+        value
+        for node_executor in topological_sorted_nodes
+        for value in (results.get(node_executor[0], CG_NO_RESULT),)
+        if isinstance(value, ChangeActiveColors)
+    )
+    if not declarations:
+        return None
+    return frozenset().union(*(d.colors for d in declarations))
+
+
 def _next_active_colors(
     topological_sorted_nodes, results, active: FrozenSet, seen_active_sets: Set
 ) -> Optional[FrozenSet]:
@@ -608,16 +630,8 @@ def _next_active_colors(
     revisits an earlier active set means the declarations depend on the active
     colors themselves, so the loop can never settle -> raises
     `ColorDeclarationsDidNotConverge`. Mutates `seen_active_sets`."""
-    declarations = frozenset(
-        value
-        for node_executor in topological_sorted_nodes
-        for value in (results.get(node_executor[0], CG_NO_RESULT),)
-        if isinstance(value, ChangeActiveColors)
-    )
-    if not declarations:
-        return None
-    observed = frozenset().union(*(d.colors for d in declarations))
-    if observed == active:
+    observed = _declared_union(topological_sorted_nodes, results)
+    if observed is None or observed == active:
         return None
     if observed in seen_active_sets:
         raise ColorDeclarationsDidNotConverge(
@@ -652,14 +666,18 @@ async def _run_graph_async(
         base_types.SkipComputationError,
         *handled_exceptions,
     )
-    # The caller provides the initial active colors; no initial color -> the empty
-    # set, disjoint from every color, so only the no-color (uncolored) nodes run.
-    active = initial_colors if initial_colors is not None else frozenset()
+    # No initial color = no color information yet (e.g. the conversation's first
+    # turns, before anything was ever declared): run UNPRUNED, exactly like an
+    # uncolored graph, so cross-turn state captures everything it would under
+    # `to_callable` -- and don't let mid-run declarations narrow the pass. An
+    # explicit (possibly empty) set means "prune to this".
+    unpruned = initial_colors is None
+    active = frozenset() if unpruned else initial_colors
 
     def _schedule_or_skip(node_executor):
         node = node_executor[0]
         colors = node_to_colors.get(node)
-        if colors and colors.isdisjoint(active):
+        if not unpruned and colors and colors.isdisjoint(active):
             # colored but not active: frontier -> boundary default; interior -> prune.
             if node in boundary_defaults:
                 node_to_task_or_result[node] = boundary_defaults[node]
@@ -708,6 +726,14 @@ async def _run_graph_async(
             harvested = await _gather_pending()
             if harvested is not None:
                 raise harvested
+            if unpruned:
+                # Everything already ran; the declarations only decide what the
+                # caller seeds next turn (via EFFECTIVE_ACTIVE_COLORS_KEY below).
+                active = (
+                    _declared_union(topological_sorted_nodes, node_to_task_or_result)
+                    or frozenset()
+                )
+                break
             observed = _next_active_colors(
                 topological_sorted_nodes,
                 node_to_task_or_result,
@@ -752,12 +778,13 @@ def _run_graph(
     initial_colors,
 ) -> _NodeToResults:
     accumulated_results = inputs.copy()
-    # The caller provides the initial active colors (no color -> empty set -> only
-    # no-color nodes run); a ChangeActiveColors event that declares a different set
-    # starts the run over, recomputing only the color-dependent nodes and carrying
-    # the rest over. With no coloring (`to_callable`) the loop runs the whole graph
-    # once, exactly as before.
-    active = initial_colors if initial_colors is not None else frozenset()
+    # No initial color = no color information yet: run UNPRUNED (see the async
+    # runner's note). An explicit set means "prune to this"; a ChangeActiveColors
+    # event that declares a different set starts the run over, recomputing only the
+    # color-dependent nodes and carrying the rest over. With no coloring
+    # (`to_callable`) the loop runs the whole graph once, exactly as before.
+    unpruned = initial_colors is None
+    active = frozenset() if unpruned else initial_colors
     # Same restart loop as the async runner: run the WHOLE pass, then union the
     # declarations (a later declarer in the toposort must be seen before deciding
     # the active set), and start over if a new color set was declared.
@@ -768,7 +795,7 @@ def _run_graph(
             if node in accumulated_results:
                 continue  # carried over (color-independent) or already run this pass
             colors = node_to_colors.get(node)
-            if colors and colors.isdisjoint(active):
+            if not unpruned and colors and colors.isdisjoint(active):
                 # colored but not active: frontier -> boundary default; interior -> prune.
                 if node in boundary_defaults:
                     accumulated_results[node] = boundary_defaults[node]
@@ -776,6 +803,14 @@ def _run_graph(
             _schedule_node(node_executor, accumulated_results, handled_exceptions)
         if not color_dependent:
             break  # no colored nodes -> nothing to restart for
+        if unpruned:
+            # Everything already ran; the declarations only decide what the caller
+            # seeds next turn (via EFFECTIVE_ACTIVE_COLORS_KEY below).
+            active = (
+                _declared_union(topological_sorted_nodes, accumulated_results)
+                or frozenset()
+            )
+            break
         observed = _next_active_colors(
             topological_sorted_nodes, accumulated_results, active, seen_active_sets
         )

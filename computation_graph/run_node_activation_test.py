@@ -3,7 +3,9 @@
 The engine is domain-agnostic: it knows only COLORS (opaque tokens) and the
 `run.ChangeActiveColors` event. The CALLER passes the initial active colors when it
 starts the run (the reducer's `active_colors` argument; optional). Colored nodes
-whose color is not active skip; with no initial color, only the no-color nodes run.
+whose color is not active skip; with NO initial color (None -- no color information
+yet) the run is UNPRUNED and declarations are only recorded for next turn's seed;
+an EXPLICIT empty set prunes every colored node.
 If a node then RETURNS `run.ChangeActiveColors(other)` the run STARTS OVER with the
 new color set (nodes skipped on the first pass may now need to run). Validates:
   * a SKIPPED BOUNDARY node returns its typed-empty default (downstream make_and
@@ -89,15 +91,28 @@ def test_other_initial_color():
     assert result[nodes["combine"]] == (("A", "EMPTY"), ("B", 7))
 
 
-def test_no_initial_color_skips_all_colored():
+def test_explicit_empty_color_set_skips_all_colored():
     calls = []
     g, x_source, nodes = _build(calls)
     f = _to_callable(g, _activation(nodes))
 
-    result = f({}, {x_source: 5})  # no color -> only no-color nodes run
+    result = f({}, {x_source: 5}, frozenset())  # explicit empty -> prune all colored
 
     assert calls == []
     assert result[nodes["combine"]] == (("A", "EMPTY"), ("B", "EMPTY"))
+
+
+def test_no_initial_color_runs_unpruned():
+    # None = no color information yet (a conversation's first turns): nothing
+    # prunes, so cross-turn state captures the opening context like `to_callable`.
+    calls = []
+    g, x_source, nodes = _build(calls)
+    f = _to_callable(g, _activation(nodes))
+
+    result = f({}, {x_source: 5})
+
+    assert sorted(calls) == ["A", "B"]
+    assert result[nodes["combine"]] == (("A", 5), ("B", 5))
 
 
 
@@ -225,16 +240,29 @@ async def test_async_change_event_routes_to_chosen_skill():
     g, u, s, nodes, calls = _build_async()
     f = _to_callable(g, _async_activation(nodes))
 
-    result = await f({}, {u: 0, s: 5})  # no initial color; event resolves skill 0
+    # explicit empty seed; the event resolves skill 0 and restarts the run
+    result = await f({}, {u: 0, s: 5}, frozenset())
     assert calls == ["A"]
     assert result[nodes["select"]] == ("A", 5)
+
+
+async def test_async_no_initial_color_unpruned_declaration_only_recorded():
+    g, u, s, nodes, calls = _build_async()
+    f = _to_callable(g, _async_activation(nodes))
+
+    result = await f({}, {u: 0, s: 5})  # no seed: unpruned; skill 0 declared
+    assert sorted(calls) == ["A", "B"]  # the declaration does NOT narrow the pass
+    assert result[nodes["select"]] == ("A", 5)
+    # ...but it IS recorded, so the caller seeds {0} (and prunes) next turn.
+    assert result[run.EFFECTIVE_ACTIVE_COLORS_KEY].colors == frozenset({0})
 
 
 async def test_async_greeting_no_skill_skips_all():
     g, u, s, nodes, calls = _build_async()
     f = _to_callable(g, _async_activation(nodes))
 
-    result = await f({}, {u: None, s: 5})  # event resolves empty -> skip all colored
+    # explicit empty seed + event resolves empty -> skip all colored
+    result = await f({}, {u: None, s: 5}, frozenset())
     assert calls == []
     assert result[nodes["select"]] == ("NONE",)
 
@@ -321,7 +349,7 @@ def test_sync_empty_declaration_does_not_veto():
     )
     f = _to_callable(g, activation)
 
-    f({}, {u: 1, s: 5})
+    f({}, {u: 1, s: 5}, frozenset())
     assert calls == ["A"]
 
 
