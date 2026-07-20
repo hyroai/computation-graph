@@ -501,7 +501,7 @@ async def _run_graph_async(inputs, handled_exceptions, topological_sorted_nodes)
 
         all_results = sync_results
         if async_results:
-            for (node, node_result) in zip(
+            for node, node_result in zip(
                 async_results[0],
                 await asyncio.gather(*async_results[1], return_exceptions=True),
             ):
