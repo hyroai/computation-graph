@@ -5,11 +5,19 @@ import gamla
 from computation_graph import base_types, composers
 
 
+def _short_name(x) -> str:
+    if x is None or isinstance(x, (int, float, str)):
+        return f"{x!s:.30}"
+    if isinstance(x, (dict, list, tuple, set, frozenset)):
+        return f"{type(x).__name__}[{len(x)}]"
+    return type(x).__name__
+
+
 def always(x):
     def always():
         return x
 
-    always.__name__ = f"always {x!s:.30}"
+    always.__name__ = f"always {_short_name(x)}"
     return always
 
 
