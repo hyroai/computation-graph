@@ -262,8 +262,7 @@ async def test_no_result_for_node_that_raised_handled_exception():
 
 
 def test_raise_unhandled_exception():
-    class MyExceptionError(Exception):
-        ...
+    class MyExceptionError(Exception): ...
 
     def raises():
         raise MyExceptionError("BAD")
@@ -273,8 +272,7 @@ def test_raise_unhandled_exception():
 
 
 async def test_raise_unhandled_exception_async():
-    class MyExceptionError(Exception):
-        ...
+    class MyExceptionError(Exception): ...
 
     @composers.compose_left_dict(
         {"x": composers.compose_left_unary(lambda: 1, lambda x: 1)}
@@ -629,7 +627,7 @@ def test_type_safety_messages(caplog, monkeypatch):
         graph_runners.nullary(composers.make_compose(f, lambda: "world"), f)
         == "hello world"
     )
-    assert "TypeError" in caplog.text
+    assert any(record.levelname == "ERROR" for record in caplog.records)
 
 
 def test_type_safety_messages_no_overtrigger(caplog, monkeypatch):
@@ -642,12 +640,12 @@ def test_type_safety_messages_no_overtrigger(caplog, monkeypatch):
         graph_runners.nullary(composers.make_compose(f, lambda: "world"), f)
         == "hello world"
     )
-    assert "TypeError" not in caplog.text
+    assert not any(record.levelname == "ERROR" for record in caplog.records)
 
 
 def test_anonymous_composition_type_safety():
     def f() -> str:
-        pass
+        return ""
 
     def g(x: int):
         pass
@@ -658,7 +656,7 @@ def test_anonymous_composition_type_safety():
 
 def test_named_composition_type_safety():
     def f() -> str:
-        pass
+        return ""
 
     def g(x: int):
         pass

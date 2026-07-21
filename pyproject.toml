@@ -1,2 +1,50 @@
+[build-system]
+requires = ["setuptools>=80", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "computation-graph"
+version = "72"
+description = "Computation graph library"
+readme = "README.md"
+requires-python = ">=3.14"
+dependencies = [
+    "gamla",
+    "immutables",
+    "termcolor",
+    "toposort",
+    "typeguard~=4.5",
+]
+
+[project.optional-dependencies]
+test = [
+    "pygraphviz",
+    "pytest>=5.4.0",
+]
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["computation_graph*"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+
+[tool.isort]
+float_to_top = true
+atomic = true
+line_length = 88
+multi_line_output = 3
+include_trailing_comma = true
+known_third_party = [
+    "gamla",
+    "immutables",
+    "pygraphviz",
+    "pytest",
+    "setuptools",
+    "termcolor",
+    "toposort",
+    "typeguard",
+]
+
 [tool.black]
 skip-magic-trailing-comma = true
