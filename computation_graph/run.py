@@ -28,7 +28,7 @@ import toposort
 import typeguard
 from gamla.optimized import sync as opt_gamla
 
-from computation_graph import base_types, composers, graph, signature
+from computation_graph import base_types, composers, graph, signature, sync_fusion
 from computation_graph.base_types import GraphType
 
 CG_NO_RESULT = "CG_NO_RESULT"
@@ -218,7 +218,7 @@ def _to_callable_with_side_effect_for_single_and_multiple(
     placeholder_to_future_source = opt_gamla.pipe(
         future_source_to_placeholder, gamla.itemmap(lambda k_v: (k_v[1], k_v[0]))
     )
-    get_node_executor = _make_get_node_executor(
+    get_node_executor, fusion_context = _make_get_node_executor(
         edges, handled_exceptions, single_node_side_effect
     )
 
@@ -228,6 +228,12 @@ def _to_callable_with_side_effect_for_single_and_multiple(
         gamla.remove(gamla.contains(placeholder_to_future_source)),
         opt_gamla.maptuple(opt_gamla.pair_right(get_node_executor)),
     )
+    fusion_enabled = is_async and sync_fusion.enabled()
+    unfused_units = topological_sorted_nodes
+    if fusion_enabled:
+        topological_sorted_nodes = sync_fusion.fuse(
+            topological_sorted_nodes, fusion_context
+        )
 
     translate_source_to_placeholder = opt_gamla.compose_left(
         opt_gamla.keyfilter(gamla.contains(future_sources)),
@@ -244,6 +250,16 @@ def _to_callable_with_side_effect_for_single_and_multiple(
             )
 
             return all_node_side_effects_on_edges(all_results)
+
+        if fusion_enabled and os.getenv(base_types.COMPUTATION_GRAPH_DEBUG_ENV_KEY):
+            final_runner = sync_fusion.with_debug_equivalence_check(
+                final_runner,
+                lambda sources_to_values: _run_graph_async(
+                    translate_source_to_placeholder(sources_to_values),
+                    handled_exceptions,
+                    unfused_units,
+                ),
+            )
 
     else:
 
@@ -474,7 +490,17 @@ def _make_get_node_executor(
             return get_deps_and_apply  # type: ignore
         raise Exception("no executor found")
 
-    return get_executor
+    return get_executor, sync_fusion.FusionContext(
+        edges=edges,
+        handled_exceptions=handled_exceptions,
+        single_node_side_effect=single_node_side_effect,
+        node_to_input_async=node_to_input_async,
+        node_to_input_spec_options=node_to_computation_input_spec_options,
+        sync_and_downstream=sync_and_downstream,
+        sync_not_downstream=sync_not_downstream,
+        dep_not_found_error=_DepNotFoundError,
+        profile=_profile,
+    )
 
 
 async def _run_graph_async(inputs, handled_exceptions, topological_sorted_nodes):
@@ -507,7 +533,11 @@ async def _run_graph_async(inputs, handled_exceptions, topological_sorted_nodes)
             ):
                 task_e = node_to_task_or_result[node].exception()
                 if not task_e:
-                    all_results[node] = node_result
+                    if type(node) is sync_fusion.FusedSyncChain:
+                        # A fused chain's task returns all its nodes' results.
+                        all_results.update(node_result)
+                    else:
+                        all_results[node] = node_result
                 elif not unhandled_exception and not isinstance(
                     task_e,
                     (
