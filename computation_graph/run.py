@@ -235,7 +235,23 @@ def _to_callable_with_side_effect_for_single_and_multiple(
     )
     all_node_side_effects_on_edges = gamla.side_effect(all_nodes_side_effect(edges))
 
-    if is_async:
+    if is_async and os.getenv("CG_ASYNC_INLINE") == "1":
+        if not _EAGER_TASKS_NATIVE:
+            raise RuntimeError(
+                "CG_ASYNC_INLINE requires Python 3.12+ (native eager asyncio tasks)."
+            )
+        inline_plan = _build_inline_plan(
+            edges, tuple(n for n, _ in topological_sorted_nodes)
+        )
+
+        async def final_runner(sources_to_values):
+            inputs = translate_source_to_placeholder(sources_to_values)
+            all_results = await _run_graph_async_inline(
+                inputs, handled_exceptions, inline_plan, single_node_side_effect
+            )
+            return all_node_side_effects_on_edges(all_results)
+
+    elif is_async:
 
         async def final_runner(sources_to_values):
             inputs = translate_source_to_placeholder(sources_to_values)
@@ -546,6 +562,299 @@ def _run_graph(
         ):
             pass
     return accumulated_results
+
+
+# The inline scheduler relies on eager tasks (run a coroutine synchronously to
+# its first real suspension) so a short-circuiting async node completes
+# immediately and its downstream collapses to inline execution. Eager tasks are
+# native on Python 3.12+ only; the runner is guarded on this at build time.
+_EAGER_TASKS_NATIVE = hasattr(asyncio, "eager_task_factory")
+
+
+# Types for the inline runner. During a run each node maps to either a plain
+# result or a future (a still-pending task, or a finished task that may carry a
+# handled/unhandled exception).
+_HandledExceptions = Tuple[Type[BaseException], ...]
+_InlineResults = Dict[base_types.ComputationNode, Any]
+_InputOptions = Tuple[_ComputationInputSpec, ...]
+_DepStatus = Tuple[str, Any]  # (kind, payload): value/pending/pruned/error
+_InlinePlan = Tuple[Tuple[base_types.ComputationNode, bool, _InputOptions], ...]
+
+
+def _eager_task(
+    coro: Awaitable[base_types.Result], loop: asyncio.AbstractEventLoop
+) -> asyncio.Future:
+    """Start `coro` eagerly: run it synchronously up to its first real
+    suspension. Returns a future that is ALREADY done if the coroutine completed
+    (or raised) synchronously (the short-circuit case that makes downstream
+    nodes inline-eligible), else a Task that resolves when it finishes. Requires
+    Python 3.12+ (guarded where the inline runner is selected)."""
+    return asyncio.Task(coro, loop=loop, eager_start=True)
+
+
+# ---- inline-runner helpers (module-level so the driver loop stays readable) ---
+def _inline_dep_status(value_or_future: Any, handled: _HandledExceptions) -> _DepStatus:
+    """Classify a stored dependency as ('value', x) | ('pending', None) |
+    ('pruned', None) | ('error', exc). A handled-exception or cancelled task
+    counts as pruned (no value); an unhandled exception is an 'error' that must
+    propagate."""
+    if not asyncio.isfuture(value_or_future):
+        return ("value", value_or_future)
+    if not value_or_future.done():
+        return ("pending", None)
+    if value_or_future.cancelled():
+        return ("pruned", None)
+    exception = value_or_future.exception()
+    if exception is None:
+        return ("value", value_or_future.result())
+    return ("pruned", None) if isinstance(exception, handled) else ("error", exception)
+
+
+def _inline_unwrap(
+    results: _InlineResults, node: base_types.ComputationNode
+) -> base_types.Result:
+    """Read a resolved dependency's value (a finished future, or a plain value)."""
+    value = results[node]
+    return value.result() if asyncio.isfuture(value) else value
+
+
+def _inline_present(
+    results: _InlineResults,
+    node: base_types.ComputationNode,
+    handled: _HandledExceptions,
+) -> bool:
+    """True if `node` produced a value or is still pending -- i.e. an option
+    using it is still viable. Absent (pruned) or handled-failed nodes are not."""
+    return node in results and _inline_dep_status(results[node], handled)[0] in (
+        "value",
+        "pending",
+    )
+
+
+async def _inline_resolve_async(
+    results: _InlineResults,
+    input_options: _InputOptions,
+    handled: _HandledExceptions,
+) -> Optional[_ComputationInput]:
+    """Faithful copy of `node_to_input_async`: try input options in priority
+    order, await the first whose deps are all present, and fall through to the
+    next on a handled raise. Returns (args, kwargs) or None."""
+    for args_spec, kwargs_spec in input_options:
+        if all(_inline_present(results, dep, handled) for dep in args_spec) and all(
+            _inline_present(results, dep, handled) for dep in kwargs_spec.values()
+        ):
+            try:
+                gathered = await asyncio.gather(
+                    *(_to_awaitable(results[dep]) for dep in args_spec),
+                    *(_to_awaitable(results[dep]) for dep in kwargs_spec.values()),
+                )
+            except handled:
+                continue
+            n_args = len(args_spec)
+            return tuple(gathered[:n_args]), dict(
+                zip(kwargs_spec.keys(), gathered[n_args:])
+            )
+    return None
+
+
+def _inline_fast_resolve(
+    results: _InlineResults,
+    input_options: _InputOptions,
+    handled: _HandledExceptions,
+) -> tuple:
+    """Decide a node synchronously, without awaiting:
+    ('run', args, kwargs) | ('defer',) | ('prune',) | ('error', exc).
+    Input options are tried in priority order; the outcome is set by the FIRST
+    non-value dependency in the first not-yet-failed option (a pending dep ->
+    defer, a pruned dep -> try the next option, an unhandled error -> propagate).
+    Only when an option's deps are all resolved values do we run it now."""
+    for args_spec, kwargs_spec in input_options:
+        blocker: Optional[str] = None  # set on the first non-value dependency
+        for dep in (*args_spec, *kwargs_spec.values()):
+            kind, payload = (
+                ("pruned", None)
+                if dep not in results
+                else _inline_dep_status(results[dep], handled)
+            )
+            if kind == "value":
+                continue
+            if kind == "error":
+                return ("error", payload)
+            blocker = kind
+            break
+        if blocker == "pending":
+            return ("defer",)
+        if blocker == "pruned":
+            continue  # this option is dead -> try the next (lower priority) one
+        # all deps are resolved values
+        return (
+            "run",
+            tuple(_inline_unwrap(results, dep) for dep in args_spec),
+            {key: _inline_unwrap(results, dep) for key, dep in kwargs_spec.items()},
+        )
+    return ("prune",)
+
+
+async def _inline_compute_deferred(
+    results: _InlineResults,
+    node: base_types.ComputationNode,
+    is_async_node: bool,
+    input_options: _InputOptions,
+    handled: _HandledExceptions,
+    side_effect: _SingleNodeSideEffect,
+) -> base_types.Result:
+    """The task path for a node that depends on a still-pending async result:
+    await its inputs (with priority fallback) then run it."""
+    resolved_inputs = await _inline_resolve_async(results, input_options, handled)
+    if resolved_inputs is None:
+        raise _DepNotFoundError()
+    args, kwargs = resolved_inputs
+    before = time.perf_counter()
+    result = node.func(*args, **kwargs)
+    if is_async_node:
+        result = await result
+    side_effect(node, result)
+    _profile(node, before)
+    return result
+
+
+async def _inline_run_async(
+    node: base_types.ComputationNode,
+    args: Tuple[base_types.Result, ...],
+    kwargs: Dict[str, base_types.Result],
+    side_effect: _SingleNodeSideEffect,
+) -> base_types.Result:
+    """Run an async node whose inputs are already resolved (eager-started so it
+    overlaps other async work and short-circuits inline when it doesn't await)."""
+    before = time.perf_counter()
+    result = await node.func(*args, **kwargs)
+    side_effect(node, result)
+    _profile(node, before)
+    return result
+
+
+def _build_inline_plan(
+    edges: base_types.GraphType,
+    ordered_nodes: Tuple[base_types.ComputationNode, ...],
+) -> _InlinePlan:
+    """Per-node (node, is_async, input_options) for the inline async runner, in
+    topological order. Same input-spec options as `_make_get_node_executor`,
+    exposed as data."""
+    node_to_incoming_edges = functools.cache(graph.get_incoming_edges_for_node(edges))
+
+    def input_options(node: base_types.ComputationNode) -> _InputOptions:
+        edges_by_key: Dict[str, list] = {}
+        for edge in node_to_incoming_edges(node):
+            edges_by_key.setdefault(base_types.edge_key(edge), []).append(edge)
+        for key in edges_by_key:
+            edges_by_key[key].sort(key=base_types.edge_priority)
+        return tuple(
+            _node_incoming_edges_to_input_spec(edge_combination)
+            for edge_combination in itertools.product(*edges_by_key.values())
+        )
+
+    return tuple(
+        (node, asyncio.iscoroutinefunction(node.func), input_options(node))
+        for node in ordered_nodes
+    )
+
+
+async def _run_graph_async_inline(
+    inputs: _InlineResults,
+    handled_exceptions: _HandledExceptions,
+    plan: _InlinePlan,
+    single_node_side_effect: _SingleNodeSideEffect,
+) -> _NodeToResults:
+    """Async runner that executes a node INLINE when its dependencies are
+    already resolved values, instead of task-wrapping every node downstream of
+    an async node. Behaviour-equivalent to `_run_graph_async`; opt-in via the
+    CG_ASYNC_INLINE env flag. Only nodes that truly depend on a still-pending
+    async result take the task path; everything else runs inline.
+
+    Semantics preserved: priority option-fallback on handled raises (the
+    deferred path mirrors `node_to_input_async`), side-effect/_profile hooks,
+    the sync isawaitable guard, concurrency of independent async ops (eager
+    tasks), and the unhandled-exception cyclic-ref cleanup dance."""
+    handled = (_DepNotFoundError, base_types.SkipComputationError, *handled_exceptions)
+    loop = asyncio.get_running_loop()
+    results: _InlineResults = inputs.copy()
+    tasks: list = []
+    unhandled: Optional[BaseException] = None
+
+    try:
+        for node, is_async_node, input_options in plan:
+            kind, *rest = _inline_fast_resolve(results, input_options, handled)
+            if kind == "prune":
+                continue
+            if kind == "error":
+                unhandled = rest[0]
+                break
+            if kind == "defer":
+                # depends on a still-pending async result -> task path
+                task = _eager_task(
+                    _inline_compute_deferred(
+                        results, node, is_async_node, input_options, handled,
+                        single_node_side_effect,
+                    ),
+                    loop,
+                )
+                results[node] = task
+                tasks.append(task)
+                continue
+            # kind == "run": all deps are resolved values
+            args, kwargs = rest
+            if is_async_node:
+                task = _eager_task(
+                    _inline_run_async(node, args, kwargs, single_node_side_effect),
+                    loop,
+                )
+                results[node] = task
+                tasks.append(task)
+            else:
+                before = time.perf_counter()
+                try:
+                    result = node.func(*args, **kwargs)  # INLINE -- no task
+                except handled:
+                    continue  # produced no value
+                except Exception as exc:  # noqa: BLE001
+                    unhandled = exc
+                    break
+                single_node_side_effect(node, result)
+                if inspect.isawaitable(result):
+                    raise Exception(
+                        f"{node} returned an awaitable result but is not an async function"
+                    )
+                _profile(node, before)
+                results[node] = result
+    except Exception as exc:  # noqa: BLE001
+        unhandled = exc
+    finally:
+        if tasks:
+            await asyncio.gather(*tasks, return_exceptions=True)
+        all_results: _NodeToResults = {}
+        for node, value in results.items():
+            if asyncio.isfuture(value):
+                if value.cancelled():
+                    continue
+                task_exc = value.exception()
+                if task_exc is None:
+                    all_results[node] = value.result()
+                elif isinstance(task_exc, handled):
+                    continue
+                elif unhandled is None:
+                    unhandled = task_exc
+            else:
+                all_results[node] = value
+        if unhandled is not None:
+            # this trick avoids cyclic reference and garbage collection issues
+            try:
+                raise unhandled from unhandled
+            except Exception as exc:
+                del results
+                del tasks
+                del unhandled
+                raise exc from exc
+    return all_results
 
 
 def _graph_reducer(graph_callable):
