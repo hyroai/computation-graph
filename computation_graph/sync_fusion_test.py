@@ -105,7 +105,7 @@ async def test_fused_results_equal_unfused(monkeypatch):
     assert graph.make_computation_node(after_skip) not in fused
 
 
-async def test_chain_nodes_share_one_task_only_when_fused(monkeypatch):
+async def test_chain_nodes_run_in_a_dedicated_task_only_when_fused(monkeypatch):
     tasks = []
 
     def s1(x):
@@ -121,15 +121,20 @@ async def test_chain_nodes_share_one_task_only_when_fused(monkeypatch):
         composers.compose_left_unary(s1, s2),
         sink_node_or_graph=graph.make_computation_node(s2),
     )
+    outer = asyncio.current_task()
 
     _fusion_on(monkeypatch)
     await run.to_callable_strict(g)({}, {})
     assert tasks[0] is tasks[1]
+    assert tasks[0] is not outer
 
     tasks.clear()
     _fusion_off(monkeypatch)
     await run.to_callable_strict(g)({}, {})
-    assert tasks[0] is not tasks[1]
+    # Unfused, a node whose dependencies are already computed runs inline in
+    # the traversing task, so no Task is created for it at all.
+    assert tasks[0] is outer
+    assert tasks[1] is outer
 
 
 async def test_enabled_provider_takes_precedence_over_env(monkeypatch):
@@ -148,19 +153,20 @@ async def test_enabled_provider_takes_precedence_over_env(monkeypatch):
         composers.compose_left_unary(s1, s2),
         sink_node_or_graph=graph.make_computation_node(s2),
     )
+    outer = asyncio.current_task()
 
     # Provider says on, env unset -> fused.
     _fusion_off(monkeypatch)
     monkeypatch.setattr(sync_fusion, "_enabled_provider", lambda: True)
     await run.to_callable_strict(g)({}, {})
-    assert tasks[0] is tasks[1]
+    assert tasks[0] is not outer
 
     # Provider says off, env says on -> provider wins, unfused.
     tasks.clear()
     _fusion_on(monkeypatch)
     monkeypatch.setattr(sync_fusion, "_enabled_provider", lambda: False)
     await run.to_callable_strict(g)({}, {})
-    assert tasks[0] is not tasks[1]
+    assert tasks[0] is outer
 
     # Provider raises -> falls back to env (on).
     def broken_provider():
@@ -169,7 +175,7 @@ async def test_enabled_provider_takes_precedence_over_env(monkeypatch):
     tasks.clear()
     monkeypatch.setattr(sync_fusion, "_enabled_provider", broken_provider)
     await run.to_callable_strict(g)({}, {})
-    assert tasks[0] is tasks[1]
+    assert tasks[0] is not outer
 
 
 async def test_skip_mid_chain_propagates_and_unrelated_chain_survives(monkeypatch):

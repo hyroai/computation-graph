@@ -38,6 +38,17 @@ class _DepNotFoundError(Exception):
     pass
 
 
+class _PendingDependencyError(Exception):
+    pass
+
+
+_PENDING = object()
+
+
+def _eager_create_task(coro):
+    return asyncio.Task(coro, loop=asyncio.get_running_loop(), eager_start=True)
+
+
 _NodeToResults = Dict[base_types.ComputationNode, base_types.Result]
 _ComputationInput = Tuple[Tuple[base_types.Result, ...], Dict[str, base_types.Result]]
 _SingleNodeSideEffect = Callable[[base_types.ComputationNode, Any], None]
@@ -376,7 +387,6 @@ def _make_get_node_executor(
                     del args, kwargs
         return None
 
-    @opt_gamla.after(asyncio.create_task)
     async def await_deps_and_apply(
         accumulated_results: Mapping[
             base_types.ComputationNode, base_types.Result | Awaitable[base_types.Result]
@@ -402,7 +412,6 @@ def _make_get_node_executor(
         _profile(node, before)
         return result
 
-    @opt_gamla.after(asyncio.create_task)
     async def await_deps_and_await(
         accumulated_results: Mapping[
             base_types.ComputationNode, base_types.Result | Awaitable[base_types.Result]
@@ -410,26 +419,6 @@ def _make_get_node_executor(
         node: base_types.ComputationNode,
     ) -> base_types.Result:
         args_kwargs = await node_to_input_async(
-            accumulated_results, node_to_computation_input_spec_options(node)
-        )
-        # We delete the references to the upstream tasks to avoid circular reference (task->exception->traceback->task) and improve memory performance
-        del accumulated_results
-        if args_kwargs is None:
-            raise _DepNotFoundError()
-
-        args, kwargs = args_kwargs
-        before = time.perf_counter()
-        result = await node.func(*args, **kwargs)
-        single_node_side_effect(node, result)
-        _profile(node, before)
-        return result
-
-    @opt_gamla.after(asyncio.create_task)
-    async def get_deps_and_await(
-        accumulated_results: Mapping[base_types.ComputationNode, base_types.Result],
-        node: base_types.ComputationNode,
-    ) -> base_types.Result:
-        args_kwargs = node_to_input_sync(
             accumulated_results, node_to_computation_input_spec_options(node)
         )
         # We delete the references to the upstream tasks to avoid circular reference (task->exception->traceback->task) and improve memory performance
@@ -473,18 +462,113 @@ def _make_get_node_executor(
     tf = graph.traverse_forward(edges)
     downstream_from_async = set(gamla.graph_traverse_many(async_nodes, tf))
 
-    async_and_downstream = async_nodes & downstream_from_async
-    async_not_downstream = async_nodes - downstream_from_async
     sync_and_downstream = sync & downstream_from_async
     sync_not_downstream = sync - downstream_from_async
 
+    await_deps_and_apply_task = opt_gamla.after(_eager_create_task)(
+        await_deps_and_apply
+    )
+    await_deps_and_await_task = opt_gamla.after(_eager_create_task)(
+        await_deps_and_await
+    )
+
+    prune_exceptions = (
+        _DepNotFoundError,
+        base_types.SkipComputationError,
+        *handled_exceptions,
+    )
+
+    def _inline_dependency_value(x):
+        if asyncio.isfuture(x):
+            if not x.done():
+                raise _PendingDependencyError()
+            return x.result()
+        if inspect.isawaitable(x):
+            # Non-future awaitable value; only the task path can await it.
+            raise _PendingDependencyError()
+        return x
+
+    def node_to_input_inline(
+        accumulated_results, input_options: Iterable[_ComputationInputSpec]
+    ):
+        """Synchronous mirror of `node_to_input_async`: resolves the node's input
+        from already-available results. Returns a resolved input, None when no
+        option's dependencies computed, or _PENDING when the first viable option
+        depends on a still-running task (caller falls back to the task path)."""
+        for args_spec, kwargs_spec in input_options:
+            if all(
+                accumulated_results.get(arg, CG_NO_RESULT) is not CG_NO_RESULT
+                for arg in args_spec
+            ) and all(
+                accumulated_results.get(kwarg, CG_NO_RESULT) is not CG_NO_RESULT
+                for kwarg in kwargs_spec.values()
+            ):
+                try:
+                    return (
+                        tuple(
+                            _inline_dependency_value(accumulated_results[arg])
+                            for arg in args_spec
+                        ),
+                        {
+                            k: _inline_dependency_value(accumulated_results[v])
+                            for k, v in kwargs_spec.items()
+                        },
+                    )
+                except _PendingDependencyError:
+                    return _PENDING
+                except prune_exceptions:
+                    ...
+        return None
+
+    async def _apply_async_node(node, args, kwargs):
+        before = time.perf_counter()
+        result = await node.func(*args, **kwargs)
+        single_node_side_effect(node, result)
+        _profile(node, before)
+        return result
+
+    def _make_inline_executor(is_async_node: bool, task_fallback):
+        def inline_executor(
+            accumulated_results, node: base_types.ComputationNode
+        ) -> base_types.Result:
+            resolved = node_to_input_inline(
+                accumulated_results, node_to_computation_input_spec_options(node)
+            )
+            if resolved is _PENDING:
+                return task_fallback(accumulated_results, node)
+            if resolved is None:
+                raise _DepNotFoundError()
+            args, kwargs = resolved
+            if is_async_node:
+                task = _eager_create_task(_apply_async_node(node, args, kwargs))
+                if (
+                    task.done()
+                    and not task.cancelled()
+                    and task.exception() is None
+                    and not asyncio.isfuture(task.result())
+                ):
+                    return task.result()
+                return task
+            before = time.perf_counter()
+            result = node.func(*args, **kwargs)
+            single_node_side_effect(node, result)
+            if inspect.isawaitable(result):
+                raise Exception(
+                    f"{node} returned an awaitable result but is not an async function"
+                )
+            _profile(node, before)
+            return result
+
+        return inline_executor
+
+    inline_async_executor = _make_inline_executor(True, await_deps_and_await_task)
+    inline_sync_executor = _make_inline_executor(False, await_deps_and_apply_task)
+
     def get_executor(node: base_types.ComputationNode) -> _NodeExecutor:
-        if node in async_and_downstream:
-            return await_deps_and_await
-        if node in async_not_downstream:
-            return get_deps_and_await
+        if node in async_nodes:
+            return inline_async_executor
         if node in sync_and_downstream:
-            return await_deps_and_apply
+            return inline_sync_executor
         if node in sync_not_downstream:
             # This is fully sync so it only uses sync results from the mapping, its typing says the whole mapping is sync.
             return get_deps_and_apply  # type: ignore
