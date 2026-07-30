@@ -74,7 +74,7 @@ _toposort_nodes: Callable[
     toposort.toposort,
     # Make async functions come first in each layer so they'll start running before all the sync functions
     opt_gamla.maptuple(
-        gamla.sort_by(lambda n: 0 if inspect.iscoroutinefunction(n.func) else 1)
+        gamla.sort_by(lambda n: 0 if gamla.is_coroutine_function(n.func) else 1)
     ),
     gamla.concat,
     tuple,
@@ -109,7 +109,7 @@ _is_graph_async = opt_gamla.compose_left(
     opt_gamla.mapcat(lambda edge: (edge.source, *edge.args)),
     opt_gamla.remove(gamla.equals(None)),
     opt_gamla.map(base_types.node_implementation),
-    gamla.anymap(inspect.iscoroutinefunction),
+    gamla.anymap(gamla.is_coroutine_function),
 )
 
 
@@ -452,7 +452,7 @@ def _make_get_node_executor(
         return result
 
     all_nodes = graph.get_all_nodes(edges)
-    async_nodes = {n for n in all_nodes if inspect.iscoroutinefunction(n.func)}
+    async_nodes = {n for n in all_nodes if gamla.is_coroutine_function(n.func)}
     sync = all_nodes - async_nodes
     tf = graph.traverse_forward(edges)
     downstream_from_async = set(gamla.graph_traverse_many(async_nodes, tf))

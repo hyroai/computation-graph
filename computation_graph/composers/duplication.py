@@ -1,6 +1,5 @@
 import dataclasses
 import functools
-import inspect
 from typing import Dict
 
 import gamla
@@ -10,7 +9,7 @@ from computation_graph.composers import debug
 
 
 def duplicate_function(func):
-    if inspect.iscoroutinefunction(func):
+    if gamla.is_coroutine_function(func):
 
         @functools.wraps(func)
         async def inner(*args, **kwargs):
