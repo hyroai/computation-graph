@@ -4,12 +4,12 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "computation-graph"
-version = "72"
+version = "73"
 description = "Computation graph library"
 readme = "README.md"
 requires-python = ">=3.14"
 dependencies = [
-    "gamla",
+    "gamla==164",
     "immutables",
     "termcolor",
     "toposort",
