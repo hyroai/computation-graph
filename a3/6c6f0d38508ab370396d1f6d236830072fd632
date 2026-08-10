@@ -1,0 +1,21 @@
+computation_graph/sync_fusion_test.py
+  s_44f9d428cbb3e9::t_d7a59ef67dc040 6
+computation_graph/sync_fusion.py
+  s_44f9d428cbb3e9::t_d7a59ef67dc040 34
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.21",
+  "base_commit_sha": "a36c6f0d38508ab370396d1f6d236830072fd632",
+  "prompts": {},
+  "sessions": {
+    "s_44f9d428cbb3e9": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "db2d8f70-bb00-4e9e-bdf0-9d2c3e56af20",
+        "model": "claude-fable-5"
+      },
+      "human_author": "Yinon Eliraz <yinon.e@hyro.ai>"
+    }
+  }
+}
