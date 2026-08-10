@@ -280,6 +280,7 @@ def fuse(node_executor_pairs: Tuple, context: FusionContext) -> Tuple:
     other units are passed through untouched."""
     chains = sync_chains(context.edges, context.sync_and_downstream)
     if not chains:
+        logging.info("sync chain fusion: enabled but the graph has no fusable chains")
         return node_executor_pairs
     topological_sorted_nodes = tuple(pair[0] for pair in node_executor_pairs)
     # Nodes whose value in the results mapping is never a Future: inputs
@@ -303,7 +304,7 @@ def fuse(node_executor_pairs: Tuple, context: FusionContext) -> Tuple:
         )
         for node in chain_nodes:
             node_to_chain[node] = chain
-    logging.debug(
+    logging.info(
         f"sync chain fusion: fused {len(node_to_chain)} of {len(topological_sorted_nodes)} nodes into {len(chains)} chains"
     )
     units: list = []
