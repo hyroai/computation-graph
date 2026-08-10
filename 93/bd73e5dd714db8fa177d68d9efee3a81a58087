@@ -1,0 +1,52 @@
+computation_graph/run.py
+  s_44f9d428cbb3e9::t_f72971310ca1a7 493-502
+  s_44f9d428cbb3e9::t_39a53392b32c72 538-540
+  s_44f9d428cbb3e9::t_244e444c4875ca 221,231-236
+  s_44f9d428cbb3e9::t_5e8f059f69d63a 31
+  s_44f9d428cbb3e9::t_8b52d2275f26b9 254-261
+  s_44f9d428cbb3e9::t_83d8fe25a659d0 503
+  s_44f9d428cbb3e9::t_ac6c630609dd73 536-537
+  s_44f9d428cbb3e9::t_b12f506bec51ad 262-263
+computation_graph/sync_fusion.py
+  s_44f9d428cbb3e9::t_8cf3fe68e9b03f 309
+  s_44f9d428cbb3e9::t_d7a59ef67dc040 34
+  s_44f9d428cbb3e9::t_be8d1ad4c7a9a4 26-32,52-65,68-74
+  s_44f9d428cbb3e9::t_43b6c73295eafe 1-25,33,35-41,43-51,66-67,75-82,84-91,94-104,106-109,112-115,119-155,157-262,266-280,282-308,310,313,315,320-353
+  s_44f9d428cbb3e9::t_308f7046faaf37 263-265
+  s_44f9d428cbb3e9::t_fc6cf162015193 116,281
+  s_44f9d428cbb3e9::t_963fddf2eacf9a 105,117
+  s_44f9d428cbb3e9::t_3e9572175b409c 311-312,314,316-319
+  s_44f9d428cbb3e9::t_737a0df11de679 83,92-93
+  s_44f9d428cbb3e9::t_298b09fbfac4a0 42,110-111,118,156
+computation_graph/sync_fusion_test.py
+  s_44f9d428cbb3e9::t_fc6cf162015193 63
+  s_44f9d428cbb3e9::t_0cb323dc8f49c9 25,27,54,61,90,97,119,122,193,199,227,232,259,265,287,292,317,322,344,378,382,401,405
+  s_44f9d428cbb3e9::t_7f014d647fd200 347-368
+  s_44f9d428cbb3e9::t_d697bf9af9230e 407-411
+  s_44f9d428cbb3e9::t_610051c1fe8550 135-174
+  s_44f9d428cbb3e9::t_b8c5c56925568a 12,14
+  s_44f9d428cbb3e9::t_8f342f49dd424f 26,29
+  s_44f9d428cbb3e9::t_d7a59ef67dc040 6
+  s_44f9d428cbb3e9::t_d5ec6dffdaa69b 1-5,7-11,13,15-24,28,30-53,55-60,62,64-89,91-96,98-118,120-121,123-134,175-192,194-198,200-226,228-231,233-258,260-264,266-286,288-291,293-316,318-321,323-343,345-346,369-377,379-381,383-400,402-404,406,412-413
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.21",
+  "base_commit_sha": "93bd73e5dd714db8fa177d68d9efee3a81a58087",
+  "prompts": {},
+  "humans": {
+    "h_738e1775e47e41": {
+      "author": "Yinon Eliraz <yinon.e@hyro.ai>"
+    }
+  },
+  "sessions": {
+    "s_44f9d428cbb3e9": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "db2d8f70-bb00-4e9e-bdf0-9d2c3e56af20",
+        "model": "claude-fable-5"
+      },
+      "human_author": "Yinon Eliraz <yinon.e@hyro.ai>"
+    }
+  }
+}
