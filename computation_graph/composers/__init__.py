@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import functools
 from typing import Any, Callable, Dict, Iterable, Optional, Sequence, Tuple
 
 import gamla
@@ -358,14 +359,39 @@ def compose_unary(*funcs: base_types.CallableOrNodeOrGraph) -> base_types.GraphT
     return _make_compose_inner(*funcs, key=None, is_future=False, priority=0)
 
 
+def _make_memory_default(default: base_types.Result) -> Callable:
+    def when_memory_unavailable():
+        return default
+
+    return when_memory_unavailable
+
+
+# One node per distinct default. The fallback is a zero-input, stateless constant and it
+# never leaves this module, so nothing can depend on two of them being distinct objects;
+# `typed=True` keeps a `1` default apart from a `True` one. Contrast `lift.always`, which
+# must NOT be shared: callers use its return value as a dict key, and
+# `slot_filling.case_dict` relies on its own `always(True)` catch-all being a fresh object
+# so that it cannot collide with a caller's condition.
+_memory_default_by_value = functools.lru_cache(maxsize=512, typed=True)(
+    _make_memory_default
+)
+
+
+def _memory_default(default: base_types.Result) -> Callable:
+    try:
+        hash(default)
+    except TypeError:
+        return _make_memory_default(default)
+    return _memory_default_by_value(default)
+
+
 def make_compose_future(
     destination: base_types.CallableOrNodeOrGraph,
     source: base_types.CallableOrNodeOrGraph,
     key: Optional[str],
     default: base_types.Result,
 ) -> base_types.GraphType:
-    def when_memory_unavailable():
-        return default
+    when_memory_unavailable = _memory_default(default)
 
     if not isinstance(destination, base_types.GraphType):
         destination = make_computation_node(destination)
