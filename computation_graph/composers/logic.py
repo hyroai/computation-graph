@@ -1,4 +1,4 @@
-from typing import Iterable, Tuple
+from typing import Iterable
 
 import gamla
 
@@ -6,14 +6,14 @@ from computation_graph import base_types, composers
 
 
 def all_truthy(functions: Iterable[base_types.GraphOrCallable]) -> base_types.GraphType:
-    def all_truthy(args: Tuple) -> bool:
+    def all_truthy(*args) -> bool:
         return all(args)
 
     return composers.make_and(functions, all_truthy)
 
 
 def any_truthy(functions: Iterable[base_types.GraphOrCallable]) -> base_types.GraphType:
-    def any_truthy(args: Tuple) -> bool:
+    def any_truthy(*args) -> bool:
         return any(args)
 
     return composers.make_and(functions, any_truthy)
