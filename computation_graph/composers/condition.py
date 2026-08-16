@@ -21,14 +21,13 @@ def when(
 def require(
     condition: base_types.GraphOrCallable, result: base_types.GraphOrCallable
 ) -> base_types.GraphType:
-    def check(x):
-        if x:
-            return None
-        raise base_types.SkipComputationError
+    def require(condition_value, result_value):
+        if not condition_value:
+            raise base_types.SkipComputationError
+        return result_value
 
-    return composers.make_and(
-        (composers.compose_unary(check, condition), result),
-        merge_fn=lambda args: args[1],
+    return composers.compose_dict(
+        require, {"condition_value": condition, "result_value": result}
     )
 
 
