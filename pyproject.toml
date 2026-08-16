@@ -16,7 +16,7 @@ dependencies = [
     "typeguard~=4.5",
 ]
 
-[project.optional-dependencies]
+[dependency-groups]
 test = [
     "pygraphviz",
     "pytest>=5.4.0",
