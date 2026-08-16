@@ -1,0 +1,19 @@
+computation_graph/run.py
+  s_44f9d428cbb3e9::t_0024e362d7e4ff 31,221,477,510
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.22",
+  "base_commit_sha": "58cd85fd6a75e727c8ef50d17db4c39d7cb9e336",
+  "prompts": {},
+  "sessions": {
+    "s_44f9d428cbb3e9": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "db2d8f70-bb00-4e9e-bdf0-9d2c3e56af20",
+        "model": "claude-fable-5"
+      },
+      "human_author": "Yinon Eliraz <yinon.e@hyro.ai>"
+    }
+  }
+}
