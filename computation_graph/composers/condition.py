@@ -21,15 +21,6 @@ def when(
 def require(
     condition: base_types.GraphOrCallable, result: base_types.GraphOrCallable
 ) -> base_types.GraphType:
-    """Pass `result` through, unless `condition` is falsy, in which case skip.
-
-    One node, not a guard composed with an aggregation: raising from the node itself is
-    equivalent because the runner treats a node that raises `SkipComputationError` the
-    same as one whose input raised, and `result` is evaluated either way since nothing
-    is pruned. Splitting this into `check` + `make_and` costs two extra nodes per call,
-    which reached 21% of a production agent graph.
-    """
-
     def require(condition_value, result_value):
         if not condition_value:
             raise base_types.SkipComputationError
