@@ -30,8 +30,12 @@ def _node_that_raises():
     raise base_types.SkipComputationError
 
 
-def _merger(args, side_effects):
-    return "[" + ",".join(args) + f"], side_effects={side_effects}"
+def _merge(*args):
+    return "[" + ",".join(args) + "]"
+
+
+def _merger(merged, side_effects):
+    return f"{merged}, side_effects={side_effects}"
 
 
 def _next_int(x):
@@ -355,7 +359,8 @@ def test_and_with_future():
         composers.compose_source(_reducer_node, key="arg1", source=source1),
         composers.make_compose(_reducer_node, _next_int, key="cur_int"),
         composers.compose_unary_future(_next_int, _next_int, None),
-        composers.make_and((_reducer_node, _node2, _node1), _merger),
+        composers.make_and((_reducer_node, _node2, _node1), _merge),
+        composers.make_compose(_merger, _merge, key="merged"),
         sink_node_or_graph=graph.make_computation_node(_merger),
     )
     assert (
@@ -377,7 +382,8 @@ def test_and_with_unactionable():
         composers.compose_source(_merger, key="side_effects", source=source2),
         composers.compose_source(_reducer_node, key="arg1", source=source1),
         composers.make_compose(_reducer_node, _next_int, key="cur_int"),
-        composers.make_and((_reducer_node, _node_that_raises), _merger),
+        composers.make_and((_reducer_node, _node_that_raises), _merge),
+        composers.make_compose(_merger, _merge, key="merged"),
         sink_node_or_graph=graph.make_computation_node(_merger),
     )
     with pytest.raises(KeyError):
@@ -394,7 +400,7 @@ def test_and_with_graphs():
             duplication.duplicate_graph(g),
             duplication.duplicate_graph(g),
         ],
-        merge_fn=lambda args: args,
+        merge_fn=lambda *args: args,
     )
 
     assert graph_runners.variadic_infer_sink(graph_with_and)({source: 1234}) == (
@@ -487,7 +493,7 @@ def test_compose_with_node_already_in_graph():
     def sink(x, y):
         return f"x={x} y={y}"
 
-    def merger(args):
+    def merger(*args):
         return " ".join(args)
 
     assert (
@@ -684,7 +690,7 @@ def _times_2(x):
     return x * 2
 
 
-def _sum(args):
+def _sum(*args):
     return sum(args)
 
 
@@ -798,7 +804,7 @@ def test_dont_duplicate_sources():
 def test_duplication_with_args():
     graph = composers.compose_unary(
         lambda x: x,
-        composers.make_and([_node1, _node2], merge_fn=lambda args: args),
+        composers.make_and([_node1, _node2], merge_fn=lambda *args: args),
         lambda: 1234,
     )
     duplicated = duplication.duplicate_graph(graph)
@@ -898,12 +904,12 @@ def test_replace_source_with_args():
                             graph.make_computation_node(_node1),
                             graph.make_computation_node(_node2),
                         ),
-                        destination=graph.make_computation_node(_merger),
+                        destination=graph.make_computation_node(_merge),
                         key="args",
                     )
                 ]
             ),
-            graph.make_computation_node(_merger),
+            graph.make_computation_node(_merge),
         )
     ).edges == frozenset(
         (
@@ -915,7 +921,7 @@ def test_replace_source_with_args():
                     graph.make_computation_node(_node1_async),
                     graph.make_computation_node(_node2),
                 ),
-                destination=graph.make_computation_node(_merger),
+                destination=graph.make_computation_node(_merge),
                 key="args",
             ),
         )
