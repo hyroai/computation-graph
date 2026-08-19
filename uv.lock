@@ -78,7 +78,7 @@ wheels = [
 
 [[package]]
 name = "computation-graph"
-version = "74"
+version = "76"
 source = { editable = "." }
 dependencies = [
     { name = "gamla" },
