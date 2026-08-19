@@ -254,7 +254,7 @@ def test_make_first_with_composed_graph():
 
 
 def test_make_and_two_nodes():
-    def merge(args):
+    def merge(*args):
         return args
 
     g = composers.make_and([lambda: 1, lambda: 2], merge)
@@ -262,7 +262,7 @@ def test_make_and_two_nodes():
 
 
 def test_make_and_three_nodes():
-    def merge(args):
+    def merge(*args):
         return args
 
     g = composers.make_and([lambda: 1, lambda: 2, lambda: 3], merge)
@@ -355,7 +355,7 @@ def test_future_composition_graph_source_sink_is_source_sink():
     def dest(x, y):
         return x + y
 
-    def aggregator(args):
+    def aggregator(*args):
         return sum(args)
 
     source_graph = composers.make_and([a, b, dest], aggregator)

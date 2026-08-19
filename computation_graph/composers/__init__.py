@@ -35,23 +35,33 @@ def make_optional(
 
 def make_and(
     funcs: Iterable[base_types.CallableOrNodeOrGraph],
-    merge_fn: base_types.CallableOrNodeOrGraph,
+    merge_fn: base_types.CallableOrNode,
 ) -> base_types.GraphType:
     """Aggregate funcs' output into `merge_fn`.
-    * merge_fn should have only 1 argument named `args`.
+    * merge_fn takes `*args` and nothing else, so that the funcs bind straight to
+      it. To combine the aggregate with an input from elsewhere in the graph,
+      compose merge_fn into a second node taking both.
     * All funcs must not raise an exception in order for merge_fn to run.
-    >>>make_and(composers.make_and([gamla.just(1), gamla.just(2), gamla.just(3)], lambda args: sum(args)))
-    (justjustjust----*args---->args_to_tuple, args_to_tuple----args----><lambda>)
+    >>>make_and([gamla.just(1), gamla.just(2), gamla.just(3)], lambda *args: sum(args))
+    (justjustjust----*args----><lambda>)
     Will return 6.
     """
-
-    def args_to_tuple(*args):
-        return args
-
-    merge_node = graph.make_computation_node(args_to_tuple)
-    # `merge_fn` may be a callable/node or a whole graph; `make_compose` handles
-    # both, connecting `merge_node`'s output into `merge_fn` under key "args".
-    merge_fn_graph = make_compose(merge_fn, merge_node, key="args")
+    assert not isinstance(merge_fn, base_types.GraphType), (
+        f"make_and cannot aggregate into a graph: {merge_fn}. The `*args` edge has to "
+        "land on the graph's sink, and a sink either takes named parameters, so it "
+        "cannot receive an args edge at all, or is already `*args` fed by its own "
+        "aggregation, so a second args edge collides. Aggregate into a `def f(*args)` "
+        "callable and compose the graph onto its output instead."
+    )
+    merge_node = graph.make_computation_node(merge_fn)
+    assert merge_node.signature.is_args, (
+        f"make_and's merge_fn must take *args, but {merge_fn} takes "
+        f"{merge_node.signature.kwargs}. Write `def f(*args)` rather than `def f(args)` "
+        "— the body already treats the funcs' outputs as a tuple. If it also needs an "
+        "input from elsewhere in the graph, keep this one *args-only and compose it into "
+        "a second node taking both, as a node cannot be fed by an args edge and a named "
+        "edge at once."
+    )
 
     return gamla.sync.pipe(
         funcs,
@@ -87,9 +97,7 @@ def make_and(
             ),
         ),
         tuple,
-        lambda graphs: graph.merge_graphs(
-            *graphs, merge_fn_graph, sink_node_or_graph=merge_fn_graph
-        ),
+        lambda graphs: graph.merge_graphs(*graphs, sink_node_or_graph=merge_node),
     )
 
 
@@ -504,10 +512,11 @@ def compose_many_to_one(
 def aggregation(
     aggregation: Callable[[Iterable], Any], graphs: Iterable[base_types.GraphOrCallable]
 ) -> base_types.GraphType:
-    """Same as `compose_many_to_one`, but takes care to duplicate `aggregation`, and allows it to have any arg name."""
-    return make_and(
-        graphs,
-        # It is important that `aggregation` is duplicated here.
-        # If it weren't for the `compose_left` we would need to do it explicitly.
-        gamla.compose_left(lambda args: args, aggregation),
-    )
+    """Same as `compose_many_to_one`, but takes care to duplicate `aggregation`, and lets it take the funcs' outputs as a single tuple."""
+
+    # The adapter gives `aggregation` a fresh identity per call, and is what makes
+    # a merge function that takes one tuple usable where `make_and` wants `*args`.
+    def adapter(*args):
+        return aggregation(args)
+
+    return make_and(graphs, adapter)
