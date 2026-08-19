@@ -47,8 +47,11 @@ def make_and(
     Will return 6.
     """
     assert not isinstance(merge_fn, base_types.GraphType), (
-        f"make_and's merge_fn must be a callable taking *args, not a graph: {merge_fn}. "
-        "Compose the graph onto the output of such a callable instead."
+        f"make_and cannot aggregate into a graph: {merge_fn}. The `*args` edge has to "
+        "land on the graph's sink, and a sink either takes named parameters, so it "
+        "cannot receive an args edge at all, or is already `*args` fed by its own "
+        "aggregation, so a second args edge collides. Aggregate into a `def f(*args)` "
+        "callable and compose the graph onto its output instead."
     )
     merge_node = graph.make_computation_node(merge_fn)
     assert merge_node.signature.is_args, (
