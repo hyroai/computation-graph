@@ -11,6 +11,10 @@ A function composition framework that supports:
 
 To deploy: `python setup.py sdist bdist_wheel; twine upload dist/*; rm -rf dist/;`
 
+### Node identity and duplication
+
+A node is a function *plus* the wiring that feeds it. Composing the same function twice with the same inputs yields one shared node: edges are a `frozenset`, and equal edges collapse. Use `duplicate_function` / `duplicate_graph` (`computation_graph/composers/duplication.py`) only when the same function must take *different* inputs at the same parameter within one graph, which otherwise fails the build with "There are multiple edges with the same destination, key and priority". Input-less nodes never need it, and every needless copy is a permanent extra node. The module docstring spells out the rule and the cases that do not need it.
+
 ### Type checking
 
 The runner will type check all outputs for nodes with return type annotations. In case of a wrong typing, it will log the node at fault.
