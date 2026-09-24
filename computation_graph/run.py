@@ -63,22 +63,87 @@ def _transpose_graph(
     )
 
 
-_toposort_nodes: Callable[
-    [base_types.GraphType], Tuple[FrozenSet[base_types.ComputationNode], ...]
+_node_to_dependencies: Callable[
+    [Iterable[base_types.ComputationEdge]],
+    Dict[base_types.ComputationNode, Set[base_types.ComputationNode]],
 ] = opt_gamla.compose_left(
     opt_gamla.groupby_many(base_types.edge_sources),
     opt_gamla.valmap(
         opt_gamla.compose_left(opt_gamla.map(base_types.edge_destination), set)
     ),
     _transpose_graph,
+)
+
+# `toposort` layers, async functions first in each layer so they start before the layer's sync ones.
+_layered_order: Callable[
+    [Dict[base_types.ComputationNode, Set[base_types.ComputationNode]]],
+    Tuple[base_types.ComputationNode, ...],
+] = opt_gamla.compose_left(
     toposort.toposort,
-    # Make async functions come first in each layer so they'll start running before all the sync functions
     opt_gamla.maptuple(
         gamla.sort_by(lambda n: 0 if gamla.is_coroutine_function(n.func) else 1)
     ),
     gamla.concat,
     tuple,
 )
+
+
+def _ancestors(
+    node_to_dependencies: Dict[
+        base_types.ComputationNode, Set[base_types.ComputationNode]
+    ],
+    node: base_types.ComputationNode,
+) -> FrozenSet[base_types.ComputationNode]:
+    seen: Set[base_types.ComputationNode] = set()
+    stack = list(node_to_dependencies.get(node, ()))
+    while stack:
+        current = stack.pop()
+        if current not in seen:
+            seen.add(current)
+            stack.extend(node_to_dependencies.get(current, ()))
+    return frozenset(seen)
+
+
+def _io_cones_first(
+    node_to_dependencies: Dict[
+        base_types.ComputationNode, Set[base_types.ComputationNode]
+    ],
+    order: Tuple[base_types.ComputationNode, ...],
+) -> Tuple[base_types.ComputationNode, ...]:
+    """Reorders a topological order so every async node runs as early as its inputs allow.
+
+    `toposort` puts a node in the layer given by its longest input chain, and a node in layer k runs
+    after every node of the layers below k in the whole graph, needed or not. An async node (an LLM
+    or HTTP call) whose inputs are a few hops deep therefore starts after thousands of unrelated sync
+    nodes. Here each async node's ancestor cone is emitted first (smallest cone first, so the cheapest
+    requests leave earliest), then the node, then everything left. A cone is closed under inputs, so
+    the result is still a topological order; only the visiting order changes.
+    """
+    index = {node: position for position, node in enumerate(order)}
+    cones = {
+        node: _ancestors(node_to_dependencies, node)
+        for node in order
+        if gamla.is_coroutine_function(node.func)
+    }
+    emitted: Set[base_types.ComputationNode] = set()
+    result = []
+    for node in sorted(cones, key=lambda n: (len(cones[n]), index[n])):
+        if node in emitted:
+            continue
+        pending = sorted(cones[node] - emitted, key=index.__getitem__)
+        result.extend(pending)
+        result.append(node)
+        emitted.update(pending)
+        emitted.add(node)
+    result.extend(node for node in order if node not in emitted)
+    return tuple(result)
+
+
+def _toposort_nodes(
+    edges: Iterable[base_types.ComputationEdge],
+) -> Tuple[base_types.ComputationNode, ...]:
+    node_to_dependencies = _node_to_dependencies(edges)
+    return _io_cones_first(node_to_dependencies, _layered_order(node_to_dependencies))
 
 
 def _type_check(node: base_types.ComputationNode, result):
