@@ -113,35 +113,60 @@ _is_graph_async = opt_gamla.compose_left(
 )
 
 
+_FutureKey = Tuple[base_types.ComputationNode, Any]  # (future source, edge default)
+
+
+def _future_edge_placeholders(
+    edges: Iterable[base_types.ComputationEdge],
+) -> Dict[_FutureKey, base_types.ComputationNode]:
+    """One placeholder source per (future source, default): readers of the same state
+    with different starting values must not share one."""
+    placeholders: Dict[_FutureKey, base_types.ComputationNode] = {}
+    for edge in edges:
+        if not edge.is_future:
+            continue
+        # We assume that future edges cannot be with multiple sources
+        assert edge.source, "only supports singular edges for now"
+        placeholders.setdefault(
+            (edge.source, edge.default), graph.make_source_with_name(edge.source.name)
+        )
+    return placeholders
+
+
+def _merge_future_edge_defaults(
+    edges: Iterable[base_types.ComputationEdge],
+) -> Tuple[base_types.ComputationEdge, ...]:
+    """A future edge wired both with and without a default (a bot input is wired by a
+    source composer, its reader may also declare a starting value) is one edge carrying
+    the default, which is what its default node used to provide."""
+    edges = tuple(edges)
+    defaults: Dict[Tuple, Any] = {}
+    for edge in edges:
+        if edge.is_future and edge.default is not base_types.NoDefault:
+            defaults.setdefault(
+                (edge.source, edge.destination, edge.key, edge.priority), edge.default
+            )
+
+    def with_default(edge):
+        if not edge.is_future or edge.default is not base_types.NoDefault:
+            return edge
+        key = (edge.source, edge.destination, edge.key, edge.priority)
+        if key not in defaults:
+            return edge
+        return dataclasses.replace(edge, default=defaults[key])
+
+    return tuple(gamla.unique(map(with_default, edges)))
+
+
 def _future_edge_to_regular_edge_with_placeholder(
-    source_to_placeholder: dict[base_types.ComputationNode, base_types.ComputationNode]
+    placeholders: Dict[_FutureKey, base_types.ComputationNode]
 ) -> Callable[[base_types.ComputationEdge], base_types.ComputationEdge]:
     def replace_source(edge):
-        assert edge.source, "only supports singular edges for now"
-
         return dataclasses.replace(
-            edge, is_future=False, source=source_to_placeholder[edge.source]
+            edge, is_future=False, source=placeholders[(edge.source, edge.default)]
         )
 
     return replace_source
-
-
-_map_future_source_to_placeholder = opt_gamla.compose_left(
-    opt_gamla.map(
-        opt_gamla.pair_right(
-            opt_gamla.compose_left(
-                gamla.attrgetter("name"), graph.make_source_with_name
-            )
-        )
-    ),
-    gamla.frozendict,
-)
-_graph_to_future_sources = opt_gamla.compose_left(
-    opt_gamla.filter(base_types.edge_is_future),
-    # We assume that future edges cannot be with multiple sources
-    opt_gamla.map(base_types.edge_source),
-    frozenset,
-)
 
 
 """Replace multiple edges pointing to a terminal with one edge that has multiple args"""
@@ -197,17 +222,14 @@ def _to_callable_with_side_effect_for_single_and_multiple(
         else single_node_side_effect
     )
 
-    future_sources = _graph_to_future_sources(edges)
-    future_source_to_placeholder = _map_future_source_to_placeholder(future_sources)
+    unique_edges = _merge_future_edge_defaults(gamla.unique(edges))
+    placeholders = _future_edge_placeholders(unique_edges)
     edges = gamla.pipe(
-        edges,
-        gamla.unique,
+        unique_edges,
         opt_gamla.map(
             opt_gamla.when(
                 base_types.edge_is_future,
-                _future_edge_to_regular_edge_with_placeholder(
-                    future_source_to_placeholder
-                ),
+                _future_edge_to_regular_edge_with_placeholder(placeholders),
             )
         ),
         tuple,
@@ -215,9 +237,6 @@ def _to_callable_with_side_effect_for_single_and_multiple(
         gamla.side_effect(base_types.assert_no_unwanted_ambiguity_on_edges),
     )
     is_async = _is_graph_async(edges)
-    placeholder_to_future_source = opt_gamla.pipe(
-        future_source_to_placeholder, gamla.itemmap(lambda k_v: (k_v[1], k_v[0]))
-    )
     get_node_executor = _make_get_node_executor(
         edges, handled_exceptions, single_node_side_effect
     )
@@ -225,14 +244,35 @@ def _to_callable_with_side_effect_for_single_and_multiple(
     topological_sorted_nodes = opt_gamla.pipe(
         edges,
         _toposort_nodes,
-        gamla.remove(gamla.contains(placeholder_to_future_source)),
+        gamla.remove(gamla.contains(frozenset(placeholders.values()))),
         opt_gamla.maptuple(opt_gamla.pair_right(get_node_executor)),
     )
 
-    translate_source_to_placeholder = opt_gamla.compose_left(
-        opt_gamla.keyfilter(gamla.contains(future_sources)),
-        opt_gamla.keymap(future_source_to_placeholder.__getitem__),
-    )
+    source_to_placeholders: Dict[
+        base_types.ComputationNode, Tuple[base_types.ComputationNode, ...]
+    ] = {}
+    for (source, _), placeholder in placeholders.items():
+        source_to_placeholders[source] = source_to_placeholders.get(source, ()) + (
+            placeholder,
+        )
+    # Until a source has produced a result, its placeholders hold the edges' defaults.
+    placeholder_defaults = {
+        placeholder: default
+        for (_, default), placeholder in placeholders.items()
+        if default is not base_types.NoDefault
+    }
+
+    def translate_source_to_placeholder(sources_to_values):
+        return {
+            **placeholder_defaults,
+            **{
+                placeholder: value
+                for source, value in sources_to_values.items()
+                if source in source_to_placeholders
+                for placeholder in source_to_placeholders[source]
+            },
+        }
+
     all_node_side_effects_on_edges = gamla.side_effect(all_nodes_side_effect(edges))
 
     if is_async:

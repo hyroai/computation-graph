@@ -108,6 +108,117 @@ async def test_async_run_as_soon_as_possible(capsys):
     )
 
 
+def _running_total(x, previous):
+    return previous + x
+
+
+def _turn_value(x):
+    return x
+
+
+def test_future_edge_default_is_read_until_the_source_has_a_result():
+    g = graph.merge_graphs(
+        composers.make_compose(_running_total, _turn_value, key="x"),
+        composers.compose_left_future(_running_total, _running_total, "previous", 100),
+        sink_node_or_graph=graph.make_computation_node(_running_total),
+    )
+    assert not any(
+        "when_memory_unavailable" in str(node) for node in graph.get_all_nodes(g.edges)
+    )
+    f = graph_runners.unary_with_state(g, _turn_value, _running_total)
+    assert f(1) == 101
+    assert f(1, 2, 3) == 106
+
+
+def test_future_edge_readers_of_one_state_keep_their_own_defaults():
+    def plus_ten(previous):
+        return previous + 10
+
+    def times_two(previous):
+        return previous * 2
+
+    def sink(a, b):
+        return a, b
+
+    f = graph_runners.unary_with_state(
+        graph.merge_graphs(
+            composers.make_compose(_running_total, _turn_value, key="x"),
+            composers.compose_left_future(
+                _running_total, _running_total, "previous", 0
+            ),
+            composers.compose_left_future(_running_total, plus_ten, "previous", 0),
+            composers.compose_left_future(_running_total, times_two, "previous", 1),
+            composers.make_compose(sink, plus_ten, key="a"),
+            composers.make_compose(sink, times_two, key="b"),
+            sink_node_or_graph=graph.make_computation_node(sink),
+        ),
+        _turn_value,
+        sink,
+    )
+    assert f(5) == (10, 2)
+    assert f(5, 5) == (15, 10)
+
+
+def test_future_edge_wired_with_and_without_a_default_reads_the_default():
+    source = graph.make_source_with_name("x")
+
+    def reader(x):
+        return x
+
+    f = run.to_callable_strict(
+        graph.merge_graphs(
+            composers.compose_left_source(source, "x")(reader),
+            composers.compose_left_future(source, reader, "x", "fallback"),
+            sink_node_or_graph=graph.make_computation_node(reader),
+        )
+    )
+    assert f({}, {})[graph.make_computation_node(reader)] == "fallback"
+    assert f({}, {source: "given"})[graph.make_computation_node(reader)] == "given"
+
+
+def test_future_edge_default_goes_only_on_the_new_edge():
+    source = graph.make_source_with_name("x")
+
+    def reader(x):
+        return x
+
+    def follower(previous):
+        return previous
+
+    g = graph.merge_graphs(
+        composers.compose_left_future(
+            composers.compose_left_source(source, "x")(reader),
+            follower,
+            "previous",
+            "start",
+        ),
+        sink_node_or_graph=graph.make_computation_node(follower),
+    )
+    assert {edge.default for edge in g.edges if edge.is_future} == {
+        base_types.NoDefault,
+        "start",
+    }
+    f = run.to_callable_strict(g)
+    first = f({}, {source: 1})
+    assert first[graph.make_computation_node(follower)] == "start"
+    assert f(first, {source: 2})[graph.make_computation_node(follower)] == 1
+
+
+def test_unhashable_future_edge_default_keeps_a_default_node():
+    def collect(x, previous):
+        return previous + [x]
+
+    g = graph.merge_graphs(
+        composers.make_compose(collect, _turn_value, key="x"),
+        composers.compose_left_future(collect, collect, "previous", []),
+        sink_node_or_graph=graph.make_computation_node(collect),
+    )
+    assert any(
+        "when_memory_unavailable" in str(node) for node in graph.get_all_nodes(g.edges)
+    )
+    assert graph_runners.unary_with_state(g, _turn_value, collect)(1, 2) == [1, 2]
+
+
 async def test_simple_async():
     assert (
         await graph_runners.unary(
@@ -1100,8 +1211,7 @@ g = graph.merge_graphs(
                 "<CompuationNode kuky() >----x----><CompuationNode duplicate of c(x) >",
                 "<CompuationNode kuky() >----x----><CompuationNode t(x) >",
                 "<CompuationNode duplicate of c(x) >----x----><CompuationNode duplicate of d(x,y) >",
-                "<CompuationNode when_memory_unavailable() >----x----><CompuationNode duplicate of b(x) >",
-                "<CompuationNode duplicate of d(x,y) >....x....><CompuationNode duplicate of b(x) >",
+                "<CompuationNode duplicate of d(x,y) >....x[default='bla']....><CompuationNode duplicate of b(x) >",
                 "<CompuationNode duplicate of b(x) >----y----><CompuationNode duplicate of d(x,y) >",
             },
             id="replace source node",
@@ -1112,8 +1222,7 @@ g = graph.merge_graphs(
                 "<CompuationNode a() >----x----><CompuationNode kuky() >",
                 "<CompuationNode a() >----x----><CompuationNode t(x) >",
                 "<CompuationNode kuky() >----x----><CompuationNode duplicate of d(x,y) >",
-                "<CompuationNode when_memory_unavailable() >----x----><CompuationNode duplicate of b(x) >",
-                "<CompuationNode duplicate of d(x,y) >....x....><CompuationNode duplicate of b(x) >",
+                "<CompuationNode duplicate of d(x,y) >....x[default='bla']....><CompuationNode duplicate of b(x) >",
                 "<CompuationNode duplicate of b(x) >----y----><CompuationNode duplicate of d(x,y) >",
             },
             id="replace node not in cycle",
@@ -1124,8 +1233,7 @@ g = graph.merge_graphs(
                 "<CompuationNode a() >----x----><CompuationNode c(x) >",
                 "<CompuationNode a() >----x----><CompuationNode t(x) >",
                 "<CompuationNode c(x) >----x----><CompuationNode duplicate of d(x,y) >",
-                "<CompuationNode when_memory_unavailable() >----x----><CompuationNode kuky() >",
-                "<CompuationNode duplicate of d(x,y) >....x....><CompuationNode kuky() >",
+                "<CompuationNode duplicate of d(x,y) >....x[default='bla']....><CompuationNode kuky() >",
                 "<CompuationNode kuky() >----y----><CompuationNode duplicate of d(x,y) >",
             },
             id="replace node in cycle",
@@ -1134,11 +1242,10 @@ g = graph.merge_graphs(
             {a: kuku, b: kuky},
             {
                 "<CompuationNode duplicate of c(x) >----x----><CompuationNode duplicate of d(x,y) >",
-                "<CompuationNode duplicate of d(x,y) >....x....><CompuationNode kuky() >",
+                "<CompuationNode duplicate of d(x,y) >....x[default='bla']....><CompuationNode kuky() >",
                 "<CompuationNode kuku() >----x----><CompuationNode duplicate of c(x) >",
                 "<CompuationNode kuku() >----x----><CompuationNode t(x) >",
                 "<CompuationNode kuky() >----y----><CompuationNode duplicate of d(x,y) >",
-                "<CompuationNode when_memory_unavailable() >----x----><CompuationNode kuky() >",
             },
             id="replace multiple nodes - duplicate reachables once",
         ),

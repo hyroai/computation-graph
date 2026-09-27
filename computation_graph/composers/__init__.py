@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import dataclasses
 from typing import Any, Callable, Dict, Iterable, Optional, Sequence, Tuple
 
 import gamla
@@ -372,9 +373,10 @@ def make_compose_future(
     key: Optional[str],
     default: base_types.Result,
 ) -> base_types.GraphType:
-    def when_memory_unavailable():
-        return default
-
+    """`destination` reads `source`'s result from the previous run under `key`; on the
+    first run it reads `default` instead. The default rides on the future edge and the
+    runner substitutes it, so no node computes it on every run. An unhashable default
+    cannot live on an edge (edges are frozenset members), so it keeps a node."""
     if not isinstance(destination, base_types.GraphType):
         destination = make_computation_node(destination)
 
@@ -387,13 +389,53 @@ def make_compose_future(
         sink_node_or_graph = destination.sink
     else:
         sink_node_or_graph = destination
+    composed = _make_compose_inner(
+        destination, source, key=key, is_future=True, priority=0
+    )
+    if not _is_hashable(default):
+
+        def when_memory_unavailable():
+            return default
+
+        return graph.merge_graphs(
+            composed,
+            _make_compose_inner(
+                destination,
+                when_memory_unavailable,
+                key=key,
+                is_future=False,
+                priority=1,
+            ),
+            sink_node_or_graph=sink_node_or_graph,
+        )
+    # Only the edges this composition adds carry the default; `composed` also holds the
+    # source's and destination's own edges, whose future edges keep their own defaults.
+    source_sink = source.sink if isinstance(source, base_types.GraphType) else source
     return graph.merge_graphs(
-        _make_compose_inner(destination, source, key=key, is_future=True, priority=0),
-        _make_compose_inner(
-            destination, when_memory_unavailable, key=key, is_future=False, priority=1
+        base_types.GraphType(
+            frozenset(
+                (
+                    dataclasses.replace(edge, default=default)
+                    if edge.is_future
+                    and edge.priority == 0
+                    and edge.source == source_sink
+                    and (key is None or edge.key == key)
+                    else edge
+                )
+                for edge in composed.edges
+            ),
+            composed.sink,
         ),
         sink_node_or_graph=sink_node_or_graph,
     )
+
+
+def _is_hashable(value) -> bool:
+    try:
+        hash(value)
+    except TypeError:
+        return False
+    return True
 
 
 def compose_unary_future(

@@ -4,7 +4,7 @@ import dataclasses
 import functools
 import os
 import typing
-from typing import Callable, FrozenSet, Hashable, Optional, Tuple, Union
+from typing import Any, Callable, FrozenSet, Hashable, Optional, Tuple, Union
 
 import gamla
 
@@ -50,6 +50,10 @@ class SkipComputationError(Exception):
     pass
 
 
+class NoDefault:
+    """`ComputationEdge.default` when the edge carries no default value."""
+
+
 @dataclasses.dataclass(frozen=True)
 class ComputationEdge:
     destination: ComputationNode
@@ -58,6 +62,9 @@ class ComputationEdge:
     source: Optional[ComputationNode]
     args: Tuple[ComputationNode, ...]
     is_future: bool
+    # What the destination receives while the source has no result yet (a future edge on
+    # the first turn), so a state variable needs no node computing its starting value.
+    default: Any = NoDefault
 
     def __post_init__(self):
         assert bool(self.args) != bool(
@@ -89,7 +96,10 @@ class ComputationEdge:
             else str(self.source)
         )
         line = "...." if self.is_future else "----"
-        return source_str + line + self.key + line + ">" + str(self.destination)
+        default = "" if self.default is NoDefault else f"[default={self.default!r}]"
+        return (
+            source_str + line + self.key + default + line + ">" + str(self.destination)
+        )
 
 
 @dataclasses.dataclass(frozen=True)
