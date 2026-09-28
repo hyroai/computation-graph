@@ -74,18 +74,12 @@ _node_to_dependencies: Callable[
     _transpose_graph,
 )
 
-# `toposort` layers, async functions first in each layer so they start before the layer's sync ones.
+# `toposort` layers, concatenated. Async nodes need no ordering here: `_io_cones_first`
+# places every one of them, so this only orders sync nodes relative to each other.
 _layered_order: Callable[
     [Dict[base_types.ComputationNode, Set[base_types.ComputationNode]]],
     Tuple[base_types.ComputationNode, ...],
-] = opt_gamla.compose_left(
-    toposort.toposort,
-    opt_gamla.maptuple(
-        gamla.sort_by(lambda n: 0 if gamla.is_coroutine_function(n.func) else 1)
-    ),
-    gamla.concat,
-    tuple,
-)
+] = opt_gamla.compose_left(toposort.toposort, gamla.concat, tuple)
 
 
 def _ancestors(
