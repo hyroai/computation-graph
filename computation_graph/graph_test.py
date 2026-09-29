@@ -108,6 +108,111 @@ async def test_async_run_as_soon_as_possible(capsys):
     )
 
 
+def _async_three_hops_deep_and_unrelated_shallow_nodes():
+    def deep_source():
+        return 1
+
+    def step(x):
+        return x
+
+    async def io(x):
+        print("start io")  # noqa
+        await asyncio.sleep(0)
+        return x
+
+    def shallow_source():
+        print("shallow_source")  # noqa
+        return 2
+
+    def shallow(x):
+        print("shallow")  # noqa
+        return x
+
+    def sink(x, y):
+        return x, y
+
+    return (
+        graph.merge_graphs(
+            composers.compose_left(deep_source, step, io),
+            composers.compose_left(shallow_source, shallow),
+            composers.compose_left(io, sink, key="x"),
+            composers.compose_left(shallow, sink, key="y"),
+            sink_node_or_graph=graph.make_computation_node(sink),
+        ),
+        sink,
+        # `io` is in layer 2 and the shallow nodes in layers 0 and 1, yet `io` must start first.
+        (("start io", "shallow_source"), ("start io", "shallow")),
+    )
+
+
+def _thin_deep_async_before_wide_shallow_async():
+    def a():
+        return 1
+
+    def b():
+        return 2
+
+    def c():
+        return 3
+
+    def e():
+        return 5
+
+    def step(x):
+        return x
+
+    async def wide(a, b, c):
+        print("start wide")  # noqa
+        await asyncio.sleep(0)
+        return a, b, c
+
+    async def thin(x):
+        print("start thin")  # noqa
+        await asyncio.sleep(0)
+        return x
+
+    def sink(x, y):
+        return x, y
+
+    return (
+        graph.merge_graphs(
+            composers.compose_left(a, wide, key="a"),
+            composers.compose_left(b, wide, key="b"),
+            composers.compose_left(c, wide, key="c"),
+            composers.compose_left(e, step, thin),
+            composers.compose_left(wide, sink, key="x"),
+            composers.compose_left(thin, sink, key="y"),
+            sink_node_or_graph=graph.make_computation_node(sink),
+        ),
+        sink,
+        # `wide` is in layer 1 but needs 3 nodes; `thin` is in layer 2 but needs 2, so it starts first.
+        (("start thin", "start wide"),),
+    )
+
+
+@pytest.mark.parametrize(
+    "make_graph",
+    [
+        _async_three_hops_deep_and_unrelated_shallow_nodes,
+        _thin_deep_async_before_wide_shallow_async,
+    ],
+)
+async def test_async_nodes_start_before_unrelated_nodes(make_graph, capsys):
+    # With eager tasks the runner's visiting order is the start order, so this pins the order
+    # itself: an async node's ancestor cone, the node, then the rest of the graph.
+    g, sink, must_precede = make_graph()
+    loop = asyncio.get_running_loop()
+    previous_factory = loop.get_task_factory()
+    loop.set_task_factory(asyncio.eager_task_factory)
+    try:
+        await graph_runners.nullary(g, sink)
+    finally:
+        loop.set_task_factory(previous_factory)
+    out = capsys.readouterr().out
+    for before, after in must_precede:
+        assert out.index(before) < out.index(after)
+
+
 async def test_simple_async():
     assert (
         await graph_runners.unary(
