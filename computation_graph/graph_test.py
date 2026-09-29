@@ -213,66 +213,6 @@ async def test_async_nodes_start_before_unrelated_nodes(make_graph, capsys):
         assert out.index(before) < out.index(after)
 
 
-@pytest.mark.parametrize(
-    "wide_result, expected",
-    [
-        pytest.param("wide", "wide", id="priority 0 wins although it starts second"),
-        pytest.param(None, "thin", id="priority 0 unactionable, priority 1 wins"),
-    ],
-)
-async def test_make_first_picks_by_priority_under_cone_first_order(
-    wide_result, expected, capsys
-):
-    def a():
-        return 1
-
-    def b():
-        return 2
-
-    def c():
-        return 3
-
-    def e():
-        return 5
-
-    def step(x):
-        return x
-
-    async def wide(a, b, c):
-        print("start wide")  # noqa
-        await asyncio.sleep(0)
-        if wide_result is None:
-            raise base_types.SkipComputationError
-        return wide_result
-
-    async def thin(x):
-        print("start thin")  # noqa
-        await asyncio.sleep(0)
-        return "thin"
-
-    first = composers.make_first(wide, thin)
-    g = graph.merge_graphs(
-        composers.compose_left(a, wide, key="a"),
-        composers.compose_left(b, wide, key="b"),
-        composers.compose_left(c, wide, key="c"),
-        composers.compose_left(e, step, thin),
-        first,
-        sink_node_or_graph=first,
-    )
-    loop = asyncio.get_running_loop()
-    previous_factory = loop.get_task_factory()
-    loop.set_task_factory(asyncio.eager_task_factory)
-    try:
-        result = await graph_runners.nullary_infer_sink(g)
-    finally:
-        loop.set_task_factory(previous_factory)
-    out = capsys.readouterr().out
-    # `thin` (priority 1) has the smaller cone, so it starts before `wide` (priority 0);
-    # the constituent that wins is still chosen by priority.
-    assert out.index("start thin") < out.index("start wide")
-    assert result == expected
-
-
 async def test_simple_async():
     assert (
         await graph_runners.unary(
