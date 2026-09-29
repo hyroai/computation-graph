@@ -74,8 +74,9 @@ _node_to_dependencies: Callable[
     _transpose_graph,
 )
 
-# `toposort` layers, concatenated. Async nodes need no ordering here: `_io_cones_first`
-# places every one of them, so this only orders sync nodes relative to each other.
+# `toposort` layers, concatenated. Async nodes need no ordering here:
+# `_async_nodes_as_early_as_possible` places every one of them, so this only orders sync
+# nodes relative to each other.
 _layered_order: Callable[
     [Dict[base_types.ComputationNode, Set[base_types.ComputationNode]]],
     Tuple[base_types.ComputationNode, ...],
@@ -98,7 +99,7 @@ def _ancestors(
     return frozenset(seen)
 
 
-def _io_cones_first(
+def _async_nodes_as_early_as_possible(
     node_to_dependencies: Dict[
         base_types.ComputationNode, Set[base_types.ComputationNode]
     ],
@@ -109,22 +110,23 @@ def _io_cones_first(
     `toposort` puts a node in the layer given by its longest input chain, and a node in layer k runs
     after every node of the layers below k in the whole graph, needed or not. An async node (an LLM
     or HTTP call) whose inputs are a few hops deep therefore starts after thousands of unrelated sync
-    nodes. Here each async node's ancestor cone is emitted first (smallest cone first, so the cheapest
-    requests leave earliest), then the node, then everything left. A cone is closed under inputs, so
-    the result is still a topological order; only the visiting order changes.
+    nodes. Here each async node is emitted right after its ancestors, the async nodes with the fewest
+    ancestors first so the cheapest requests leave earliest, and everything left comes after. A
+    node's ancestors are closed under inputs, so the result is still a topological order; only the
+    visiting order changes.
     """
     index = {node: position for position, node in enumerate(order)}
-    cones = {
+    ancestors = {
         node: _ancestors(node_to_dependencies, node)
         for node in order
         if gamla.is_coroutine_function(node.func)
     }
     emitted: Set[base_types.ComputationNode] = set()
     result = []
-    for node in sorted(cones, key=lambda n: (len(cones[n]), index[n])):
+    for node in sorted(ancestors, key=lambda n: (len(ancestors[n]), index[n])):
         if node in emitted:
             continue
-        pending = sorted(cones[node] - emitted, key=index.__getitem__)
+        pending = sorted(ancestors[node] - emitted, key=index.__getitem__)
         result.extend(pending)
         result.append(node)
         emitted.update(pending)
@@ -137,7 +139,9 @@ def _toposort_nodes(
     edges: Iterable[base_types.ComputationEdge],
 ) -> Tuple[base_types.ComputationNode, ...]:
     node_to_dependencies = _node_to_dependencies(edges)
-    return _io_cones_first(node_to_dependencies, _layered_order(node_to_dependencies))
+    return _async_nodes_as_early_as_possible(
+        node_to_dependencies, _layered_order(node_to_dependencies)
+    )
 
 
 def _type_check(node: base_types.ComputationNode, result):
