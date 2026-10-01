@@ -13,9 +13,12 @@ class _ComputationError:
     pass
 
 
-_to_computation_node_if_callable = gamla.unless(
-    gamla.is_instance(base_types.GraphType), graph.make_computation_node
-)
+def _to_computation_node_if_callable(
+    func_or_graph: base_types.CallableOrNodeOrGraph,
+) -> base_types.NodeOrGraph:
+    if isinstance(func_or_graph, base_types.GraphType):
+        return func_or_graph
+    return graph.make_computation_node(func_or_graph)
 
 
 def _get_edges_from_node_or_graph(
@@ -241,8 +244,7 @@ def _determine_composition_sink(
     raise AssertionError("Could not compose, failed to. find a sink")
 
 
-@gamla.curry
-def _try_connect(
+def _connect(
     source: base_types.ComputationNode,
     key: Optional[str],
     priority: int,
@@ -265,35 +267,22 @@ def _try_connect(
     )
 
 
-@gamla.curry
-def _infer_composition_edges(
+def _destination_unbound_signature(
+    destination: base_types.GraphType,
+) -> Callable[[base_types.ComputationNode], base_types.NodeSignature]:
+    """Signature of each node of `destination` after its internal edges bind some keys."""
+    return graph.unbound_signature(graph.get_incoming_edges_for_node(destination.edges))
+
+
+def _compose_into_graph(
     priority: int,
     key: Optional[str],
     is_future: bool,
     source: base_types.NodeOrGraph,
-    destination: base_types.NodeOrGraph,
+    destination: base_types.GraphType,
+    unbound_signature: Callable[[base_types.ComputationNode], base_types.NodeSignature],
 ) -> base_types.GraphType:
-
-    try_connect = _try_connect(
-        source.sink if isinstance(source, GraphType) else source,
-        key,
-        priority,
-        is_future,
-    )
-
-    if isinstance(destination, base_types.ComputationNode):
-        sink = _determine_sink(source, destination, is_future)
-        return graph.merge_graphs(
-            base_types.GraphType(
-                edges=frozenset([try_connect(destination, destination.signature)]),
-                sink=sink,
-            ),
-            _get_edges_from_node_or_graph(source),
-            sink_node_or_graph=sink,
-        )
-    unbound_signature = graph.unbound_signature(
-        graph.get_incoming_edges_for_node(destination.edges)
-    )
+    source_node = source.sink if isinstance(source, GraphType) else source
     source_nodes = (
         graph.get_all_nodes(source.edges)
         if isinstance(source, GraphType)
@@ -314,7 +303,7 @@ def _infer_composition_edges(
         if not skip_cycle_check and node in source_nodes:
             continue
         new_edges.add(
-            try_connect(destination=node, unbound_destination_signature=node_signature)
+            _connect(source_node, key, priority, is_future, node, node_signature)
         )
     if not new_edges:
         raise AssertionError(
@@ -330,6 +319,44 @@ def _infer_composition_edges(
     )
 
 
+def _infer_composition_edges(
+    priority: int,
+    key: Optional[str],
+    is_future: bool,
+    source: base_types.NodeOrGraph,
+    destination: base_types.NodeOrGraph,
+) -> base_types.GraphType:
+    if isinstance(destination, base_types.ComputationNode):
+        sink = _determine_sink(source, destination, is_future)
+        return graph.merge_graphs(
+            base_types.GraphType(
+                edges=frozenset(
+                    [
+                        _connect(
+                            source.sink if isinstance(source, GraphType) else source,
+                            key,
+                            priority,
+                            is_future,
+                            destination,
+                            destination.signature,
+                        )
+                    ]
+                ),
+                sink=sink,
+            ),
+            _get_edges_from_node_or_graph(source),
+            sink_node_or_graph=sink,
+        )
+    return _compose_into_graph(
+        priority,
+        key,
+        is_future,
+        source,
+        destination,
+        _destination_unbound_signature(destination),
+    )
+
+
 def _make_compose_inner(
     *funcs: base_types.CallableOrNodeOrGraph,
     key: Optional[str],
@@ -339,16 +366,15 @@ def _make_compose_inner(
     assert (
         len(funcs) > 1
     ), f"Only {len(funcs)} function passed to compose, need at least 2, funcs={funcs}"
-    return gamla.sync.pipe(
-        funcs,
-        reversed,
-        gamla.sync.map(_to_computation_node_if_callable),
-        gamla.sliding_window(2),
-        gamla.sync.map(gamla.star(_infer_composition_edges(priority, key, is_future))),
-        tuple,
-        lambda graphs: graph.merge_graphs(
-            *graphs, sink_node_or_graph=_determine_composition_sink(graphs)
-        ),
+    nodes_or_graphs = tuple(
+        _to_computation_node_if_callable(func) for func in reversed(funcs)
+    )
+    graphs = tuple(
+        _infer_composition_edges(priority, key, is_future, source, destination)
+        for source, destination in zip(nodes_or_graphs, nodes_or_graphs[1:])
+    )
+    return graph.merge_graphs(
+        *graphs, sink_node_or_graph=_determine_composition_sink(graphs)
     )
 
 
@@ -465,21 +491,30 @@ def compose_dict(
     """
 
     destination = f if base_types.is_computation_graph(f) else make_computation_node(f)  # type: ignore
-    sink = (
-        destination.sink  # type: ignore
-        if base_types.is_computation_graph(destination)
-        else destination
+    if isinstance(destination, base_types.GraphType):
+        # One incoming-edge index of the destination for all keys instead of one per key.
+        unbound_signature = _destination_unbound_signature(destination)
+        graphs = tuple(
+            _compose_into_graph(
+                0,
+                key,
+                False,
+                _to_computation_node_if_callable(fn),
+                destination,
+                unbound_signature,
+            )
+            for key, fn in d.items()
+        )
+        sink = destination.sink
+    else:
+        assert isinstance(destination, base_types.ComputationNode)
+        graphs = tuple(make_compose(destination, fn, key=key) for key, fn in d.items())
+        sink = destination
+    return graph.merge_graphs(
+        *graphs, sink_node_or_graph=sink
+    ) or compose_left_unary(  # type: ignore
+        f, lambda x: x
     )
-
-    return gamla.pipe(
-        d,
-        dict.items,
-        gamla.sync.map(
-            gamla.star(lambda key, fn: make_compose(destination, fn, key=key))
-        ),
-        tuple,
-        lambda graphs: graph.merge_graphs(*graphs, sink_node_or_graph=sink),  # type: ignore
-    ) or compose_left_unary(f, lambda x: x)
 
 
 @gamla.curry

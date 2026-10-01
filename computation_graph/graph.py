@@ -49,17 +49,12 @@ def make_computation_node(
 ) -> base_types.ComputationNode:
     if isinstance(func, base_types.ComputationNode):
         return func
-
+    node_signature = signature.from_callable(func)
+    assert signature.is_supported(node_signature), str(func)
     return base_types.ComputationNode(
         name=signature.name(func),
         func=func,
-        signature=gamla.pipe(
-            func,
-            signature.from_callable,
-            gamla.assert_that_with_message(
-                gamla.just(str(func)), signature.is_supported
-            ),
-        ),
+        signature=node_signature,
         is_terminal=False,
     )
 
@@ -381,6 +376,7 @@ def merge_graphs(
         assert new_g.sink == _infer_sink_module.infer_sink(
             new_g.edges
         ), f"Infer sink (new) mismatch: graph.sink: {new_g.sink}, infer_sink: {_infer_sink_module.infer_sink(new_g.edges)}"
+        base_types.assert_no_unwanted_ambiguity_on_edges(new_g.edges)
     # assert new_g.sink == _infer_sink_module.infer_sink_old(new_g.edges),  f"Infer sink (old) mismatch: graph.sink: {new_g.sink}, infer_sink: {_infer_sink_module.infer_sink_old(new_g.edges)}"
 
-    return base_types.assert_no_unwanted_ambiguity_when_debug_set(new_g)
+    return new_g

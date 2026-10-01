@@ -58,8 +58,11 @@ class ComputationEdge:
     source: Optional[ComputationNode]
     args: Tuple[ComputationNode, ...]
     is_future: bool
+    # Rewrites that only swap a node for its duplicate pass True: the duplicate wraps the
+    # same function, so the type check of the edge it was derived from still holds.
+    skip_type_check: dataclasses.InitVar[bool] = False
 
-    def __post_init__(self):
+    def __post_init__(self, skip_type_check: bool):
         assert bool(self.args) != bool(
             self.source
         ), f"Edge must have a source or args, not both: {self}"
@@ -72,14 +75,16 @@ class ComputationEdge:
         assert all(
             isinstance(x, ComputationNode) for x in self.args
         ), f"all args must be ComputationNodes {self.args}"
-        if (
-            not self.args
-            and not isinstance(self.source.func, functools.partial)
-            and not isinstance(self.destination.func, functools.partial)
+        if skip_type_check or self.args:
+            return
+        assert self.source is not None
+        source_func, destination_func = self.source.func, self.destination.func
+        if not isinstance(source_func, functools.partial) and not isinstance(
+            destination_func, functools.partial
         ):
-            if not gamla.composable(self.destination.func, self.source.func, self.key):
+            if not gamla.composable(destination_func, source_func, self.key):
                 raise ComputationGraphTypeError(
-                    _mismatch_message(self.key, self.source.func, self.destination.func)
+                    _mismatch_message(self.key, source_func, destination_func)
                 )
 
     def __repr__(self):
