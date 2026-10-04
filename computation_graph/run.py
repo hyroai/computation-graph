@@ -167,6 +167,11 @@ def _profile(node, time_started: float):
 
 _group_by_is_future = opt_gamla.groupby(lambda k_v: asyncio.isfuture(k_v[1]))
 
+# A new async node's coroutine runs only to its first await, and an HTTP client needs the
+# event loop a few more times before its request is written. So while an async node is in
+# flight, the runner gives the loop a turn at least this often (seconds of node execution).
+_YIELD_EVERY = 0.002
+
 
 _is_graph_async = opt_gamla.compose_left(
     opt_gamla.mapcat(lambda edge: (edge.source, *edge.args)),
@@ -543,18 +548,30 @@ def _make_get_node_executor(
 async def _run_graph_async(inputs, handled_exceptions, topological_sorted_nodes):
     node_to_task_or_result = inputs.copy()
     unhandled_exception = None
+    in_flight = []
+    last_yield = time.perf_counter()
     try:
         for node_executor in topological_sorted_nodes:
             try:
-                node_to_task_or_result[node_executor[0]] = node_executor[1](
-                    node_to_task_or_result, node_executor[0]
-                )
+                result = node_executor[1](node_to_task_or_result, node_executor[0])
+                node_to_task_or_result[node_executor[0]] = result
+                if asyncio.isfuture(result) and not result.done():
+                    in_flight.append(result)
             except (
                 _DepNotFoundError,
                 base_types.SkipComputationError,
                 *handled_exceptions,
             ):
                 pass
+            if in_flight and time.perf_counter() - last_yield > _YIELD_EVERY:
+                await asyncio.sleep(0)
+                in_flight = [future for future in in_flight if not future.done()]
+                last_yield = time.perf_counter()
+    except asyncio.CancelledError:
+        # Cancelled at a yield: cancel the in-flight nodes too, as cancelling the final gather does.
+        for future in in_flight:
+            future.cancel()
+        raise
     except Exception as exc:
         unhandled_exception = exc
     finally:

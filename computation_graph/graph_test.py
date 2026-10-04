@@ -1,4 +1,5 @@
 import asyncio
+import time
 from typing import Dict
 
 import gamla
@@ -211,6 +212,74 @@ async def test_async_nodes_start_before_unrelated_nodes(make_graph, capsys):
     out = capsys.readouterr().out
     for before, after in must_precede:
         assert out.index(before) < out.index(after)
+
+
+def _slow_nodes(count):
+    def make_slow(i):
+        def slow(x):
+            time.sleep(0.005)
+            print(f"slow {i}")  # noqa
+            return x
+
+        return slow
+
+    return [make_slow(i) for i in range(count)]
+
+
+def _sink(x, y):
+    return x, y
+
+
+def _request_beside_sync_chain(request, *chain):
+    return graph.merge_graphs(
+        composers.compose_left(lambda: 1, request),
+        composers.compose_left(lambda: 2, *chain),
+        composers.compose_left(request, _sink, key="x"),
+        composers.compose_left(chain[-1], _sink, key="y"),
+        sink_node_or_graph=graph.make_computation_node(_sink),
+    )
+
+
+async def test_in_flight_async_node_progresses_during_a_long_sync_stretch(capsys):
+    # Like an HTTP client, `request` needs a few event-loop turns before its request goes
+    # out; that has to happen while the unrelated sync nodes run, not after them.
+    async def request(x):
+        for _ in range(3):
+            await asyncio.sleep(0)
+        print("request sent")  # noqa
+        return x
+
+    await graph_runners.nullary(
+        _request_beside_sync_chain(request, *_slow_nodes(10)), _sink
+    )
+    out = capsys.readouterr().out
+    assert out.index("request sent") < out.index("slow 9")
+
+
+async def test_cancelling_a_run_at_a_yield_cancels_its_in_flight_async_nodes():
+    cancelled = []
+
+    async def request(x):
+        try:
+            await asyncio.sleep(1)
+        except asyncio.CancelledError:
+            cancelled.append("request")
+            raise
+        return x
+
+    def cancel_run(x):
+        asyncio.current_task().cancel()
+        return x
+
+    first, *rest = _slow_nodes(3)
+    run_task = asyncio.create_task(
+        graph_runners.nullary(
+            _request_beside_sync_chain(request, first, cancel_run, *rest), _sink
+        )
+    )
+    with pytest.raises(asyncio.CancelledError):
+        await run_task
+    assert cancelled == ["request"]
 
 
 async def test_simple_async():
