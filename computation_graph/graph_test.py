@@ -1,6 +1,6 @@
 import asyncio
 import time
-from typing import Dict
+from typing import Awaitable, Callable, Dict, List, Tuple
 
 import gamla
 import pytest
@@ -214,9 +214,9 @@ async def test_async_nodes_start_before_unrelated_nodes(make_graph, capsys):
         assert out.index(before) < out.index(after)
 
 
-def _slow_nodes(count):
-    def make_slow(i):
-        def slow(x):
+def _slow_nodes(count: int) -> List[Callable[[int], int]]:
+    def make_slow(i: int) -> Callable[[int], int]:
+        def slow(x: int) -> int:
             time.sleep(0.005)
             print(f"slow {i}")  # noqa
             return x
@@ -226,11 +226,13 @@ def _slow_nodes(count):
     return [make_slow(i) for i in range(count)]
 
 
-def _sink(x, y):
+def _sink(x: int, y: int) -> Tuple[int, int]:
     return x, y
 
 
-def _request_beside_sync_chain(request, *chain):
+def _request_beside_sync_chain(
+    request: Callable[[int], Awaitable[int]], *chain: Callable[[int], int]
+) -> base_types.GraphType:
     return graph.merge_graphs(
         composers.compose_left(lambda: 1, request),
         composers.compose_left(lambda: 2, *chain),
@@ -240,10 +242,12 @@ def _request_beside_sync_chain(request, *chain):
     )
 
 
-async def test_in_flight_async_node_progresses_during_a_long_sync_stretch(capsys):
+async def test_in_flight_async_node_progresses_during_a_long_sync_stretch(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
     # Like an HTTP client, `request` needs a few event-loop turns before its request goes
     # out; that has to happen while the unrelated sync nodes run, not after them.
-    async def request(x):
+    async def request(x: int) -> int:
         for _ in range(3):
             await asyncio.sleep(0)
         print("request sent")  # noqa
@@ -256,10 +260,10 @@ async def test_in_flight_async_node_progresses_during_a_long_sync_stretch(capsys
     assert out.index("request sent") < out.index("slow 9")
 
 
-async def test_cancelling_a_run_at_a_yield_cancels_its_in_flight_async_nodes():
+async def test_cancelling_a_run_at_a_yield_cancels_its_in_flight_async_nodes() -> None:
     cancelled = []
 
-    async def request(x):
+    async def request(x: int) -> int:
         try:
             await asyncio.sleep(1)
         except asyncio.CancelledError:
@@ -267,8 +271,8 @@ async def test_cancelling_a_run_at_a_yield_cancels_its_in_flight_async_nodes():
             raise
         return x
 
-    def cancel_run(x):
-        asyncio.current_task().cancel()
+    def cancel_run(x: int) -> int:
+        asyncio.current_task().cancel()  # type: ignore[union-attr]
         return x
 
     first, *rest = _slow_nodes(3)
