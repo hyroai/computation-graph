@@ -42,7 +42,25 @@ class _PendingDependencyError(Exception):
     pass
 
 
-_PENDING = object()
+# The value a node holds in a run's results while it waits for a pending input.
+_DEFERRED = object()
+
+
+class _Deferral:
+    """Returned by an executor whose node has a pending input: the run continues the
+    node once `dependency`, the node of its first pending input, has a value or turned
+    out to have none."""
+
+    __slots__ = ("dependency",)
+
+    def __init__(self, dependency: base_types.ComputationNode):
+        self.dependency = dependency
+
+
+def _is_pending(x) -> bool:
+    if asyncio.isfuture(x):
+        return not x.done()
+    return x is _DEFERRED or inspect.isawaitable(x)
 
 
 def _eager_create_task(coro):
@@ -393,93 +411,6 @@ def _make_get_node_executor(
                 ...
         return None
 
-    async def node_to_input_async(
-        accumulated_results: Mapping[
-            base_types.ComputationNode, base_types.Result | Awaitable[base_types.Result]
-        ],
-        input_options: Iterable[_ComputationInputSpec],
-    ) -> Optional[_ComputationInput]:
-        for input_spec in input_options:
-            args_spec, kwargs_spec = input_spec
-            if all(
-                accumulated_results.get(arg, CG_NO_RESULT) is not CG_NO_RESULT
-                for arg in args_spec
-            ) and all(
-                accumulated_results.get(kwarg, CG_NO_RESULT) is not CG_NO_RESULT
-                for kwarg in kwargs_spec.values()
-            ):
-                # Resolve inputs in place: await only the still-pending ones
-                # (already-scheduled tasks, so concurrency is preserved) and pass
-                # concrete values straight through. This avoids allocating a
-                # resolved Future per concrete input and the asyncio.gather
-                # machinery; the comprehension does zero awaits when nothing is
-                # pending, so it completes without suspending.
-                args = [accumulated_results[a] for a in args_spec]
-                kwargs = {k: accumulated_results[v] for k, v in kwargs_spec.items()}
-                try:
-                    return (
-                        tuple([await x if inspect.isawaitable(x) else x for x in args]),
-                        {
-                            k: (await x if inspect.isawaitable(x) else x)
-                            for k, x in kwargs.items()
-                        },
-                    )
-                except (
-                    _DepNotFoundError,
-                    base_types.SkipComputationError,
-                    *handled_exceptions,
-                ):
-                    # Drop refs to the upstream tasks to avoid a
-                    # task -> exception -> traceback -> task reference cycle.
-                    del args, kwargs
-        return None
-
-    async def await_deps_and_apply(
-        accumulated_results: Mapping[
-            base_types.ComputationNode, base_types.Result | Awaitable[base_types.Result]
-        ],
-        node: base_types.ComputationNode,
-    ) -> base_types.Result:
-        args_kwargs = await node_to_input_async(
-            accumulated_results, node_to_computation_input_spec_options(node)
-        )
-        # We delete the references to the upstream tasks to avoid circular reference (task->exception->traceback->task) and improve memory performance
-        del accumulated_results
-        if args_kwargs is None:
-            raise _DepNotFoundError()
-
-        args, kwargs = args_kwargs
-        before = time.perf_counter()
-        result = node.func(*args, **kwargs)
-        single_node_side_effect(node, result)
-        if inspect.isawaitable(result):
-            raise Exception(
-                f"{node} returned an awaitable result but is not an async function"
-            )
-        _profile(node, before)
-        return result
-
-    async def await_deps_and_await(
-        accumulated_results: Mapping[
-            base_types.ComputationNode, base_types.Result | Awaitable[base_types.Result]
-        ],
-        node: base_types.ComputationNode,
-    ) -> base_types.Result:
-        args_kwargs = await node_to_input_async(
-            accumulated_results, node_to_computation_input_spec_options(node)
-        )
-        # We delete the references to the upstream tasks to avoid circular reference (task->exception->traceback->task) and improve memory performance
-        del accumulated_results
-        if args_kwargs is None:
-            raise _DepNotFoundError()
-
-        args, kwargs = args_kwargs
-        before = time.perf_counter()
-        result = await node.func(*args, **kwargs)
-        single_node_side_effect(node, result)
-        _profile(node, before)
-        return result
-
     def get_deps_and_apply(
         accumulated_results: Mapping[base_types.ComputationNode, base_types.Result],
         node: base_types.ComputationNode,
@@ -512,13 +443,6 @@ def _make_get_node_executor(
     sync_and_downstream = sync & downstream_from_async
     sync_not_downstream = sync - downstream_from_async
 
-    await_deps_and_apply_task = opt_gamla.after(_eager_create_task)(
-        await_deps_and_apply
-    )
-    await_deps_and_await_task = opt_gamla.after(_eager_create_task)(
-        await_deps_and_await
-    )
-
     prune_exceptions = (
         _DepNotFoundError,
         base_types.SkipComputationError,
@@ -530,18 +454,16 @@ def _make_get_node_executor(
             if not x.done():
                 raise _PendingDependencyError()
             return x.result()
-        if inspect.isawaitable(x):
-            # Non-future awaitable value; only the task path can await it.
+        if x is _DEFERRED or inspect.isawaitable(x):
             raise _PendingDependencyError()
         return x
 
     def node_to_input_inline(
         accumulated_results, input_options: Iterable[_ComputationInputSpec]
     ):
-        """Synchronous mirror of `node_to_input_async`: resolves the node's input
-        from already-available results. Returns a resolved input, None when no
-        option's dependencies computed, or _PENDING when the first viable option
-        depends on a still-running task (caller falls back to the task path)."""
+        """Resolves the node's input from the results available so far. Returns the
+        resolved input, None when no option's dependencies computed, or a _Deferral
+        when the first option whose dependencies all computed has a pending one."""
         for args_spec, kwargs_spec in input_options:
             args = []
             for key in args_spec:
@@ -563,7 +485,17 @@ def _make_get_node_executor(
                             {k: _inline_dependency_value(v) for k, v in kwargs.items()},
                         )
                     except _PendingDependencyError:
-                        return _PENDING
+                        dependency = next(
+                            key
+                            for key in (*args_spec, *kwargs_spec.values())
+                            if _is_pending(accumulated_results[key])
+                        )
+                        x = accumulated_results[dependency]
+                        if not asyncio.isfuture(x) and x is not _DEFERRED:
+                            # Only a task can await an awaitable that is not a future:
+                            # await it once, in a task its dependents share.
+                            accumulated_results[dependency] = asyncio.ensure_future(x)
+                        return _Deferral(dependency)
                     except prune_exceptions:
                         ...
         return None
@@ -575,17 +507,17 @@ def _make_get_node_executor(
         _profile(node, before)
         return result
 
-    def _make_inline_executor(is_async_node: bool, task_fallback):
+    def _make_inline_executor(is_async_node: bool):
         def inline_executor(
             accumulated_results, node: base_types.ComputationNode
-        ) -> base_types.Result:
+        ) -> base_types.Result | _Deferral:
             resolved = node_to_input_inline(
                 accumulated_results, node_to_computation_input_spec_options(node)
             )
-            if resolved is _PENDING:
-                return task_fallback(accumulated_results, node)
             if resolved is None:
                 raise _DepNotFoundError()
+            if resolved.__class__ is _Deferral:
+                return resolved
             args, kwargs = resolved
             if is_async_node:
                 task = _eager_create_task(_apply_async_node(node, args, kwargs))
@@ -609,8 +541,8 @@ def _make_get_node_executor(
 
         return inline_executor
 
-    inline_async_executor = _make_inline_executor(True, await_deps_and_await_task)
-    inline_sync_executor = _make_inline_executor(False, await_deps_and_apply_task)
+    inline_async_executor = _make_inline_executor(True)
+    inline_sync_executor = _make_inline_executor(False)
 
     def get_executor(node: base_types.ComputationNode) -> _NodeExecutor:
         if node in async_nodes:
@@ -625,24 +557,81 @@ def _make_get_node_executor(
     return get_executor
 
 
+async def _wait_for_a_dependency(node_to_task_or_result, deferred) -> None:
+    pending = {
+        x
+        for x in (node_to_task_or_result.get(dependency) for _, dependency in deferred)
+        if asyncio.isfuture(x) and not x.done()
+    }
+    if pending:
+        await asyncio.wait(pending, return_when=asyncio.FIRST_COMPLETED)
+
+
+def _continue_deferred(node_to_task_or_result, deferred, prune_exceptions):
+    """Runs, in visiting order, the deferred nodes whose dependency is no longer
+    pending, and returns the ones still waiting."""
+    still_waiting = []
+    for node_executor, dependency in deferred:
+        if _is_pending(node_to_task_or_result.get(dependency)):
+            still_waiting.append((node_executor, dependency))
+            continue
+        node = node_executor[0]
+        try:
+            result = node_executor[1](node_to_task_or_result, node)
+        except prune_exceptions:
+            del node_to_task_or_result[node]
+            continue
+        if result.__class__ is _Deferral:
+            still_waiting.append((node_executor, result.dependency))
+        else:
+            node_to_task_or_result[node] = result
+    return still_waiting
+
+
+def _cancel_pending(node_to_task_or_result) -> None:
+    for x in node_to_task_or_result.values():
+        if asyncio.isfuture(x) and not x.done():
+            x.cancel()
+
+
 async def _run_graph_async(inputs, handled_exceptions, topological_sorted_nodes):
     node_to_task_or_result = inputs.copy()
     unhandled_exception = None
+    prune_exceptions = (
+        _DepNotFoundError,
+        base_types.SkipComputationError,
+        *handled_exceptions,
+    )
+    # (node executor, the dependency it waits for) for each node visited while one of
+    # its inputs was pending, in visiting order. They run inline once it is available,
+    # instead of each waiting in a task of its own.
+    deferred = []
     try:
         for node_executor in topological_sorted_nodes:
             try:
-                node_to_task_or_result[node_executor[0]] = node_executor[1](
-                    node_to_task_or_result, node_executor[0]
-                )
-            except (
-                _DepNotFoundError,
-                base_types.SkipComputationError,
-                *handled_exceptions,
-            ):
-                pass
+                result = node_executor[1](node_to_task_or_result, node_executor[0])
+            except prune_exceptions:
+                continue
+            if result.__class__ is _Deferral:
+                deferred.append((node_executor, result.dependency))
+                result = _DEFERRED
+            node_to_task_or_result[node_executor[0]] = result
+        while deferred:
+            await _wait_for_a_dependency(node_to_task_or_result, deferred)
+            deferred = _continue_deferred(
+                node_to_task_or_result, deferred, prune_exceptions
+            )
+    except asyncio.CancelledError:
+        # Waiting does not cancel what it waits for, as cancelling the final gather does.
+        _cancel_pending(node_to_task_or_result)
+        raise
     except Exception as exc:
         unhandled_exception = exc
     finally:
+        # An unhandled exception stops the run: the nodes still waiting have no result.
+        for (node, _), _ in deferred:
+            if node_to_task_or_result.get(node) is _DEFERRED:
+                del node_to_task_or_result[node]
         results_by_is_async = _group_by_is_future(node_to_task_or_result.items())
         async_results = tuple(zip(*results_by_is_async.get(True, ())))
         sync_results = dict(results_by_is_async.get(False, ()))
