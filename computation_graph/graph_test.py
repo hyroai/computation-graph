@@ -1,5 +1,5 @@
 import asyncio
-from typing import Dict
+from typing import Any, Callable, Dict
 
 import gamla
 import pytest
@@ -424,6 +424,87 @@ async def test_raise_exception_in_async_after_sync():
         await run.to_callable_strict(
             composers.compose_left(source, raises, lambda x: 1)
         )({}, {})
+
+
+def _counted_step(i: int) -> Callable[[int], int]:
+    def step(x: int) -> int:
+        return x + 1
+
+    step.__name__ = f"step{i}"
+    return step
+
+
+async def test_nodes_after_a_pending_async_node_run_without_a_task_each() -> None:
+    async def io() -> int:
+        await asyncio.sleep(0)
+        return 0
+
+    created = []
+
+    def counting_factory(
+        loop: asyncio.AbstractEventLoop, coro: Any, **kwargs: Any
+    ) -> asyncio.Task:
+        task = asyncio.Task(coro, loop=loop, **kwargs)
+        created.append(task)
+        return task
+
+    loop = asyncio.get_running_loop()
+    previous_factory = loop.get_task_factory()
+    loop.set_task_factory(counting_factory)
+    try:
+        result = await graph_runners.nullary_infer_sink(
+            composers.compose_left(io, *map(_counted_step, range(10)))
+        )
+    finally:
+        loop.set_task_factory(previous_factory)
+    assert result == 10
+    # Only `io` gets a task; the ten steps wait for it in the run itself.
+    assert len(created) == 1
+
+
+async def test_node_after_an_async_node_that_raises_takes_its_next_option() -> None:
+    async def raises() -> int:
+        await asyncio.sleep(0)
+        raise base_types.SkipComputationError
+
+    def after_raises(x: int) -> int:
+        return x
+
+    assert (
+        await graph_runners.nullary_infer_sink(
+            composers.make_first(
+                composers.compose_left(raises, after_raises), lambda: 2
+            )
+        )
+        == 2
+    )
+
+
+async def test_cancelling_a_run_that_waits_for_an_async_node_cancels_the_node() -> None:
+    started = asyncio.Event()
+    cancelled = []
+
+    async def slow() -> int:
+        started.set()
+        try:
+            await asyncio.sleep(5)
+        except asyncio.CancelledError:
+            cancelled.append(True)
+            raise
+        return 1
+
+    def after_slow(x: int) -> int:
+        return x
+
+    running = asyncio.ensure_future(
+        graph_runners.nullary_infer_sink(composers.compose_left(slow, after_slow))
+    )
+    await started.wait()
+    await asyncio.sleep(0)
+    running.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await running
+    assert cancelled == [True]
 
 
 def test_first_all_unactionable():
