@@ -46,7 +46,7 @@ _PENDING = object()
 
 
 def _eager_create_task(coro):
-    return asyncio.Task(coro, loop=asyncio.get_running_loop(), eager_start=True)
+    return asyncio.get_running_loop().create_task(coro, eager_start=True)
 
 
 _NodeToResults = Dict[base_types.ComputationNode, base_types.Result]
@@ -543,28 +543,29 @@ def _make_get_node_executor(
         option's dependencies computed, or _PENDING when the first viable option
         depends on a still-running task (caller falls back to the task path)."""
         for args_spec, kwargs_spec in input_options:
-            if all(
-                accumulated_results.get(arg, CG_NO_RESULT) is not CG_NO_RESULT
-                for arg in args_spec
-            ) and all(
-                accumulated_results.get(kwarg, CG_NO_RESULT) is not CG_NO_RESULT
-                for kwarg in kwargs_spec.values()
-            ):
-                try:
-                    return (
-                        tuple(
-                            _inline_dependency_value(accumulated_results[arg])
-                            for arg in args_spec
-                        ),
-                        {
-                            k: _inline_dependency_value(accumulated_results[v])
-                            for k, v in kwargs_spec.items()
-                        },
-                    )
-                except _PendingDependencyError:
-                    return _PENDING
-                except prune_exceptions:
-                    ...
+            args = []
+            for key in args_spec:
+                x = accumulated_results.get(key, CG_NO_RESULT)
+                if x is CG_NO_RESULT:
+                    break
+                args.append(x)
+            else:
+                kwargs = {}
+                for name, key in kwargs_spec.items():
+                    x = accumulated_results.get(key, CG_NO_RESULT)
+                    if x is CG_NO_RESULT:
+                        break
+                    kwargs[name] = x
+                else:
+                    try:
+                        return (
+                            tuple(map(_inline_dependency_value, args)),
+                            {k: _inline_dependency_value(v) for k, v in kwargs.items()},
+                        )
+                    except _PendingDependencyError:
+                        return _PENDING
+                    except prune_exceptions:
+                        ...
         return None
 
     async def _apply_async_node(node, args, kwargs):
