@@ -549,6 +549,7 @@ async def _run_graph_async(inputs, handled_exceptions, topological_sorted_nodes)
     node_to_task_or_result = inputs.copy()
     unhandled_exception = None
     in_flight = []
+    result = None
     last_yield = time.perf_counter()
     try:
         for node_executor in topological_sorted_nodes:
@@ -604,6 +605,8 @@ async def _run_graph_async(inputs, handled_exceptions, topological_sorted_nodes)
             except Exception as e:
                 del node_to_task_or_result
                 del unhandled_exception
+                in_flight.clear()
+                del result
                 raise e from e
     return all_results
 

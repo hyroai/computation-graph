@@ -499,6 +499,19 @@ async def test_raise_exception_in_async_after_sync():
         )({}, {})
 
 
+async def test_raise_exception_in_first_node_of_async_graph() -> None:
+    def raises() -> int:
+        raise TypeError("BAD")
+
+    async def async_node(x: int) -> int:
+        return x
+
+    with pytest.raises(TypeError, match="BAD"):
+        await run.to_callable_strict(  # type: ignore[misc]
+            composers.compose_left(raises, async_node, lambda x: 1)
+        )({}, {})
+
+
 def test_first_all_unactionable():
     def raises():
         raise base_types.SkipComputationError
