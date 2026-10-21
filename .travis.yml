@@ -10,7 +10,7 @@ jobs:
     - sudo apt update && sudo apt install graphviz graphviz-dev
     - curl -LsSf https://astral.sh/uv/install.sh | sh
     - export PATH="$HOME/.local/bin:$PATH"
-    - uv sync --locked --group test
+    - uv sync --locked --group test --python 3.14
     script: uv run pytest
   - stage: test
     name: pre-commit
